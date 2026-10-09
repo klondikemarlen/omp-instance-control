@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from "node:path"
+import { realpathSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 import { parseArgs } from "node:util"
 
@@ -137,7 +137,7 @@ async function runInstances(positionals, values) {
   return rows.some((row) => ["failed", "unreachable", "unknown"].includes(row.status)) ? 1 : 0
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().then(
     (code) => {
       if (Number.isInteger(code) && code !== 0) process.exitCode = code

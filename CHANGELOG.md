@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 - 2026-10-09
+
+### Fixed
+
+- Run the installed CLI through npm bin symlinks instead of silently returning without executing a command.
+
 ## 0.1.0 - 2026-10-09
 
 ### Added
