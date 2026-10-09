@@ -2,52 +2,57 @@
 
 ## Purpose
 
-Give an operator or another OMP instance a local, explicit way to request restart or plugin resource refresh from participating terminal instances without interrupting active work.
+Give an operator or another OMP instance an explicit way to request safe restart/resume across participating Linux terminals without interrupting their work.
 
 ## Ownership
 
-| Boundary                                                                | Owner       |
-| ----------------------------------------------------------------------- | ----------- |
-| Instance selection and broadcast outcomes                               | `cli/`      |
-| Request identifiers, actions, responses, and launch identity            | `protocol/` |
-| Linux socket endpoints, permissions, and discovery records              | `linux/`    |
-| Extension registration and invoking supported host actions              | `omp/`      |
-| Settlement, teardown, terminal handoff, persistence, and restart/resume | OMP core    |
+| Boundary                                                              | Owner       |
+| --------------------------------------------------------------------- | ----------- |
+| Target selection, snapshot broadcasts, and outcomes                   | `cli/`      |
+| Profile/config scope, launch identity, and wire validation            | `protocol/` |
+| Private discovery records, Unix sockets, and foreground relaunch      | `linux/`    |
+| Public extension registration, shutdown requests, and handoff capture | `omp/`      |
+| Settlement, transcript persistence, teardown, and terminal release    | OMP core    |
 
-A control endpoint belongs to a running main interactive instance, not a task subagent or persisted transcript. A restart produces a fresh launch identity even when the PID remains unchanged.
+A control endpoint belongs to a main interactive launch, not a subagent or persisted transcript. Instance identity changes on every boot, including native POSIX restart that can retain the PID. A launcher token binds a handoff to one child launch; it is not a network credential.
 
-## Safe Lifecycle Boundary
+## Settled Restart Handoff
 
-An accepted request is not a completed action. A busy instance defers the action until OMP's settlement predicate allows it. A single tool/model turn ending is insufficient: admitted submissions, queued prompts, async jobs, and pending deliveries can still wake the session.
+1. The client reads a profile/config-root-scoped snapshot and sends one request per selected instance.
+2. The extension requires a live launcher and an existing persisted session. Concurrent requests coalesce into one operation.
+3. After acknowledgement flush, the extension calls public `ctx.shutdown()` once. It does not poll `ctx.isIdle()` or equate `agent_end` with settlement.
+4. OMP waits for its settled boundary, including queued submissions and background deliveries. During `session_shutdown`, the extension synchronously captures the current session file and cwd in a private atomic handoff, then removes its endpoint.
+5. After successful child exit, the launcher validates and consumes the handoff once. It relaunches with inherited terminal streams, retained configuration, and the current absolute session file; it strips the original messages and old selector.
+6. A fresh mounted endpoint exposes `lastRestart.operationId` and `lastRestart.previousInstanceId`. Acceptance is not completion.
 
-Broadcasts select a snapshot of reachable instances. Newly launched replacement instances must not replay the old request. Scope discovery by profile/config root by default; broader selection must be explicit.
+Normal exit without a handoff does not restart. Nonzero child exit and launcher termination signals prevent relaunch. A native OMP `/restart` can replace the child in-place; its new plugin binding clears a same-token handoff so a later `/exit` cannot replay it.
+
+A request accepted before a manual graceful exit may be satisfied by that exit. A request whose acknowledgement is lost has an unknown outcome; clients never retry automatically. Stale records are reported as unreachable rather than pruning state based on PID guesses.
+
+## Scope and Trust
+
+Scope includes OMP config root, normalized profile, and effective agent directory. Default-profile `PI_CODING_AGENT_DIR` overrides remain distinct; named profiles ignore that override, as OMP does. The Linux transport chooses its own private runtime path. Shared client code receives a transport object and never constructs Linux socket paths.
+
+Directories are private, owned by the current user, and have trusted non-writable ancestors. Records and sockets are private. Symlink paths and unsafe permissions are rejected. These controls protect against other Unix users, not processes already running under the same account.
 
 ## Reload Versus Restart
 
-Resource refresh rediscoveries and MCP reconnects are different from re-evaluating an extension module or replacing the OMP executable. Do not report a process upgrade or code reload after a resource-only refresh.
+Resource discovery/MCP reconnects are not extension-module reload or executable upgrade. OMP 18.8.7's `/reload-plugins` retained an edited extension module in the original isolated investigation; native `/restart` loaded it anew while preserving the session and terminal.
 
-Restart should reuse native OMP teardown and relaunch behavior. Only persisted conversations can be resumed; ephemeral or never-materialized sessions need an explicit policy before implementation.
+This helper implements restart only. It loads code/configuration present on disk at the next launch, without performing package installation or executable upgrades. Unwrapped, ephemeral, or never-materialized sessions cannot claim restart/resume through the helper.
 
 ## Host API Dependency
 
-The existing upstream feature request is [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458).
+Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). OMP 18.8.7 exposes graceful extension shutdown, but not public restart/plugin-refresh request methods. The user selected a Linux launcher workaround instead of patching OMP.
 
-Observed on OMP 18.8.7 during the setup investigation:
+Public source contracts:
 
-- A throwaway extension exposed private Unix sockets in two isolated interactive instances. An external client queried both and requested graceful shutdown; both exited with code 0.
-- Native `/restart` loaded edited extension code while preserving the persisted session ID and terminal. On Linux, it retained the PID through process-image replacement.
-- Native `/reload-plugins` retained the already-imported extension module.
-- Deferred restart while real work was active was not exercised.
+- [Extension context](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/extensibility/extensions/types.ts): `shutdown()` and read-only session access; command-context `reload()` is a session operation.
+- [Interactive lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/modes/interactive-mode.ts): settled shutdown-request path, native restart, and terminal teardown.
+- [Plugin refresh](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/slash-commands/builtin-marketplace.ts): discovery/MCP refresh, not loaded-module re-evaluation.
 
-Source contracts:
-
-- [Public extension context](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/extensibility/extensions/types.ts): shutdown is exposed; restart and plugin-refresh requests are not. Command-context reload is a session operation.
-- [Interactive lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/modes/interactive-mode.ts): native restart and the settled shutdown-request path.
-- [Plugin refresh](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/slash-commands/builtin-marketplace.ts): discovery and MCP refresh.
-- [Session reload](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/session/agent-session.ts): reopens the session transcript.
-
-The preferred integration needs public host lifecycle requests callable from extension callbacks and scheduled by OMP at settlement. API names and availability remain unresolved; no private-import, terminal-injection, or launch-wrapper workaround has been selected.
+The launcher does not duplicate OMP's settlement predicate, abort tools, kill sibling instances, inject lifecycle keystrokes, or import private OMP internals.
 
 ## Platform Scope
 
-Linux is the initial implementation target. Linux transport and discovery stay in `linux/`; protocol semantics and OMP lifecycle ownership remain platform-independent. Future macOS or Windows support adds its own platform directory and focused behavior checks without making the shared client or protocol depend on Linux-specific paths.
+Linux, including Ubuntu, is the only supported platform. Future macOS/Windows implementations must introduce their own concrete platform boundary and focused checks; no speculative adapters or scattered shared-code platform branches are included.
