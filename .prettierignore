@@ -1,0 +1,5 @@
+dist/
+coverage/
+debian/build/
+debian/.debhelper/
+debian/omp-instance-control/

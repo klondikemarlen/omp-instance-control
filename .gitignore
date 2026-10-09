@@ -5,3 +5,10 @@ coverage/
 .env.*
 .envrc
 *.sock
+debian/build/
+debian/.debhelper/
+debian/omp-instance-control/
+debian/*.debhelper
+debian/*.debhelper.log
+debian/*.substvars
+debian/files
