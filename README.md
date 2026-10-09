@@ -15,7 +15,7 @@ macOS and Windows are not supported. Resource-only plugin reload is not availabl
 Install the versioned GitHub release artifact:
 
 ```bash
-npm install --global https://github.com/klondikemarlen/omp-instance-control/releases/download/v0.1.0/omp-instance-control-0.1.0.tgz
+npm install --global https://github.com/klondikemarlen/omp-instance-control/releases/download/v0.1.1/omp-instance-control-0.1.1.tgz
 omp-instance-control --help
 ```
 
