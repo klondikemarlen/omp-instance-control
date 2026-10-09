@@ -1,0 +1,44 @@
+{
+  "name": "omp-instance-control",
+  "version": "0.1.0",
+  "description": "Linux launcher and OMP plugin for scoped settled-boundary restart/resume.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klondikemarlen/omp-instance-control.git"
+  },
+  "homepage": "https://github.com/klondikemarlen/omp-instance-control#readme",
+  "bugs": {
+    "url": "https://github.com/klondikemarlen/omp-instance-control/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "omp-instance-control": "./cli/index.js"
+  },
+  "omp": {
+    "extensions": [
+      "./omp/index.js"
+    ]
+  },
+  "files": [
+    "cli/",
+    "linux/",
+    "omp/",
+    "protocol/",
+    "README.md",
+    "CONCEPTS.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "format": "prettier --write .",
+    "check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
+}
