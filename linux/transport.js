@@ -216,7 +216,14 @@ export async function createTransport(scope, { env = process.env } = {}) {
       const instanceId = entry.name.slice(0, -5)
       if (!INSTANCE_ID.test(instanceId))
         throw new Error(`Invalid instance record filename: ${entry.name}`)
-      const record = validateRecord(await readPrivateJson(path.join(directory, entry.name)), scope)
+      let value
+      try {
+        value = await readPrivateJson(path.join(directory, entry.name))
+      } catch (error) {
+        if (error.code === "ENOENT") continue
+        throw error
+      }
+      const record = validateRecord(value, scope)
       if (record.instanceId !== instanceId)
         throw new Error(`Instance record filename does not match identity: ${entry.name}`)
       records.push(record)
@@ -391,7 +398,17 @@ export async function createTransport(scope, { env = process.env } = {}) {
           const response = validateResponse(JSON.parse(input.slice(0, newline)), requestValue)
           finish(null, response)
         } catch (error) {
-          finish(error)
+          finish(
+            Object.assign(
+              new Error(
+                `Invalid IPC acknowledgement; request outcome is unknown: ${error.message}`,
+                {
+                  cause: error,
+                }
+              ),
+              { code: error.code, ambiguous: true }
+            )
+          )
         }
       })
       socket.on("connect", () => socket.write(frame))

@@ -1,9 +1,13 @@
 import assert from "node:assert/strict"
+import fsPromises from "node:fs/promises"
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, chmod } from "node:fs/promises"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
+import { syncBuiltinESMExports } from "node:module"
 import { afterEach, test } from "node:test"
+
+import { listInstances, restartInstances } from "../../cli/client.js"
 import { ProtocolError } from "../../protocol/index.js"
 import {
   createTransport,
@@ -69,6 +73,31 @@ test("private directory and JSON operations refuse permissive paths and symlink 
   assert.equal(await readFile(target, "utf8"), "original")
 })
 
+test("discovery keeps surviving instances when another record disappears after enumeration", async (t) => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  await transport.writeRecord(makeRecord(SCOPE_A, INSTANCE_A))
+  await transport.writeRecord(makeRecord(SCOPE_A, INSTANCE_B))
+  const readdir = fsPromises.readdir
+  const enumeration = t.mock.method(fsPromises, "readdir", async (...args) => {
+    const entries = await readdir(...args)
+    if (args[0] === transport.directory) {
+      await fsPromises.unlink(path.join(transport.directory, `${INSTANCE_B}.json`))
+    }
+    return entries
+  })
+  syncBuiltinESMExports()
+  try {
+    assert.deepEqual(
+      (await transport.readRecords()).map((record) => record.instanceId),
+      [INSTANCE_A]
+    )
+  } finally {
+    enumeration.mock.restore()
+    syncBuiltinESMExports()
+  }
+})
+
 test("real socket dispatch returns handler protocol errors and rejects wrong instance identities", async () => {
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
@@ -112,23 +141,42 @@ test("real socket dispatch returns handler protocol errors and rejects wrong ins
   }
 })
 
-test("client rejects a response with mismatched instance or request identity", async () => {
+test("invalid acknowledgements stay unknown while correlated rejection reports failure", async () => {
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const record = makeRecord(SCOPE_A)
   await transport.writeRecord(record)
   const socketPath = path.join(transport.directory, `${INSTANCE_A}.sock`)
 
-  for (const response of [
-    { version: 1, instanceId: INSTANCE_B, requestId: "request-1", ok: true, data: {} },
-    { version: 1, instanceId: INSTANCE_A, requestId: "different-request", ok: true, data: {} },
+  for (const { reply, status } of [
+    { reply: { instanceId: INSTANCE_B, ok: true, data: {} }, status: "unknown" },
+    { reply: { requestId: "different-request", ok: true, data: {} }, status: "unknown" },
+    { reply: { ok: true, data: null }, status: "unknown" },
+    {
+      reply: { ok: false, error: { code: "NOT_READY", message: "The instance is not ready" } },
+      status: "failed",
+    },
   ]) {
     const server = net.createServer((socket) => {
-      socket.once("data", () => socket.end(`${JSON.stringify(response)}\n`))
+      socket.once("data", (chunk) => {
+        const request = JSON.parse(chunk.toString("utf8"))
+        socket.end(
+          `${JSON.stringify({
+            version: 1,
+            instanceId: INSTANCE_A,
+            requestId: request.requestId,
+            ...reply,
+          })}\n`
+        )
+      })
     })
     await new Promise((resolve) => server.listen(socketPath, resolve))
     try {
-      await assert.rejects(transport.request(record, makeRequest()), /instance|request/i)
+      assert.equal((await listInstances(transport))[0].status, status)
+      assert.equal(
+        (await restartInstances(transport, { instanceId: INSTANCE_A }))[0].status,
+        status
+      )
     } finally {
       await new Promise((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve()))

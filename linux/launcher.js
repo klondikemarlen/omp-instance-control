@@ -35,8 +35,11 @@ export async function launchOmp(options = {}) {
   }
   process.chdir(cwd)
 
-  const env = process.env
+  const env = { ...process.env }
   const scope = getScope({ env, profile: options.profile, cwd })
+  if (scope.profile === "default" && env.PI_CODING_AGENT_DIR) {
+    env.PI_CODING_AGENT_DIR = scope.agentDir
+  }
   const root = await getRuntimeRoot(env)
   await ensurePrivateDirectory(root)
   const launchDirectory = join(root, `launch-${process.pid}-${randomToken()}`)
@@ -124,7 +127,7 @@ function composeArguments(options, resumeFile, currentCwd) {
     if (options[key]) args.push(flag)
   }
   if (resumeFile ?? options.resume) addOption(args, "--resume", resumeFile ?? options.resume)
-  if (!resumeFile) args.push(...(options.messages ?? []))
+  if (!resumeFile && options.messages?.length) args.push("--", ...options.messages)
   return args
 }
 

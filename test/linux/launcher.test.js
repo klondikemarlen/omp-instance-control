@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -15,6 +15,7 @@ async function withLauncherFixture(run) {
     XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
     OMP_INSTANCE_CONTROL_OMP: process.env.OMP_INSTANCE_CONTROL_OMP,
     LAUNCH_TEST_LOG: process.env.LAUNCH_TEST_LOG,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
   }
   process.env.XDG_RUNTIME_DIR = root
   process.env.LAUNCH_TEST_LOG = join(root, "launches.jsonl")
@@ -97,6 +98,73 @@ if (entries.length === 1) {
     )
     assert.notEqual(runs[0].token, runs[1].token)
     assert.equal(runs[1].argv.filter((arg) => arg === "--resume").length, 1)
+  })
+})
+
+test("flag-shaped initial messages cannot select another profile", async () => {
+  await withLauncherFixture(async (root) => {
+    await fakeOmp(
+      root,
+      `
+const fs = require('node:fs');
+const { parseArgs } = require('node:util');
+const { values, positionals } = parseArgs({
+  args: process.argv.slice(2),
+  options: { extension: { type: 'string', multiple: true }, cwd: { type: 'string' }, profile: { type: 'string' } },
+  allowPositionals: true
+});
+fs.appendFileSync(process.env.LAUNCH_TEST_LOG, JSON.stringify({
+  profile: values.profile,
+  messages: positionals
+}) + '\\n');
+`
+    )
+    await launchOmp({
+      allowNonTty: true,
+      cwd: root,
+      profile: "default",
+      messages: ["--profile", "other"],
+    })
+    assert.deepEqual(await launches(root), [
+      { profile: "default", messages: ["--profile", "other"] },
+    ])
+  })
+})
+
+test("cwd-changing resume retains the original relative agent-directory override", async () => {
+  await withLauncherFixture(async (root) => {
+    const sessionFile = join(root, "session.jsonl")
+    const resumedCwd = join(root, "other")
+    await mkdir(resumedCwd, { mode: 0o700 })
+    await writeFile(sessionFile, "persisted session\n")
+    process.env.PI_CODING_AGENT_DIR = "./agent"
+    await fakeOmp(
+      root,
+      `
+const fs = require('node:fs');
+const path = require('node:path');
+const log = process.env.LAUNCH_TEST_LOG;
+const entries = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\\n') : [];
+const launch = JSON.parse(fs.readFileSync(process.env.OMP_INSTANCE_CONTROL_LAUNCH_DIR + '/launch.json', 'utf8'));
+fs.appendFileSync(log, JSON.stringify({
+  cwd: process.cwd(),
+  agentDir: path.resolve(process.cwd(), process.env.PI_CODING_AGENT_DIR),
+  scopeAgentDir: launch.scope.agentDir
+}) + '\\n');
+if (entries.length === 0) {
+  fs.writeFileSync(process.env.OMP_INSTANCE_CONTROL_LAUNCH_DIR + '/handoff.json', JSON.stringify({
+    version: 1, token: launch.token, operationId: 'restart-relative-agent',
+    instanceId: 'c'.repeat(32), sessionFile: ${JSON.stringify(sessionFile)},
+    cwd: ${JSON.stringify(resumedCwd)}
+  }), { mode: 0o600 });
+}
+`
+    )
+    await launchOmp({ allowNonTty: true, cwd: root, profile: "default" })
+    assert.deepEqual(await launches(root), [
+      { cwd: root, agentDir: join(root, "agent"), scopeAgentDir: join(root, "agent") },
+      { cwd: resumedCwd, agentDir: join(root, "agent"), scopeAgentDir: join(root, "agent") },
+    ])
   })
 })
 
