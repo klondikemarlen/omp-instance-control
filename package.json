@@ -1,7 +1,7 @@
 {
   "name": "omp-instance-control",
-  "version": "0.1.1",
-  "description": "Linux launcher and OMP plugin for scoped settled-boundary restart/resume.",
+  "version": "0.2.0",
+  "description": "Native ompi wrapper and OMP adapter for scoped settled-boundary restart/resume.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -14,9 +14,6 @@
   },
   "engines": {
     "node": ">=22"
-  },
-  "bin": {
-    "omp-instance-control": "./cli/index.js"
   },
   "omp": {
     "extensions": [
@@ -34,9 +31,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test",
-    "format": "prettier --write .",
-    "check": "prettier --check ."
+    "build": "make build",
+    "test": "go test ./... && node --test",
+    "format": "gofmt -w cli linux protocol test && prettier --write .",
+    "check": "go vet ./... && prettier --check . && test -z \"$(gofmt -l cli linux protocol test)\""
   },
   "devDependencies": {
     "prettier": "3.9.6"
