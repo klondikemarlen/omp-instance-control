@@ -1,6 +1,6 @@
 {
   "name": "omp-instance-control",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Linux launcher and OMP plugin for scoped settled-boundary restart/resume.",
   "type": "module",
   "license": "MIT",
