@@ -20,6 +20,11 @@ for (const scenario of [
     launch: { flagTypes: { "no-tools": "boolean" } },
     getFlag: () => "literal startup value",
   },
+  {
+    name: "extension shadowing a known string flag with a boolean value",
+    launch: { flagTypes: { plan: "string" } },
+    getFlag: () => true,
+  },
 ]) {
   test(`when ${scenario.name} is detected, restart is rejected without requesting shutdown`, async () => {
     // Arrange
@@ -72,14 +77,16 @@ for (const scenario of [
         },
       },
     }
+    let flagsReady = false
     try {
       await instanceControl({
         on(event, handler) {
           handlers.set(event, handler)
         },
         registerCommand() {},
-        getFlag: scenario.getFlag,
+        getFlag: (name) => (flagsReady ? scenario.getFlag(name) : undefined),
       })
+      flagsReady = true
       await handlers.get("session_start")({}, ctx)
       const transport = await createTransport(scope)
       const [record] = await transport.readRecords()

@@ -30,13 +30,6 @@ export default async function instanceControl(pi) {
     (await realpath(launch.extensionPath)) !== (await realpath(fileURLToPath(import.meta.url)))
   )
     return
-  for (const [name, expectedType] of Object.entries(launch?.flagTypes ?? {})) {
-    const value = pi.getFlag?.(name)
-    if (value !== undefined && typeof value !== expectedType) {
-      launch.restartError = `Extension flag --${name} changes built-in argument consumption; controlled restart is unavailable to prevent startup-message replay.`
-      break
-    }
-  }
 
   let runtime
 
@@ -127,6 +120,14 @@ export default async function instanceControl(pi) {
         ctx.ui.setStatus("instance-control", "instances: launcher required")
         return
       }
+      for (const [name, expectedType] of Object.entries(launch.flagTypes ?? {})) {
+        const value = pi.getFlag?.(name)
+        if (value !== undefined && typeof value !== expectedType) {
+          launch.restartError = `Extension flag --${name} changes built-in argument consumption; controlled restart is unavailable to prevent startup-message replay.`
+          break
+        }
+      }
+
       const scope = getScope({ cwd: ctx.cwd })
       const transport = await createTransport(scope)
       runtime = {
