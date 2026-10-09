@@ -29,6 +29,18 @@ export async function readLauncherContext(env = process.env) {
   if (typeof launch.extensionPath !== "string" || !path.isAbsolute(launch.extensionPath)) {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher extension path is invalid.")
   }
+  if (launch.restartError !== undefined && typeof launch.restartError !== "string") {
+    throw new ProtocolError("INVALID_LAUNCHER", "Launcher restart limitation is invalid.")
+  }
+  if (
+    launch.flagTypes !== undefined &&
+    (!launch.flagTypes ||
+      typeof launch.flagTypes !== "object" ||
+      Array.isArray(launch.flagTypes) ||
+      Object.values(launch.flagTypes).some((value) => value !== "string" && value !== "boolean"))
+  ) {
+    throw new ProtocolError("INVALID_LAUNCHER", "Launcher argument types are invalid.")
+  }
 
   const handoffPath = path.join(directory, "handoff.json")
   try {

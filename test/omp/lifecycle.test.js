@@ -9,7 +9,8 @@ import { createTransport, writePrivateJson } from "../../linux/transport.js"
 import instanceControl from "../../omp/index.js"
 import { getScope } from "../../protocol/index.js"
 
-test("late agent-end metadata cannot recreate an endpoint record during shutdown", async () => {
+test("when agent-end arrives during shutdown, removed endpoint records stay removed", async () => {
+  // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-life-"))
   const launchDirectory = path.join(root, "launch")
   await mkdir(launchDirectory, { mode: 0o700 })
@@ -24,6 +25,11 @@ test("late agent-end metadata cannot recreate an endpoint record during shutdown
     lastRestart: null,
   })
   const environment = {
+    HOME: root,
+    PI_CONFIG_DIR: path.join(root, ".omp"),
+    PI_CODING_AGENT_DIR: path.join(root, ".omp", "agent"),
+    OMP_PROFILE: "",
+    PI_PROFILE: "",
     XDG_RUNTIME_DIR: root,
     OMP_INSTANCE_CONTROL_LAUNCH_DIR: launchDirectory,
     OMP_INSTANCE_CONTROL_LAUNCH_TOKEN: token,
@@ -54,9 +60,13 @@ test("late agent-end metadata cannot recreate an endpoint record during shutdown
     })
     await handlers.get("session_start")({}, ctx)
     const transport = await createTransport(scope)
+
+    // Act
     const closing = handlers.get("session_shutdown")({}, ctx)
     await handlers.get("agent_end")({}, ctx)
     await closing
+
+    // Assert
     assert.deepEqual(await transport.readRecords(), [])
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
