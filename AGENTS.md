@@ -2,19 +2,19 @@
 
 ## Scope
 
-This project owns local control of participating OMP instances: resource refresh and same-terminal restart/resume at a safe settled boundary. The current deliverable is repository setup, not runtime implementation. Do not add placeholder entry points, fake lifecycle actions, or installation claims.
+This project owns local control of participating OMP instances. The current implementation is a Linux launcher and public OMP extension for same-terminal restart/resume at a safe settled boundary. Resource-only refresh remains unavailable. Do not add placeholder entry points, fake lifecycle actions, or unobserved installation claims.
 
 Linux is the initial target. macOS and Windows are possible future extensions, not supported platforms.
 
 ## Organization
 
-Follow omp-send-context's integration-oriented layout. Keep OMP host integration in `omp/`, shared client behavior in `cli/`, wire contracts in `protocol/`, and Linux-specific transport, filesystem, permissions, and process behavior in `linux/`. Group future tests under `test/<integration>/`.
+Follow omp-send-context's integration-oriented layout. Keep OMP host integration in `omp/`, shared client behavior in `cli/`, wire contracts in `protocol/`, and Linux-specific transport, filesystem, permissions, and process behavior in `linux/`. Group tests under `test/<integration>/`.
 
 Keep shared code independent of Linux paths. Do not scatter `process.platform` branches or add speculative macOS/Windows adapters. Introduce only the smallest boundary required by real behavior.
 
 ## Lifecycle Invariants
 
-- OMP owns teardown, terminal handoff, argument rewriting, transcript persistence, and the settled-boundary decision.
+- OMP owns settlement, transcript persistence, teardown, and terminal release. The explicitly selected launcher workaround owns relaunch and argument selection after successful exit; do not duplicate OMP's idle predicate.
 - Do not equate `turn_end`, `agent_end`, or `ctx.isIdle()` alone with session settlement; background work and queued submissions can still wake the agent.
 - Never kill another instance or inject terminal keystrokes to imitate a lifecycle API.
 - Use a fresh instance identity per launch. PID alone is not an identity: native POSIX restart can retain the PID.
@@ -32,11 +32,13 @@ Keep shared code independent of Linux paths. Do not scatter `process.platform` b
 - Keep import groups contiguous with one blank line between groups. Use one blank line between unrelated logical blocks. Prefer `Promise.withResolvers()` for event-based completion.
 - Run Prettier and `git diff --check` for changed files. Add deterministic behavior tests and real isolated multi-instance smoke checks when lifecycle implementation begins.
 - Keep credentials, environment files, sockets, and session/runtime state out of Git. Do not create `.envrc.example`.
-- Do not modify configured model routes or install the plugin as part of repository setup. A future runtime release must verify the released artifact in fresh OMP processes; current processes retain loaded modules.
+- Do not modify configured model routes. Runtime release QA must uninstall the isolated QA installation, install the released artifact, verify its version, then exercise behavior and autocomplete in fresh OMP processes; current processes retain loaded modules.
 
-## Current Formatting Check
+## Development Checks
 
 ```bash
-npx --yes prettier@3.9.6 --check '**/*.md' .prettierrc.yaml
+npm ci
+npm test
+npm run check
 git diff --check
 ```

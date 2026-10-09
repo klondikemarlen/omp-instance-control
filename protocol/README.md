@@ -4,4 +4,4 @@ Own the shared request/response semantics, request identifiers, lifecycle action
 
 Distinguish request acceptance, busy deferral, action completion, and failure. PID alone cannot identify a launch because native POSIX restart can retain it.
 
-No wire schema or fixtures are defined yet; derive them from the first real implementation and its consumer-visible behavior. See [shared concepts](../CONCEPTS.md).
+`index.js` defines version 1: `{version, instanceId, requestId, action}` requests, with `status` and `restart` actions. Responses match both identities and contain either `{ok: true, data}` or `{ok: false, error: {code, message}}`. Scope includes config root, profile, and effective agent directory, independently of Linux runtime paths. See [shared concepts](../CONCEPTS.md).
