@@ -1,0 +1,17 @@
+Source: omp-instance-control
+Section: utils
+Priority: optional
+Maintainer: Marlen Brunner <klondikemarlen@gmail.com>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.25)
+Standards-Version: 4.7.0
+Homepage: https://github.com/klondikemarlen/omp-instance-control
+Rules-Requires-Root: no
+
+Package: omp-instance-control
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Native ompi wrapper for participating OMP terminals
+ Launches standard OMP through ompi and adds explicit scoped instance
+ discovery and settled-boundary restart/resume in the same terminal.
+ Includes the public-API JavaScript adapter loaded by an independently
+ installed OMP executable. The native command does not require Node.js.

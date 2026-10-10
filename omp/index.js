@@ -5,7 +5,7 @@ import { parseArgs } from "node:util"
 
 import { formatRows, listInstances, restartInstances } from "../cli/client.js"
 import { createTransport } from "../linux/transport.js"
-import { ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
+import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
 import { readLauncherContext, writeRestartHandoff } from "./launcher-context.js"
 
 function isMainTerminal(ctx) {
@@ -64,10 +64,18 @@ export default async function instanceControl(pi) {
       throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")
     const ctx = runtime.ctx
     if (request.action === "status") {
-      return { data: { ...record(ctx), canRestart: await hasPersistedSession(ctx) } }
+      return {
+        data: {
+          ...record(ctx),
+          canRestart: !runtime.launch.restartError && (await hasPersistedSession(ctx)),
+        },
+      }
     }
     if (process.ppid !== runtime.launch.pid) {
       throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
+    }
+    if (runtime.launch.restartError) {
+      throw new ProtocolError("RESTART_ARGUMENTS_UNAVAILABLE", runtime.launch.restartError)
     }
     if (!(await hasPersistedSession(ctx))) {
       throw new ProtocolError(
@@ -112,9 +120,23 @@ export default async function instanceControl(pi) {
         ctx.ui.setStatus("instance-control", "instances: launcher required")
         return
       }
-      const transport = await createTransport(launch.scope)
+      // OMP 18.8.7's public getFlag() is extension-local. This read-only private
+      // boundary must fail closed until OMP exposes parsed flag metadata.
+      const flagValues = pi.runtime?.flagValues
+      if (!(flagValues instanceof Map)) {
+        launch.restartError =
+          "OMP's parsed extension flags are unavailable; controlled restart is disabled, but normal OMP invocation is unchanged."
+      } else {
+        const shadow = launch.builtinFlags.find((name) => flagValues.has(name))
+        if (shadow) {
+          launch.restartError = `Extension flag --${shadow} overrides a built-in OMP option used by this launch; controlled restart is disabled to prevent changed arguments or startup-message replay.`
+        }
+      }
+
+      const scope = getScope({ cwd: ctx.cwd })
+      const transport = await createTransport(scope)
       runtime = {
-        launch,
+        launch: { ...launch, scope },
         transport,
         ctx,
         instanceId: randomBytes(16).toString("hex"),
@@ -159,10 +181,7 @@ export default async function instanceControl(pi) {
     description: "List launcher-managed Linux instances or request scoped restart",
     handler: async (args, ctx) => {
       if (!isMainTerminal(ctx) || !runtime) {
-        ctx.ui.notify(
-          "Instance control requires a main Linux terminal started with omp-instance-control launch.",
-          "error"
-        )
+        ctx.ui.notify("Instance control requires a main Linux terminal started with ompi.", "error")
         return
       }
       try {

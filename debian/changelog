@@ -1,0 +1,7 @@
+omp-instance-control (0.2.0~ppa1) resolute; urgency=medium
+
+  * Install the native Go ompi wrapper with default OMP launch.
+  * Forward standard OMP commands and add scoped instance control.
+  * Retain public host lifecycle integration and safe restart/resume.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 09 Oct 2026 13:30:00 -0700

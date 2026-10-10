@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	mkdir -p debian/build
+	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.2.0" -o debian/build/ompi ./cli/cmd/ompi
+
+override_dh_auto_test:
+	GOCACHE=$(CURDIR)/debian/build/cache go test ./...
+
+override_dh_auto_install:
+	install -D -m 0755 debian/build/ompi debian/omp-instance-control/usr/bin/ompi
+	install -D -m 0644 package.json debian/omp-instance-control/usr/share/omp-instance-control/package.json
+	install -D -m 0644 omp/index.js debian/omp-instance-control/usr/share/omp-instance-control/omp/index.js
+	install -D -m 0644 omp/launcher-context.js debian/omp-instance-control/usr/share/omp-instance-control/omp/launcher-context.js
+	install -D -m 0644 cli/client.js debian/omp-instance-control/usr/share/omp-instance-control/cli/client.js
+	install -D -m 0644 linux/transport.js debian/omp-instance-control/usr/share/omp-instance-control/linux/transport.js
+	install -D -m 0644 protocol/index.js debian/omp-instance-control/usr/share/omp-instance-control/protocol/index.js
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf debian/build

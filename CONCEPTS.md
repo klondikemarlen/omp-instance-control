@@ -53,6 +53,18 @@ Public source contracts:
 
 The launcher does not duplicate OMP's settlement predicate, abort tools, kill sibling instances, inject lifecycle keystrokes, or import private OMP internals.
 
+### Parsed Extension-Flag Compatibility Decision
+
+Preserve normal spaced OMP arguments and keep the wrapper additive. The wrapper does not register built-in flags. OMP permits extensions to override their names; for example, a boolean extension flag named `plan` makes `--plan "startup prompt"` submit that text instead of consuming it as the built-in value.
+
+OMP 18.8.7's public `getFlag()` only sees flags registered by the calling extension, not other plugins. The explicit compatibility decision is to read the private `pi.runtime.flagValues` map at `session_start`, without modifying it or registering observer flags. The [host implementation](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/extensibility/extensions/loader.ts) owns this parsed map. If its shape is unavailable, or it contains an extension value for a built-in name used by the launch, refuse controlled restart before shutdown. Same-type collisions are rejected too: value type alone does not prove identical parsing or path semantics.
+
+The map contains values, not every registration: unused flags without defaults are absent. Do not treat absence as proof that a flag name is unregistered. The wrapper loads its adapter with `-e` (or an inline trusted-extension option), resumes through OMP's `-r` alias, and sets the child's actual process cwd after removing the original cwd selector. Short options are not extension-shadowable in the verified host parser. Reject incomplete or flag-looking spaced string values; inline values keep consumption explicit without changing normal spaced options such as `--model MODEL`.
+
+This is a private metadata dependency, not a supported host API. Lifecycle actions still use public `ctx.shutdown()`. Remove the guard when OMP supplies public parsed-flag metadata or owns restart argument selection; do not extend the exception to other internals.
+
+`ompi` is an additive native wrapper, not a replacement OMP runtime. Standard commands and arguments pass to the installed `omp`; only `instances` is a new command group. The JavaScript adapter remains host-loaded package data. Temporary relaunch/argv, adapter, and discovery responsibilities have separate [upstream removal criteria](README.md#temporary-ownership-and-upstream-removal). Remove each when the corresponding supported OMP contract preserves its invariants; remove the wrapper entirely when standard OMP covers the complete outcome.
+
 ## Platform Scope
 
 Linux, including Ubuntu, is the only supported platform. Future macOS/Windows implementations must introduce their own concrete platform boundary and focused checks; no speculative adapters or scattered shared-code platform branches are included.

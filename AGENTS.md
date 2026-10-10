@@ -2,7 +2,7 @@
 
 ## Scope
 
-This project owns local control of participating OMP instances. The current implementation is a Linux launcher and public OMP extension for same-terminal restart/resume at a safe settled boundary. Resource-only refresh remains unavailable. Do not add placeholder entry points, fake lifecycle actions, or unobserved installation claims.
+This project owns local control of participating OMP instances through the native Go `ompi` wrapper and a host-loaded JavaScript adapter using public lifecycle APIs. Bare `ompi` launches standard OMP; ordinary OMP commands pass through. Same-terminal restart/resume uses OMP's safe settled boundary. Resource-only refresh remains unavailable. Do not add placeholder actions or unobserved installation claims.
 
 Linux is the initial target. macOS and Windows are possible future extensions, not supported platforms.
 
@@ -21,6 +21,7 @@ Keep shared code independent of Linux paths. Do not scatter `process.platform` b
 - Resource refresh does not imply extension-code reload or executable upgrade.
 - Preserve profile/config-root boundaries by default. Cross-profile selection must be explicit.
 - Track the host dependency in [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). Do not invent supported host methods or depend on private OMP internals without an explicit design decision.
+- The explicit parsed-flag compatibility decision permits only read-only `pi.runtime.flagValues` access at `session_start`. Refuse controlled restart if the map is unavailable or a parsed extension value shares a built-in option used by the launch. The map is not a complete registry: keep generated arguments unshadowable and refuse ambiguous string values. Do not register observer flags or extend this exception to other internals; see [Concepts](CONCEPTS.md#parsed-extension-flag-compatibility-decision).
 
 ## Delivery Standards
 
@@ -28,9 +29,9 @@ Keep shared code independent of Linux paths. Do not scatter `process.platform` b
 - Use `issue-<number>/<outcome-slug>` branches and linked pull requests. Self-review the complete diff, record focused QA, resolve feedback, and merge using a merge commit.
 - Use title case for issue, pull request, and Markdown headings, preserving identifiers and acronyms.
 - Commit subjects follow `:emoji: Imperative outcome.` Keep configuration, dependencies, documentation, and unrelated implementation changes in separate commits; run `check-commit-scope` after staging.
-- Prefer readable ES modules consistent with omp-send-context. Keep functions and control flow small; avoid speculative frameworks or service abstractions.
+- Prefer readable Go for the native command and ES modules for host-loaded adapter code. Keep functions and control flow small; avoid speculative frameworks or service abstractions.
 - Keep import groups contiguous with one blank line between groups. Use one blank line between unrelated logical blocks. Prefer `Promise.withResolvers()` for event-based completion.
-- Run Prettier and `git diff --check` for changed files. Add deterministic behavior tests and real isolated multi-instance smoke checks when lifecycle implementation begins.
+- Run gofmt, Go behavior checks/vet, Prettier, and `git diff --check`. Keep Go package tests beside the native code they exercise; keep adapter integration tests under `test/<integration>/`. Exercise real isolated multi-instance OMP terminals for lifecycle changes.
 - Keep credentials, environment files, sockets, and session/runtime state out of Git. Do not create `.envrc.example`.
 - Do not modify configured model routes. Runtime release QA must uninstall the isolated QA installation, install the released artifact, verify its version, then exercise behavior and autocomplete in fresh OMP processes; current processes retain loaded modules.
 
@@ -40,5 +41,6 @@ Keep shared code independent of Linux paths. Do not scatter `process.platform` b
 npm ci
 npm test
 npm run check
+npm run build
 git diff --check
 ```
