@@ -63,9 +63,9 @@ From a participating OMP instance:
 
 `--all` selects a snapshot in the current profile/config-root scope. Replacement instances do not receive the old request. Select another profile explicitly with control-command `--profile`; use the same `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and `XDG_RUNTIME_DIR` as the participating launchers. Named profiles ignore `PI_CODING_AGENT_DIR`, as OMP does.
 
-Use `--` before flag-shaped initial messages. Initial messages and startup session actions are never replayed after a controlled restart. For custom string-valued extension flags, use `--custom=value`; for custom boolean flags before a message, separate the message with `--`. An unknown bare flag immediately followed by a non-flag token has ambiguous arity: initial OMP invocation still passes through, but controlled restart is explicitly unavailable rather than risking prompt replay.
+Use `--` before flag-shaped initial messages. Initial messages and startup session actions are never replayed after a controlled restart. For custom string-valued extension flags, use `--custom=value`; for custom boolean flags before a message, separate the message with `--`. An unknown bare flag followed by a non-flag token, a missing string value, or a flag-looking spaced string value makes controlled restart unavailable. Use `--system-prompt=--literal` for a flag-shaped string value. Initial OMP invocation still passes through unchanged.
 
-The wrapper does not register or shadow OMP flags. If another extension overrides a built-in option used by the launch, controlled restart is unavailable rather than guessing its parsing or changing the original invocation. Ordinary spaced options such as `--model MODEL` remain supported.
+The wrapper does not register or shadow OMP flags. A parsed extension value sharing a built-in option used by the launch makes controlled restart unavailable rather than guessing its parsing or changing the original invocation. Ordinary spaced options such as `--model MODEL` remain supported.
 
 ## Outcomes and Safety
 
@@ -74,7 +74,7 @@ The wrapper does not register or shadow OMP flags. If another extension override
 - `failed` reports explicit rejection, including a missing persisted session or no matching target. `unreachable` means a missing/refused endpoint; `unknown` means acknowledgement was inconclusive. Requests are never automatically replayed.
 - Normal `/exit`, unsuccessful child exit, and termination signals do not relaunch. Handoffs are validated and consumed once after successful child exit.
 - Relaunch resumes the actual current session file and cwd, not the original selector. Original configuration paths and relative default-profile agent-directory overrides remain anchored across directory changes.
-- Restart admission checks OMP's private parsed extension-flag map read-only at `session_start`. Missing metadata or a built-in collision refuses restart before shutdown. This explicit compatibility dependency is verified on OMP 18.8.7; it does not mutate flags or replace public lifecycle APIs.
+- Restart admission checks OMP's private parsed extension-flag map read-only at `session_start`. Missing metadata or a parsed built-in collision refuses restart before shutdown. This map is not a registry: unused no-default flags may be absent. Generated restart uses the unshadowable `-r` alias and the child's process cwd, not injectable long options. The explicit compatibility dependency is verified on OMP 18.8.7; it does not mutate flags or replace public lifecycle APIs.
 - Private same-user Unix sockets and discovery records live under `$XDG_RUNTIME_DIR/omp-instance-control`, or `/tmp/omp-instance-control-<uid>` when unset. Unsafe permissions, symlinks, and overlong socket paths fail explicitly.
 - Crashed instances can leave unreachable records. Discovery reports them without deleting another instance's state. Same-user IPC is not a sandbox against other programs running as your account.
 

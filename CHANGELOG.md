@@ -15,6 +15,9 @@
 - Refuse controlled restart when extension flag arity is ambiguous or an extension shadows a built-in option used by the launch; the original OMP invocation still passes through.
 - Check parsed extension-flag metadata through one documented read-only private OMP compatibility boundary. Missing metadata fails closed; lifecycle actions remain on public APIs.
 - Retain literal flag-valued strings during restart path normalization and apply the protocol's UTF-16 identifier bound to restart handoffs.
+- Preserve nullable and absent response fields in native CLI JSON rather than synthesizing capabilities.
+- Keep generated adapter/resume arguments unshadowable, use the child's process cwd for relaunch, and refuse incomplete or ambiguously flag-shaped spaced string values.
+- Preserve reserved management-command rejection across profile bootstrap.
 
 ## 0.1.1 - 2026-10-09
 

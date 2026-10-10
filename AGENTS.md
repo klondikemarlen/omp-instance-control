@@ -21,7 +21,7 @@ Keep shared code independent of Linux paths. Do not scatter `process.platform` b
 - Resource refresh does not imply extension-code reload or executable upgrade.
 - Preserve profile/config-root boundaries by default. Cross-profile selection must be explicit.
 - Track the host dependency in [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). Do not invent supported host methods or depend on private OMP internals without an explicit design decision.
-- The explicit parsed-flag compatibility decision permits only read-only `pi.runtime.flagValues` access at `session_start`. Refuse controlled restart if the map is unavailable or an extension shadows a built-in option used by the launch. Do not register observer flags or extend this exception to other internals; see [Concepts](CONCEPTS.md#parsed-extension-flag-compatibility-decision).
+- The explicit parsed-flag compatibility decision permits only read-only `pi.runtime.flagValues` access at `session_start`. Refuse controlled restart if the map is unavailable or a parsed extension value shares a built-in option used by the launch. The map is not a complete registry: keep generated arguments unshadowable and refuse ambiguous string values. Do not register observer flags or extend this exception to other internals; see [Concepts](CONCEPTS.md#parsed-extension-flag-compatibility-decision).
 
 ## Delivery Standards
 
