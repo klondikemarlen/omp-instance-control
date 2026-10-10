@@ -70,7 +70,7 @@ func Launch(args []string, extensionPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	builtinFlags := make([]string, 0, len(args)+1)
+	builtinFlags := make([]string, 0, len(args))
 	restartArgs, profile, cwd, restartArgsErr := restartArguments(args, initialCwd, &builtinFlags)
 	if err := ensureWorkingDirectory(cwd); err != nil {
 		return 0, err
@@ -112,11 +112,10 @@ func Launch(args []string, extensionPath string) (int, error) {
 			"PI_CODING_AGENT_DIR": scope.AgentDir,
 		})
 	}
-	extensionFlag := "--extension"
+	extensionFlag := "-e"
 	if slices.Contains(builtinFlags, "trusted-extension") {
 		extensionFlag = "--trusted-extension"
 	}
-	builtinFlags = append(builtinFlags, strings.TrimPrefix(extensionFlag, "--"))
 	var resumeFile string
 	for {
 		select {
@@ -146,9 +145,15 @@ func Launch(args []string, extensionPath string) (int, error) {
 		if resumeFile != "" {
 			currentArgs = restartArgs
 		}
-		childArgs := append([]string{extensionFlag, extensionPath}, currentArgs...)
+		childArgs := make([]string, 0, len(currentArgs)+4)
+		if extensionFlag == "-e" {
+			childArgs = append(childArgs, extensionFlag, extensionPath)
+		} else {
+			childArgs = append(childArgs, extensionFlag+"="+extensionPath)
+		}
+		childArgs = append(childArgs, currentArgs...)
 		if resumeFile != "" {
-			childArgs = append(childArgs, "--cwd", cwd, "--resume", resumeFile)
+			childArgs = append(childArgs, "-r", resumeFile)
 		}
 		childEnv := replaceEnvironment(baseEnv, map[string]string{
 			launchDirectoryEnv: launchDir,
@@ -392,6 +397,7 @@ func validateSessionAndCWD(sessionFile, cwd string) error {
 }
 
 func isReservedCommand(args []string) bool {
+	args = withoutProfileOptions(args)
 	if len(args) == 0 {
 		return false
 	}
@@ -415,4 +421,39 @@ func isReservedCommand(args []string) bool {
 		}
 	}
 	return false
+}
+
+func withoutProfileOptions(args []string) []string {
+	var stripped []string
+	start := 0
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			break
+		}
+		name, _, hasInline := splitFlag(arg)
+		if name == "--profile" || name == "--alias" {
+			if stripped == nil {
+				stripped = make([]string, 0, len(args))
+			}
+			stripped = append(stripped, args[start:index]...)
+			if !hasInline && index+1 < len(args) {
+				index++
+			}
+			start = index + 1
+			continue
+		}
+		if hasInline || index+1 == len(args) {
+			continue
+		}
+		kind := flagValueKind(name)
+		next := args[index+1]
+		if kind == valueRequired || (kind == valueOptional || kind == valuePlan || kind == valueUnknown) && !strings.HasPrefix(next, "-") {
+			index++
+		}
+	}
+	if stripped == nil {
+		return args
+	}
+	return append(stripped, args[start:]...)
 }

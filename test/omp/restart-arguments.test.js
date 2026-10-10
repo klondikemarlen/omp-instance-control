@@ -36,6 +36,12 @@ for (const scenario of [
     missingMetadata: true,
     flags: [],
   },
+  {
+    name: "host extension-flag metadata is unavailable for a bare launch",
+    launch: { builtinFlags: [] },
+    missingMetadata: true,
+    flags: [],
+  },
 ]) {
   test(`when ${scenario.name} is detected, restart is rejected without requesting shutdown`, async () => {
     // Arrange

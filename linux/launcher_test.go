@@ -30,7 +30,7 @@ func TestRestartArgumentsDropsStartupSourcesAndNormalizesPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"--profile", "first", "--profile=second", "--cwd", selected,
+		"--profile", "first", "--profile=second",
 		"--config", filepath.Join(selected, "settings.json"),
 		"--extension=" + filepath.Join(selected, "extensions/custom.js"),
 		"--session-dir", filepath.Join(selected, "sessions"),
@@ -84,11 +84,69 @@ func TestNonInteractiveAndSubcommandArgumentsBypassLauncher(t *testing.T) {
 	}
 }
 
-func TestRestartArgumentsKeepsFlagLookingValuesLiteral(t *testing.T) {
-	args := []string{"--system-prompt", "--config", "--model", "MODEL"}
+func TestRestartArgumentsKeepsInlineFlagLookingValuesLiteral(t *testing.T) {
+	args := []string{"--system-prompt=--config", "--model", "MODEL"}
 	got, _, _, err := restartArguments(args, "/initial", nil)
 	if err != nil || !reflect.DeepEqual(got, args) {
 		t.Fatalf("restart reinterpreted a literal flag value: got=%#v err=%v", got, err)
+	}
+}
+
+func TestRestartArgumentsRejectsIncompleteRetainedStringOptions(t *testing.T) {
+	for _, option := range []string{"--system-prompt", "--config", "--model", "--plan"} {
+		t.Run(option, func(t *testing.T) {
+			_, _, _, err := restartArguments([]string{option}, t.TempDir(), nil)
+			if err == nil {
+				t.Fatal("incomplete string option could consume an injected restart argument")
+			}
+		})
+	}
+}
+
+func TestRestartArgumentsPreservesExplicitEmptyPlanValue(t *testing.T) {
+	got, _, _, err := restartArguments([]string{"--plan", ""}, t.TempDir(), nil)
+	if err != nil || !reflect.DeepEqual(got, []string{"--plan", ""}) {
+		t.Fatalf("empty plan value became a bare option: got=%#v err=%v", got, err)
+	}
+}
+
+func TestRestartArgumentsRejectsAmbiguousFlagLookingSpacedValues(t *testing.T) {
+	for _, option := range []string{"--system-prompt", "--config", "--model", "--plan"} {
+		_, _, _, err := restartArguments([]string{option, "--no-tools"}, t.TempDir(), nil)
+		if err == nil {
+			t.Errorf("flag-looking value for %s could hide an unused extension registration", option)
+		}
+	}
+}
+
+func TestRestartRejectionStillResolvesFirstLaunchOptions(t *testing.T) {
+	var builtinFlags []string
+	_, profile, cwd, err := restartArguments([]string{
+		"--system-prompt", "--config", "--trusted-extension", "/custom.js",
+		"--profile", "work", "--cwd", "/project",
+	}, "/initial", &builtinFlags)
+	if err == nil || profile != "work" || cwd != "/project" || !contains(builtinFlags, "trusted-extension") {
+		t.Fatalf("restart rejection truncated original launch metadata: profile=%q cwd=%q flags=%#v err=%v", profile, cwd, builtinFlags, err)
+	}
+}
+
+func TestReservedCommandsRetainProfileBootstrapRouting(t *testing.T) {
+	for _, args := range [][]string{
+		{"--profile", "default", "marketplace", "add", "example"},
+		{"marketplace", "--profile=default", "add", "example"},
+		{"list", "--profile", "default"},
+	} {
+		if !isReservedCommand(args) {
+			t.Errorf("reserved invocation could become an initial prompt: %#v", args)
+		}
+	}
+	for _, args := range [][]string{
+		{"--", "--profile", "default", "marketplace", "add", "example"},
+		{"--system-prompt", "--profile", "marketplace", "add", "example"},
+	} {
+		if isReservedCommand(args) {
+			t.Errorf("literal profile token changed routing: %#v", args)
+		}
 	}
 }
 
@@ -108,6 +166,7 @@ func TestHandoffIdentifierUsesProtocolUTF16Boundary(t *testing.T) {
 
 type fakeInvocation struct {
 	Args       []string       `json:"args"`
+	CWD        string         `json:"cwd"`
 	Token      string         `json:"token"`
 	Launch     map[string]any `json:"launch"`
 	CallNumber int            `json:"callNumber"`
@@ -143,7 +202,11 @@ func TestFakeOMPChild(t *testing.T) {
 	if err := json.Unmarshal(launchBytes, &launch); err != nil {
 		t.Fatal(err)
 	}
-	entry := fakeInvocation{Args: args, Token: os.Getenv(launchTokenEnv), Launch: launch, CallNumber: callNumber}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := fakeInvocation{Args: args, CWD: cwd, Token: os.Getenv(launchTokenEnv), Launch: launch, CallNumber: callNumber}
 	encoded, err := json.Marshal(entry)
 	if err != nil {
 		t.Fatal(err)
@@ -231,8 +294,8 @@ func TestLaunchFakeOMPResumesWithCurrentCWDAndNoPromptReplay(t *testing.T) {
 	if !containsPair(second, "--config", filepath.Join(root, "project", "settings.json")) || !containsPair(second, "--system-prompt-template", filepath.Join(root, "project", "prompts/system.txt")) {
 		t.Fatalf("restart paths were not normalized against effective cwd: %#v", second)
 	}
-	if !containsPair(second, "--cwd", cwd) || !containsPair(second, "--resume", session) {
-		t.Fatalf("restart did not use the handoff cwd/session: %#v", second)
+	if calls[1].CWD != cwd || !containsPair(second, "-r", session) || contains(second, "--cwd") {
+		t.Fatalf("restart did not use the handoff process cwd/session: cwd=%q args=%#v", calls[1].CWD, second)
 	}
 }
 

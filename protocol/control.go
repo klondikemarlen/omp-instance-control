@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -216,6 +217,26 @@ type Data struct {
 	LastRestart     *Restart `json:"lastRestart,omitempty"`
 	CanRestart      bool     `json:"canRestart"`
 	Message         string   `json:"message,omitempty"`
+	// Received data is immutable. Keep its wire payload so CLI JSON preserves
+	// explicit nulls, absent capability fields, and unrecognized host fields.
+	raw json.RawMessage
+}
+
+func (data *Data) UnmarshalJSON(encoded []byte) error {
+	type fields Data
+	if err := json.Unmarshal(encoded, (*fields)(data)); err != nil {
+		return err
+	}
+	data.raw = bytes.Clone(encoded)
+	return nil
+}
+
+func (data *Data) MarshalJSON() ([]byte, error) {
+	if data.raw != nil {
+		return data.raw, nil
+	}
+	type fields Data
+	return json.Marshal((*fields)(data))
 }
 
 // Response is the identity-correlated acknowledgement to a control request.

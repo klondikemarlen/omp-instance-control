@@ -12,8 +12,8 @@ import (
 func restartArguments(args []string, initialCwd string, builtinFlags *[]string) ([]string, string, string, error) {
 	profile := ""
 	cwd := initialCwd
-	kept := make([]string, 0, len(args)+4)
-	ambiguousFlag := ""
+	var kept []string
+	var restartError error
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -33,13 +33,13 @@ func restartArguments(args []string, initialCwd string, builtinFlags *[]string) 
 		if !hasInline && i+1 < len(args) {
 			next := args[i+1]
 			switch kind {
-			case valueRequired:
+			case valueRequired, valuePlan:
 				consumesNext = true
-			case valueOptional, valuePlan:
+			case valueOptional:
 				consumesNext = next != "" && !strings.HasPrefix(next, "-")
 			case valueUnknown:
-				if strings.HasPrefix(name, "--") && !strings.HasPrefix(next, "-") && ambiguousFlag == "" {
-					ambiguousFlag = name
+				if strings.HasPrefix(name, "--") && !strings.HasPrefix(next, "-") && restartError == nil {
+					restartError = fmt.Errorf("RESTART_ARGUMENTS_UNAVAILABLE: %s may consume the startup prompt; use --custom=value for an extension string flag", name)
 				}
 			}
 		}
@@ -53,25 +53,34 @@ func restartArguments(args []string, initialCwd string, builtinFlags *[]string) 
 		if name == "--cwd" && present {
 			cwd = absolutePath(initialCwd, value)
 		}
-		if isSessionSource(name) || name == "--goal" {
+		if isSessionSource(name) || name == "--goal" || name == "--cwd" {
 			continue
+		}
+		if (kind == valueRequired || kind == valuePlan) && !present && restartError == nil {
+			restartError = fmt.Errorf("RESTART_ARGUMENTS_UNAVAILABLE: %s lacks its value and could consume an injected restart option", name)
+		}
+		if !hasInline && (kind == valueRequired || kind == valuePlan) && strings.HasPrefix(value, "-") && restartError == nil {
+			restartError = fmt.Errorf("RESTART_ARGUMENTS_UNAVAILABLE: %s has a flag-looking value; use %s=value to make its consumption explicit", name, name)
+		}
+		if restartError != nil {
+			continue
+		}
+		if kept == nil {
+			kept = make([]string, 0, len(args))
 		}
 		kept = append(kept, arg)
 		if consumesNext {
 			kept = append(kept, value)
 		}
 	}
-	if ambiguousFlag != "" {
-		return nil, profile, cwd, fmt.Errorf("RESTART_ARGUMENTS_UNAVAILABLE: %s may consume the startup prompt; use --custom=value for an extension string flag", ambiguousFlag)
+	if restartError != nil {
+		return nil, profile, cwd, restartError
 	}
 	for index := 0; index < len(kept); index++ {
 		name, inlineValue, hasInline := splitFlag(kept[index])
 		kind := flagValueKind(name)
 		pathFlag := isPathFlag(name)
 		base := cwd
-		if name == "--cwd" {
-			base = initialCwd
-		}
 		if hasInline {
 			if pathFlag {
 				kept[index] = name + "=" + absolutePath(base, inlineValue)
@@ -79,7 +88,7 @@ func restartArguments(args []string, initialCwd string, builtinFlags *[]string) 
 			continue
 		}
 		if index+1 < len(kept) && (kind == valueRequired || kind == valueOptional || kind == valuePlan) {
-			if kind == valueRequired || !strings.HasPrefix(kept[index+1], "-") {
+			if kind == valueRequired || kind == valuePlan || !strings.HasPrefix(kept[index+1], "-") {
 				if pathFlag {
 					kept[index+1] = absolutePath(base, kept[index+1])
 				}

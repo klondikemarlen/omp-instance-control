@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -355,6 +356,64 @@ func TestRequestMissingSocketIsUnreachableAndOversizedAckUnknown(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Status != "unknown" {
 		t.Fatalf("oversized acknowledgement should remain unknown, got %#v", rows)
+	}
+}
+
+func TestNativeJSONPreservesStatusNullsAndRestartCapabilityAbsence(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		data string
+		want map[string]any
+	}{
+		{
+			name: "status",
+			data: `{"state":"running","sessionFile":null,"operationId":null,"lastRestart":null,"launcherManaged":true,"canRestart":false}`,
+			want: map[string]any{
+				"state": "running", "sessionFile": nil, "operationId": nil,
+				"lastRestart": nil, "launcherManaged": true, "canRestart": false,
+			},
+		},
+		{
+			name: "restart",
+			data: `{"state":"accepted","operationId":"operation-123","message":"Restart requested."}`,
+			want: map[string]any{
+				"state": "accepted", "operationId": "operation-123", "message": "Restart requested.",
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			transport, scope := testTransport(t)
+			record := testRecord(scope, testInstanceID)
+			if err := WritePrivateJSON(filepath.Join(transport.directory, testInstanceID+".json"), record); err != nil {
+				t.Fatal(err)
+			}
+			startSocketBytesWithRequest(t, transport, func(request protocol.Request) []byte {
+				return []byte(fmt.Sprintf(`{"version":1,"instanceId":%q,"requestId":%q,"ok":true,"data":%s}`+"\n", request.InstanceID, request.RequestID, testCase.data))
+			})
+			var rows []cli.Row
+			var err error
+			if testCase.name == "status" {
+				rows, err = cli.ListInstances(transport)
+			} else {
+				rows, err = cli.RestartInstances(transport, false, testInstanceID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(rows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output []struct {
+				Data map[string]any `json:"data"`
+			}
+			if err := json.Unmarshal(encoded, &output); err != nil {
+				t.Fatal(err)
+			}
+			if len(output) != 1 || !reflect.DeepEqual(output[0].Data, testCase.want) {
+				t.Fatalf("native JSON changed host field presence: %s", encoded)
+			}
+		})
 	}
 }
 
