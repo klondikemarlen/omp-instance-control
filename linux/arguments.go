@@ -9,7 +9,7 @@ import (
 // restartArguments mirrors OMP's public v18.8.7 flag tables. Unknown long
 // flags followed by a value-like token are deliberately ambiguous: that token
 // may be a string flag's value or the initial prompt, so neither is replayed.
-func restartArguments(args []string, initialCwd string, flagTypes map[string]string) ([]string, string, string, error) {
+func restartArguments(args []string, initialCwd string, builtinFlags *[]string) ([]string, string, string, error) {
 	profile := ""
 	cwd := initialCwd
 	kept := make([]string, 0, len(args)+4)
@@ -25,12 +25,8 @@ func restartArguments(args []string, initialCwd string, flagTypes map[string]str
 
 		name, inlineValue, hasInline := splitFlag(arg)
 		kind := flagValueKind(name)
-		if flagTypes != nil && kind != valueUnknown {
-			flagType := "boolean"
-			if kind != valueBoolean {
-				flagType = "string"
-			}
-			flagTypes[strings.TrimPrefix(name, "--")] = flagType
+		if builtinFlags != nil && kind != valueUnknown {
+			*builtinFlags = append(*builtinFlags, strings.TrimPrefix(name, "--"))
 		}
 		value, present := inlineValue, hasInline
 		consumesNext := false

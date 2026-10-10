@@ -13,17 +13,28 @@ for (const scenario of [
   {
     name: "ambiguous startup flag arity",
     launch: { restartError: "Ambiguous custom flag; use --custom=value." },
-    getFlag: () => undefined,
+    flags: [],
   },
   {
-    name: "extension shadowing a known boolean flag with a string value",
-    launch: { flagTypes: { "no-tools": "boolean" } },
-    getFlag: () => "literal startup value",
+    name: "an extension shadows a built-in boolean flag with a string value",
+    launch: { builtinFlags: ["no-tools"] },
+    flags: [["no-tools", "literal startup value"]],
   },
   {
-    name: "extension shadowing a known string flag with a boolean value",
-    launch: { flagTypes: { plan: "string" } },
-    getFlag: () => true,
+    name: "an extension shadows a built-in string flag with a boolean value",
+    launch: { builtinFlags: ["plan"] },
+    flags: [["plan", true]],
+  },
+  {
+    name: "an extension shares a built-in flag name and value type",
+    launch: { builtinFlags: ["no-tools"] },
+    flags: [["no-tools", true]],
+  },
+  {
+    name: "host extension-flag metadata is unavailable",
+    launch: { builtinFlags: ["model"] },
+    missingMetadata: true,
+    flags: [],
   },
 ]) {
   test(`when ${scenario.name} is detected, restart is rejected without requesting shutdown`, async () => {
@@ -42,6 +53,7 @@ for (const scenario of [
       scope,
       extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
       lastRestart: null,
+      builtinFlags: [],
       ...scenario.launch,
     })
     const environment = {
@@ -77,16 +89,17 @@ for (const scenario of [
         },
       },
     }
-    let flagsReady = false
+    const flagValues = new Map()
     try {
       await instanceControl({
         on(event, handler) {
           handlers.set(event, handler)
         },
         registerCommand() {},
-        getFlag: (name) => (flagsReady ? scenario.getFlag(name) : undefined),
+        getFlag: () => undefined,
+        runtime: scenario.missingMetadata ? undefined : { flagValues },
       })
-      flagsReady = true
+      for (const [name, value] of scenario.flags) flagValues.set(name, value)
       await handlers.get("session_start")({}, ctx)
       const transport = await createTransport(scope)
       const [record] = await transport.readRecords()

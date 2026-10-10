@@ -23,6 +23,7 @@ test("when agent-end arrives during shutdown, removed endpoint records stay remo
     scope,
     extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
     lastRestart: null,
+    builtinFlags: [],
   })
   const environment = {
     HOME: root,

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -24,14 +25,14 @@ const (
 )
 
 type launchRecord struct {
-	Version       int               `json:"version"`
-	Token         string            `json:"token"`
-	PID           int               `json:"pid"`
-	Scope         protocol.Scope    `json:"scope"`
-	ExtensionPath string            `json:"extensionPath"`
-	LastRestart   *restartRecord    `json:"lastRestart"`
-	RestartError  string            `json:"restartError,omitempty"`
-	FlagTypes     map[string]string `json:"flagTypes"`
+	Version       int            `json:"version"`
+	Token         string         `json:"token"`
+	PID           int            `json:"pid"`
+	Scope         protocol.Scope `json:"scope"`
+	ExtensionPath string         `json:"extensionPath"`
+	LastRestart   *restartRecord `json:"lastRestart"`
+	RestartError  string         `json:"restartError,omitempty"`
+	BuiltinFlags  []string       `json:"builtinFlags"`
 }
 
 type restartRecord struct {
@@ -69,8 +70,8 @@ func Launch(args []string, extensionPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	flagTypes := make(map[string]string)
-	restartArgs, profile, cwd, restartArgsErr := restartArguments(args, initialCwd, flagTypes)
+	builtinFlags := make([]string, 0, len(args)+1)
+	restartArgs, profile, cwd, restartArgsErr := restartArguments(args, initialCwd, &builtinFlags)
 	if err := ensureWorkingDirectory(cwd); err != nil {
 		return 0, err
 	}
@@ -111,6 +112,11 @@ func Launch(args []string, extensionPath string) (int, error) {
 			"PI_CODING_AGENT_DIR": scope.AgentDir,
 		})
 	}
+	extensionFlag := "--extension"
+	if slices.Contains(builtinFlags, "trusted-extension") {
+		extensionFlag = "--trusted-extension"
+	}
+	builtinFlags = append(builtinFlags, strings.TrimPrefix(extensionFlag, "--"))
 	var resumeFile string
 	for {
 		select {
@@ -124,7 +130,7 @@ func Launch(args []string, extensionPath string) (int, error) {
 		}
 		launch := launchRecord{
 			Version: 1, Token: token, PID: os.Getpid(), Scope: scope,
-			ExtensionPath: extensionPath, LastRestart: restart, FlagTypes: flagTypes,
+			ExtensionPath: extensionPath, LastRestart: restart, BuiltinFlags: builtinFlags,
 		}
 		if restartArgsErr != nil && restart == nil {
 			launch.RestartError = restartArgsErr.Error()
@@ -139,10 +145,6 @@ func Launch(args []string, extensionPath string) (int, error) {
 		currentArgs := args
 		if resumeFile != "" {
 			currentArgs = restartArgs
-		}
-		extensionFlag := "--extension"
-		if _, trusted := flagTypes["trusted-extension"]; trusted {
-			extensionFlag = "--trusted-extension"
 		}
 		childArgs := append([]string{extensionFlag, extensionPath}, currentArgs...)
 		if resumeFile != "" {

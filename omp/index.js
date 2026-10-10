@@ -120,11 +120,18 @@ export default async function instanceControl(pi) {
         ctx.ui.setStatus("instance-control", "instances: launcher required")
         return
       }
-      for (const [name, expectedType] of Object.entries(launch.flagTypes ?? {})) {
-        const value = pi.getFlag?.(name)
-        if (value !== undefined && typeof value !== expectedType) {
-          launch.restartError = `Extension flag --${name} changes built-in argument consumption; controlled restart is unavailable to prevent startup-message replay.`
-          break
+      if (launch.builtinFlags.length) {
+        // OMP 18.8.7's public getFlag() is extension-local. This read-only private
+        // boundary must fail closed until OMP exposes parsed flag metadata.
+        const flagValues = pi.runtime?.flagValues
+        if (!(flagValues instanceof Map)) {
+          launch.restartError =
+            "OMP's parsed extension flags are unavailable; controlled restart is disabled, but normal OMP invocation is unchanged."
+        } else {
+          const shadow = launch.builtinFlags.find((name) => flagValues.has(name))
+          if (shadow) {
+            launch.restartError = `Extension flag --${shadow} overrides a built-in OMP option used by this launch; controlled restart is disabled to prevent changed arguments or startup-message replay.`
+          }
         }
       }
 

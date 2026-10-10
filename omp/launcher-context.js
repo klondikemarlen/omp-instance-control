@@ -33,13 +33,10 @@ export async function readLauncherContext(env = process.env) {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher restart limitation is invalid.")
   }
   if (
-    launch.flagTypes !== undefined &&
-    (!launch.flagTypes ||
-      typeof launch.flagTypes !== "object" ||
-      Array.isArray(launch.flagTypes) ||
-      Object.values(launch.flagTypes).some((value) => value !== "string" && value !== "boolean"))
+    !Array.isArray(launch.builtinFlags) ||
+    launch.builtinFlags.some((name) => typeof name !== "string" || !name)
   ) {
-    throw new ProtocolError("INVALID_LAUNCHER", "Launcher argument types are invalid.")
+    throw new ProtocolError("INVALID_LAUNCHER", "Launcher built-in flag names are invalid.")
   }
 
   const handoffPath = path.join(directory, "handoff.json")
