@@ -14,10 +14,10 @@ The `ompi` executable is statically linked and does not require Node.js. OMP loa
 
 ## Installation
 
-The Ubuntu 26.04 (Resolute) package follows the existing Firefox-host PPA convention:
+The Ubuntu 26.04 (Resolute) package uses its own dedicated `ppa:klondikemarlen/omp-instance-control` archive. Install after the package has been published:
 
 ```bash
-sudo add-apt-repository ppa:klondikemarlen/omp-send-context
+sudo add-apt-repository ppa:klondikemarlen/omp-instance-control
 sudo apt update
 sudo apt install omp-instance-control
 ompi instances --version
@@ -118,11 +118,11 @@ git diff --check
 
 `make build` produces `dist/ompi` without cgo or runtime dependencies. The installed wrapper resolves its adapter relative to the real executable, not the working directory.
 
-Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Build and sign the Debian native source package from the merged release checkout:
+Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Create or verify the dedicated public [OMP Instance Control PPA](https://launchpad.net/~klondikemarlen/+archive/ubuntu/omp-instance-control) before uploading. Do not reuse another project's archive. Build and sign the Debian native source package from the merged release checkout:
 
 ```bash
 dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
-dput ppa:klondikemarlen/omp-send-context ../omp-instance-control_0.2.0~ppa1_source.changes
+dput ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.2.0~ppa1_source.changes
 ```
 
 Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/instances` autocomplete in fresh isolated OMP processes. System installation additionally requires authorized apt access; extracted-package QA is not a system-install claim.

@@ -33,6 +33,7 @@ Keep shared code independent of Linux paths. Do not scatter `process.platform` b
 - Keep import groups contiguous with one blank line between groups. Use one blank line between unrelated logical blocks. Prefer `Promise.withResolvers()` for event-based completion.
 - Run gofmt, Go behavior checks/vet, Prettier, and `git diff --check`. Keep Go package tests beside the native code they exercise; keep adapter integration tests under `test/<integration>/`. Exercise real isolated multi-instance OMP terminals for lifecycle changes.
 - Keep credentials, environment files, sockets, and session/runtime state out of Git. Do not create `.envrc.example`.
+- Publish Ubuntu packages only through the dedicated `ppa:klondikemarlen/omp-instance-control` archive. Reuse sibling layout or packaging conventions, not another project's PPA.
 - Do not modify configured model routes. Runtime release QA must uninstall the isolated QA installation, install the released artifact, verify its version, then exercise behavior and autocomplete in fresh OMP processes; current processes retain loaded modules.
 
 ## Development Checks
