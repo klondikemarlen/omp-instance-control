@@ -6,7 +6,7 @@
 
 - Replace the Node.js launcher with the statically linked Go `ompi` executable. Bare `ompi` launches OMP; standard arguments, subcommands, help/version, and noninteractive invocations pass through.
 - Move external instance control to `ompi instances list|restart`; retain the participating instance's `/instances` command. Remove the old npm executable and explicit `launch` interface.
-- Package the executable and public-API OMP adapter as a native Ubuntu Resolute package using the existing `ppa:klondikemarlen/omp-send-context` archive. The executable requires neither Node.js nor a separate plugin installation.
+- Package the executable and public-API OMP adapter as a native Ubuntu Resolute package using its own dedicated `ppa:klondikemarlen/omp-instance-control` archive. The executable requires neither Node.js nor a separate plugin installation.
 - Document per-feature ownership and removal criteria as supported OMP lifecycle and instance-control APIs arrive upstream.
 
 ### Safety
