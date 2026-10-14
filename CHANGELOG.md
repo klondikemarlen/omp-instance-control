@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 - 2026-10-14
+
+### Added
+
+- `/ompi take-over` prepares a safely quoted manual resume command for a plain-OMP session, shows it in a copy-and-confirm dialog, and requests OMP-owned graceful exit.
+- Preserve the exact saved transcript, current working directory, profile, configuration root, default agent-directory override, and runtime scope. Save preparation as session metadata without starting a model turn.
+- Refuse missing/empty/ephemeral transcripts, unsafe command values, unavailable native executables, and already wrapped sessions; revalidate after confirmation so a session switch cannot shut down the wrong conversation.
+
+### Limits
+
+- Relaunch requires one manual shell paste after OMP exits. No automatic handoff, process killing, terminal-input injection, or original startup-argument replay.
+
 ## 0.4.0 - 2026-10-14
 
 ### Changed
