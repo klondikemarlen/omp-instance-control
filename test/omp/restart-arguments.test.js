@@ -9,6 +9,36 @@ import { createTransport, writePrivateJson } from "../../linux/transport.js"
 import instanceControl from "../../omp/index.js"
 import { createRequest, getScope } from "../../protocol/index.js"
 
+function createEventBus() {
+  const listeners = new Map()
+  return {
+    emit(channel, value) {
+      for (const listener of listeners.get(channel) ?? []) {
+        listener(value)
+      }
+    },
+    on(channel, listener) {
+      let channelListeners = listeners.get(channel)
+      if (!channelListeners) {
+        channelListeners = new Set()
+        listeners.set(channel, channelListeners)
+      }
+      channelListeners.add(listener)
+      return () => channelListeners.delete(listener)
+    },
+  }
+}
+
+function createSdk() {
+  return {
+    KeybindingsManager: {
+      inMemory() {
+        return { matches: () => false }
+      },
+    },
+  }
+}
+
 for (const scenario of [
   {
     name: "ambiguous startup flag arity",
@@ -98,6 +128,8 @@ for (const scenario of [
     const flagValues = new Map()
     try {
       await instanceControl({
+        events: createEventBus(),
+        pi: createSdk(),
         on(event, handler) {
           handlers.set(event, handler)
         },

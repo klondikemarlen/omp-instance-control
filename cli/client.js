@@ -59,7 +59,12 @@ export async function restartInstances(transport, { all = false, instanceId } = 
             errorCode: response.error.code,
           }
         }
-        return { instanceId: record.instanceId, status: "accepted", data: response.data }
+        return {
+          record,
+          instanceId: record.instanceId,
+          status: "accepted",
+          data: response.data,
+        }
       } catch (error) {
         const status = UNREACHABLE_CODES.has(error.code)
           ? "unreachable"
@@ -92,7 +97,7 @@ export function formatRows(rows) {
         ? ` completed-after-relaunch:${safeText(row.data.lastRestart.operationId)}:${safeText(row.data.lastRestart.previousInstanceId)}`
         : ""
       const lifecycle =
-        row.status === "online" && row.data
+        row.data && (row.status === "online" || row.status === "restarted")
           ? ` launcher=${row.data.launcherManaged ? "managed" : "unmanaged"} canRestart=${row.data.canRestart === true}`
           : ""
       return `${safeText(id)}\t${safeText(status)}${cwd}${lifecycle}${restart}${details ? `\t${safeText(details)}` : ""}`

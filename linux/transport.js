@@ -337,7 +337,7 @@ export async function createTransport(scope, { env = process.env } = {}) {
     }
   }
 
-  function request(record, request) {
+  function request(record, request, { signal } = {}) {
     validateRecord(record, scope)
     const requestValue = validateRequest(request)
     if (requestValue.instanceId !== record.instanceId)
@@ -345,12 +345,31 @@ export async function createTransport(scope, { env = process.env } = {}) {
     const file = socketPath(directory, record.instanceId)
     const frame = encodeFrame(requestValue)
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason)
+        return
+      }
+
       const socket = net.createConnection(file)
       socket.setEncoding("utf8")
       let input = ""
       let bytes = 0
       let finished = false
-      const timer = setTimeout(
+      let timer
+      const finish = (error, value, rejectError = false) => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        signal?.removeEventListener("abort", handleAbort)
+        socket.destroy()
+        if (rejectError || error) {
+          reject(error)
+        } else {
+          resolve(value)
+        }
+      }
+      const handleAbort = () => finish(signal.reason, undefined, true)
+      timer = setTimeout(
         () =>
           finish(
             Object.assign(new Error("IPC response timed out; request outcome is unknown"), {
@@ -360,14 +379,12 @@ export async function createTransport(scope, { env = process.env } = {}) {
           ),
         REQUEST_TIMEOUT_MS
       )
-      const finish = (error, value) => {
-        if (finished) return
-        finished = true
-        clearTimeout(timer)
-        socket.destroy()
-        if (error) reject(error)
-        else resolve(value)
+      signal?.addEventListener("abort", handleAbort, { once: true })
+      if (signal?.aborted) {
+        handleAbort()
+        return
       }
+
       socket.setTimeout(REQUEST_TIMEOUT_MS, () =>
         finish(
           Object.assign(new Error("IPC response timed out; request outcome is unknown"), {
@@ -411,7 +428,11 @@ export async function createTransport(scope, { env = process.env } = {}) {
           )
         }
       })
-      socket.on("connect", () => socket.write(frame))
+      socket.on("connect", () => {
+        if (!finished) {
+          socket.write(frame)
+        }
+      })
     })
   }
 

@@ -1,12 +1,13 @@
 import { randomBytes } from "node:crypto"
 import { realpath, stat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
-import { parseArgs } from "node:util"
 
-import { formatRows, listInstances, restartInstances } from "../cli/client.js"
 import { createTransport } from "../linux/transport.js"
 import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
 import { readLauncherContext, writeRestartHandoff } from "./launcher-context.js"
+import { registerOmpiCommand } from "./command.js"
+
+const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
@@ -28,10 +29,23 @@ export default async function instanceControl(pi) {
   if (
     launch &&
     (await realpath(launch.extensionPath)) !== (await realpath(fileURLToPath(import.meta.url)))
-  )
+  ) {
     return
+  }
+
+  const claimProbe = { claimed: false }
+  pi.events.emit(ENTRY_CLAIM_EVENT, claimProbe)
+  if (claimProbe.claimed) {
+    return
+  }
+  const releaseClaim = pi.events.on(ENTRY_CLAIM_EVENT, (probe) => {
+    if (probe && typeof probe === "object") {
+      probe.claimed = true
+    }
+  })
 
   let runtime
+  const refreshCompletions = registerOmpiCommand(pi, { getRuntime: () => runtime })
 
   function record(ctx) {
     return {
@@ -114,10 +128,15 @@ export default async function instanceControl(pi) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    if (!isMainTerminal(ctx) || runtime) return
+    if (!isMainTerminal(ctx)) return
+    await refreshCompletions(ctx)
+    if (runtime) return
     try {
       if (!launch) {
-        ctx.ui.setStatus("instance-control", "instances: launcher required")
+        ctx.ui.setStatus(
+          "instance-control",
+          "peer control only; this session is not launcher-managed"
+        )
         return
       }
       // OMP 18.8.7's public getFlag() is extension-local. This read-only private
@@ -146,6 +165,7 @@ export default async function instanceControl(pi) {
         ctx.ui.notify(`Instance control: ${error.message}`, "error")
       })
       await refresh(ctx)
+      await refreshCompletions(ctx)
       ctx.ui.setStatus("instance-control", `instance ${runtime.instanceId.slice(0, 8)}`)
     } catch (error) {
       if (runtime) {
@@ -157,64 +177,40 @@ export default async function instanceControl(pi) {
     }
   })
 
-  pi.on("session_switch", async (_event, ctx) => refresh(ctx))
-  pi.on("session_branch", async (_event, ctx) => refresh(ctx))
-  pi.on("agent_end", async (_event, ctx) => refresh(ctx))
-
-  pi.on("session_shutdown", async (_event, ctx) => {
-    if (!runtime || !isMainTerminal(ctx)) return
-    const state = runtime
-    state.closing = true
-    try {
-      if (runtime.pending) {
-        writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx)
-      }
-    } finally {
-      await state.recordWrite?.catch(() => {})
-      await state.server.close()
-      await state.transport.removeRecord(state.instanceId)
-      runtime = undefined
-    }
+  pi.on("session_switch", async (_event, ctx) => {
+    await refresh(ctx)
+    if (isMainTerminal(ctx)) await refreshCompletions(ctx)
+  })
+  pi.on("session_branch", async (_event, ctx) => {
+    await refresh(ctx)
+    if (isMainTerminal(ctx)) await refreshCompletions(ctx)
+  })
+  pi.on("agent_end", async (_event, ctx) => {
+    await refresh(ctx)
+    if (isMainTerminal(ctx)) await refreshCompletions(ctx)
   })
 
-  pi.registerCommand("instances", {
-    description: "List launcher-managed Linux instances or request scoped restart",
-    handler: async (args, ctx) => {
-      if (!isMainTerminal(ctx) || !runtime) {
-        ctx.ui.notify("Instance control requires a main Linux terminal started with ompi.", "error")
-        return
-      }
-      try {
-        const { values, positionals } = parseArgs({
-          args: args.trim() ? args.trim().split(/\s+/) : [],
-          options: { all: { type: "boolean" }, instance: { type: "string" } },
-          allowPositionals: true,
-        })
-        const action = positionals[0] ?? "list"
-        if (positionals.length > 1 || (action !== "list" && action !== "restart")) {
-          throw new Error(
-            "Usage: /instances list | /instances restart --all | /instances restart --instance ID"
-          )
+  pi.on("session_shutdown", async (_event, ctx) => {
+    if (ctx.agent.kind !== "main") {
+      return
+    }
+    try {
+      if (runtime && isMainTerminal(ctx)) {
+        const state = runtime
+        state.closing = true
+        try {
+          if (runtime.pending) {
+            writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx)
+          }
+        } finally {
+          await state.recordWrite?.catch(() => {})
+          await state.server.close()
+          await state.transport.removeRecord(state.instanceId)
+          runtime = undefined
         }
-        if (action === "list" && (values.all || values.instance)) {
-          throw new Error("Target selectors apply only to restart.")
-        }
-        const rows =
-          action === "list"
-            ? await listInstances(runtime.transport)
-            : await restartInstances(runtime.transport, {
-                all: values.all,
-                instanceId: values.instance,
-              })
-        ctx.ui.notify(
-          formatRows(rows),
-          rows.some((row) => ["failed", "unknown", "unreachable"].includes(row.status))
-            ? "warning"
-            : "info"
-        )
-      } catch (error) {
-        ctx.ui.notify(error.message, "error")
       }
-    },
+    } finally {
+      releaseClaim()
+    }
   })
 }

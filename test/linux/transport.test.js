@@ -208,3 +208,28 @@ test("records and sockets are isolated by scope, and close destroys pending clie
   await server.close()
   await rejected
 })
+
+test("request cancellation interrupts a blocked socket probe", async () => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const record = makeRecord(SCOPE_A)
+  await transport.writeRecord(record)
+  const requestReceived = Promise.withResolvers()
+  const server = await transport.serve(INSTANCE_A, async (request) => {
+    assert.equal(request.action, "status")
+    requestReceived.resolve()
+    return new Promise(() => {})
+  })
+  const controller = new AbortController()
+  const cancellation = new Error("stop probing")
+
+  try {
+    const pending = transport.request(record, makeRequest(), { signal: controller.signal })
+    const rejected = assert.rejects(pending, (error) => error === cancellation)
+    await requestReceived.promise
+    controller.abort(cancellation)
+    await rejected
+  } finally {
+    await server.close()
+  }
+})

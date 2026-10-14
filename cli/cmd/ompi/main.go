@@ -17,8 +17,8 @@ import (
 var version = "dev"
 
 const instancesHelp = `Usage:
-  ompi instances list [--profile NAME] [--cwd PATH] [--json]
-  ompi instances restart (--all | --instance ID) [--profile NAME] [--cwd PATH] [--json] [--no-wait | --timeout DURATION]
+  ompi instances [list] [--profile NAME] [--json]
+  ompi instances restart (--all | --instance ID) [--profile NAME] [--json] [--no-wait]
   ompi instances --help
   ompi instances --version
 
@@ -73,58 +73,55 @@ func resolveExtension(executable string) string {
 }
 
 func runInstances(args []string) (int, error) {
-	if len(args) == 1 && args[0] == "--version" {
-		fmt.Printf("ompi %s\n", version)
-		return 0, nil
+	action := "list"
+	optionArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		action = args[0]
+		optionArgs = args[1:]
 	}
-	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Print(instancesHelp)
-		return 0, nil
-	}
-	if len(args) == 0 {
-		return 0, usageError("use 'ompi instances list' or 'ompi instances restart'")
-	}
-	action := args[0]
 	if action != "list" && action != "restart" {
 		return 0, usageError("use 'ompi instances list' or 'ompi instances restart'")
 	}
 	flags := flag.NewFlagSet("ompi instances "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profile := flags.String("profile", "", "OMP profile")
-	cwd := flags.String("cwd", "", "working directory")
 	jsonOutput := flags.Bool("json", false, "JSON output")
 	all := flags.Bool("all", false, "restart all discovered instances")
 	instance := flags.String("instance", "", "instance ID to restart")
 	noWait := flags.Bool("no-wait", false, "return after restart requests are accepted")
-	timeout := flags.Duration("timeout", 0, "maximum time to wait for restarts (0 means unlimited)")
-	if err := flags.Parse(args[1:]); err != nil {
+	help := flags.Bool("help", false, "show instance command help")
+	flags.BoolVar(help, "h", false, "show instance command help")
+	showVersion := flags.Bool("version", false, "show wrapper version")
+	if err := flags.Parse(optionArgs); err != nil {
 		return 0, usageError(err.Error())
 	}
-	timeoutSet, noWaitSet := false, false
+	if *help && *showVersion {
+		return 0, usageError("choose either --help or --version")
+	}
+	if *help {
+		fmt.Print(instancesHelp)
+		return 0, nil
+	}
+	if *showVersion {
+		fmt.Printf("ompi %s\n", version)
+		return 0, nil
+	}
+	restartOptionSet := false
 	flags.Visit(func(option *flag.Flag) {
-		if option.Name == "timeout" {
-			timeoutSet = true
-		}
-		if option.Name == "no-wait" {
-			noWaitSet = true
+		if option.Name == "all" || option.Name == "instance" || option.Name == "no-wait" {
+			restartOptionSet = true
 		}
 	})
 	if flags.NArg() != 0 {
 		return 0, usageError("unexpected positional argument")
 	}
-	if action == "list" && (*all || *instance != "" || noWaitSet || timeoutSet) {
-		return 0, usageError("--all, --instance, --no-wait, and --timeout are only valid with restart")
+	if action == "list" && restartOptionSet {
+		return 0, usageError("--all, --instance, and --no-wait are only valid with restart")
 	}
 	if action == "restart" && (*all == (*instance != "")) {
 		return 0, usageError("choose exactly one of --all or --instance <id>")
 	}
-	if *timeout < 0 {
-		return 0, usageError("--timeout must be nonnegative")
-	}
-	if noWaitSet && timeoutSet {
-		return 0, usageError("--no-wait and --timeout cannot be used together")
-	}
-	scope, err := protocol.GetScope(*profile, *cwd)
+	scope, err := protocol.GetScope(*profile, "")
 	if err != nil {
 		return 0, err
 	}
@@ -140,7 +137,7 @@ func runInstances(args []string) (int, error) {
 		return printRows(rows, *jsonOutput), nil
 	}
 
-	return runRestart(transport, *all, *instance, *jsonOutput, *noWait, *timeout)
+	return runRestart(transport, *all, *instance, *jsonOutput, *noWait)
 }
 
 func printRows(rows []cli.Row, jsonOutput bool) int {

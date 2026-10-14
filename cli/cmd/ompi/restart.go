@@ -7,12 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/klondikemarlen/omp-instance-control/cli"
 )
 
-func runRestart(transport cli.Transport, all bool, instanceID string, jsonOutput, noWait bool, timeout time.Duration) (int, error) {
+func runRestart(transport cli.Transport, all bool, instanceID string, jsonOutput, noWait bool) (int, error) {
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
@@ -28,12 +27,6 @@ func runRestart(transport cli.Transport, all bool, instanceID string, jsonOutput
 	}
 
 	if !noWait {
-		if timeout > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, timeout)
-			defer cancel()
-		}
-
 		var progress func([]cli.Row)
 		if renderer != nil {
 			progress = renderer.progress
@@ -53,10 +46,6 @@ func runRestart(transport cli.Transport, all bool, instanceID string, jsonOutput
 	if errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "Restart observation stopped; accepted requests can still restart.")
 		return 130, nil
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		fmt.Fprintln(os.Stderr, "Restart wait timed out; accepted requests can still restart.")
-		return 1, nil
 	}
 	if err != nil {
 		return 1, err
