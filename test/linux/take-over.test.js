@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 
-import { prepareTakeover } from "../../omp/take-over.js"
+import { prepareResumeCommand } from "../../linux/take-over.js"
 
 const scopeEnvironmentKeys = [
   "PI_CONFIG_DIR",
@@ -43,14 +43,8 @@ async function createSandbox(t, { cwdName, sessionName, executableName } = {}) {
   return { root, cwd, sessionFile, executable, resultFile }
 }
 
-function makeContext(cwd, sessionFile, sessionId = "persisted-session") {
-  return {
-    cwd,
-    sessionManager: {
-      getSessionId: () => sessionId,
-      getSessionFile: () => sessionFile,
-    },
-  }
+function makeSnapshot(cwd, sessionFile) {
+  return { cwd, sessionFile }
 }
 
 async function runCommand(command, resultFile) {
@@ -76,7 +70,7 @@ function injectionName(prefix, markerFile) {
   return `${prefix} ' $(touch ${path.basename(markerFile)})`
 }
 
-test("executes the exact named-profile session command with literal paths", async (t) => {
+test("when named-profile paths contain shell syntax, resume preserves literal arguments and scope", async (t) => {
   // Arrange
   const markerForPaths = path.join(tmpdir(), `ompi-injection-${randomUUID()}`)
   t.after(() => rm(markerForPaths, { force: true }))
@@ -99,7 +93,7 @@ test("executes the exact named-profile session command with literal paths", asyn
     XDG_RUNTIME_DIR: runtimeDirectory,
   }
   const configRoot = path.resolve(home, configRelative)
-  const command = await prepareTakeover(makeContext(sandbox.cwd, sandbox.sessionFile), {
+  const command = await prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), {
     env,
     executable: sandbox.executable,
   })
@@ -120,7 +114,7 @@ test("executes the exact named-profile session command with literal paths", asyn
   await assert.rejects(readFile(markerForPaths), { code: "ENOENT" })
 })
 
-test("executes the default-profile command with its resolved config and agent directories", async (t) => {
+test("when the default profile overrides its agent directory, resume preserves resolved scope", async (t) => {
   // Arrange
   const markerForPaths = path.join(tmpdir(), `ompi-default-injection-${randomUUID()}`)
   t.after(() => rm(markerForPaths, { force: true }))
@@ -141,7 +135,7 @@ test("executes the default-profile command with its resolved config and agent di
   }
   const configRoot = path.resolve(home, configRelative)
   const agentDirectory = path.resolve(process.cwd(), agentRelative)
-  const command = await prepareTakeover(makeContext(sandbox.cwd, sandbox.sessionFile), {
+  const command = await prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), {
     env,
     executable: sandbox.executable,
   })
@@ -162,33 +156,33 @@ test("executes the default-profile command with its resolved config and agent di
   await assert.rejects(readFile(markerForPaths), { code: "ENOENT" })
 })
 
-test("rejects unavailable transcripts and control characters without executing ompi", async (t) => {
+test("when transcript paths are unavailable or unsafe, preparation rejects without execution", async (t) => {
   // Arrange
   const transcriptCases = [
     {
-      name: "a session that was not persisted",
+      name: "the session was not persisted",
       sessionFile: null,
       createSession: true,
     },
     {
-      name: "a missing transcript file",
+      name: "the transcript file is missing",
       sessionFile: "missing-session.jsonl",
       createSession: false,
     },
     {
-      name: "a directory instead of a transcript file",
+      name: "the transcript path is a directory",
       sessionFile: "session-directory",
       createSession: "directory",
     },
     {
-      name: "an empty transcript file",
+      name: "the transcript file is empty",
       sessionFile: "empty-session.jsonl",
       createSession: "empty",
     },
   ]
 
   for (const scenario of transcriptCases) {
-    await t.test(scenario.name, async (subtest) => {
+    await t.test(`when ${scenario.name}, preparation rejects`, async (subtest) => {
       // Arrange
       const sandbox = await createSandbox(subtest)
       const sessionPath =
@@ -202,7 +196,7 @@ test("rejects unavailable transcripts and control characters without executing o
       }
 
       // Act
-      const preparation = prepareTakeover(makeContext(sandbox.cwd, sessionPath), {
+      const preparation = prepareResumeCommand(makeSnapshot(sandbox.cwd, sessionPath), {
         env: { PATH: "/usr/bin:/bin" },
         executable: sandbox.executable,
       })
@@ -214,45 +208,48 @@ test("rejects unavailable transcripts and control characters without executing o
   }
 
   for (const invalidValue of ["cwd", "session"]) {
-    await t.test(`rejects control characters in ${invalidValue}`, async (subtest) => {
-      // Arrange
-      const sandbox = await createSandbox(subtest, {
-        cwdName: invalidValue === "cwd" ? "work\nline" : "worktree",
-        sessionName: invalidValue === "session" ? "session\nline.jsonl" : "session.jsonl",
-      })
+    await t.test(
+      `when ${invalidValue} contains control characters, preparation rejects`,
+      async (subtest) => {
+        // Arrange
+        const sandbox = await createSandbox(subtest, {
+          cwdName: invalidValue === "cwd" ? "work\nline" : "worktree",
+          sessionName: invalidValue === "session" ? "session\nline.jsonl" : "session.jsonl",
+        })
 
-      // Act
-      const preparation = prepareTakeover(makeContext(sandbox.cwd, sandbox.sessionFile), {
-        env: { PATH: "/usr/bin:/bin" },
-        executable: sandbox.executable,
-      })
+        // Act
+        const preparation = prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), {
+          env: { PATH: "/usr/bin:/bin" },
+          executable: sandbox.executable,
+        })
 
-      // Assert
-      await assert.rejects(preparation)
-      await assert.rejects(readFile(sandbox.resultFile), { code: "ENOENT" })
-    })
+        // Assert
+        await assert.rejects(preparation)
+        await assert.rejects(readFile(sandbox.resultFile), { code: "ENOENT" })
+      }
+    )
   }
 })
 
-test("rejects takeover when ompi cannot be found on PATH", async (t) => {
+test("when ompi is absent from PATH, preparation rejects", async (t) => {
   // Arrange
   const sandbox = await createSandbox(t)
   const env = { HOME: sandbox.root, PATH: path.join(sandbox.root, "missing-bin") }
 
   // Act
-  const preparation = prepareTakeover(makeContext(sandbox.cwd, sandbox.sessionFile), { env })
+  const preparation = prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), { env })
 
   // Assert
   await assert.rejects(preparation)
 })
 
-test("rejects a relative runtime directory that the wrapper cannot use", async (t) => {
+test("when the runtime directory is relative, preparation rejects", async (t) => {
   // Arrange
   const sandbox = await createSandbox(t)
   const env = { HOME: sandbox.root, XDG_RUNTIME_DIR: "relative-runtime" }
 
   // Act
-  const preparation = prepareTakeover(makeContext(sandbox.cwd, sandbox.sessionFile), {
+  const preparation = prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), {
     env,
     executable: sandbox.executable,
   })
