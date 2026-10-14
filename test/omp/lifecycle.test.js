@@ -9,6 +9,36 @@ import { createTransport, writePrivateJson } from "../../linux/transport.js"
 import instanceControl from "../../omp/index.js"
 import { getScope } from "../../protocol/index.js"
 
+function createEventBus() {
+  const listeners = new Map()
+  return {
+    emit(channel, value) {
+      for (const listener of listeners.get(channel) ?? []) {
+        listener(value)
+      }
+    },
+    on(channel, listener) {
+      let channelListeners = listeners.get(channel)
+      if (!channelListeners) {
+        channelListeners = new Set()
+        listeners.set(channel, channelListeners)
+      }
+      channelListeners.add(listener)
+      return () => channelListeners.delete(listener)
+    },
+  }
+}
+
+function createSdk() {
+  return {
+    KeybindingsManager: {
+      inMemory() {
+        return { matches: () => false }
+      },
+    },
+  }
+}
+
 test("when agent-end arrives during shutdown, removed endpoint records stay removed", async () => {
   // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-life-"))
@@ -54,6 +84,8 @@ test("when agent-end arrives during shutdown, removed endpoint records stay remo
   }
   try {
     await instanceControl({
+      events: createEventBus(),
+      pi: createSdk(),
       on(event, handler) {
         handlers.set(event, handler)
       },

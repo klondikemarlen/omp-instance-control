@@ -23,13 +23,15 @@ A control endpoint belongs to a main interactive launch, not a subagent or persi
 3. After acknowledgement flush, the extension calls public `ctx.shutdown()` once. It does not poll `ctx.isIdle()` or equate `agent_end` with settlement.
 4. OMP waits for its settled boundary, including queued submissions and background deliveries. During `session_shutdown`, the extension synchronously captures the current session file and cwd in a private atomic handoff, then removes its endpoint.
 5. After successful child exit, the launcher validates and consumes the handoff once. It relaunches with inherited terminal streams, retained configuration, and the current absolute session file; it strips the original messages and old selector.
-6. A fresh mounted endpoint exposes `lastRestart.operationId` and `lastRestart.previousInstanceId`. The external CLI waits until a live status probe confirms both values against the accepted operation and original instance. Acceptance, disappearance, or PID changes alone are not completion.
+6. A fresh mounted endpoint exposes `lastRestart.operationId` and `lastRestart.previousInstanceId`. External CLI and in-OMP peer observation wait until a live status probe confirms both values against the accepted operation and original instance. Acceptance, disappearance, or PID changes alone are not completion.
 
 Normal exit without a handoff does not restart. Nonzero child exit and launcher termination signals prevent relaunch. A native OMP `/restart` can replace the child in-place; its new plugin binding clears a same-token handoff so a later `/exit` cannot replay it.
 
 A request accepted before a manual graceful exit may be satisfied by that exit. A request whose acknowledgement is lost has an unknown outcome; clients never retry automatically. Stale records are reported as unreachable rather than pruning state based on PID guesses.
 
-CLI observation has no default deadline. Optional timeout or Ctrl-C stops watching without cancelling an accepted restart or killing OMP. Missing endpoints and status connections closed during teardown remain a `restarting` transition; malformed or uncorrelated acknowledgements remain unknown, never successful. In-session commands stay request-only because waiting in the selected session would block its own settlement.
+Observation has no default deadline. Ctrl-C stops watching without cancelling an accepted restart or killing OMP. Missing endpoints and status connections closed during teardown remain a `restarting` transition; malformed or uncorrelated acknowledgements remain unknown, never successful. In-session peer commands wait by default, but any selection containing the invoking wrapped session returns acceptance for the whole snapshot because waiting would block its own settlement. `--no-wait` is explicit on both surfaces.
+
+The installed controller can run in ordinary OMP without publishing an endpoint. Only a launcher-managed main terminal is a restart target. Installed and injected extension paths can both be bound by the host, even when they resolve to the same file. A synchronous claim on the public extension event bus gives that host one registration owner; shutdown releases the claim. It does not use PID identity, private registration state, or process-global ownership.
 
 ## Scope and Trust
 

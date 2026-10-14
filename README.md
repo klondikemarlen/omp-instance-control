@@ -23,9 +23,18 @@ sudo apt install omp-instance-control
 ompi instances --version
 ```
 
-The package installs `/usr/bin/ompi` and the adapter under `/usr/share/omp-instance-control/`. No separate OMP plugin installation is required. Existing processes retain their loaded modules; launch fresh processes after installation or upgrade.
+The package installs `/usr/bin/ompi` and the plugin under `/usr/share/omp-instance-control/`. `ompi` loads it automatically; no separate plugin installation is required for wrapped sessions. Existing processes retain their loaded modules; launch fresh processes after installation or upgrade.
 
 The old npm launcher and `omp-instance-control launch` interface are replaced, not aliased. If previously installed globally through npm, remove that old package with `npm uninstall --global omp-instance-control`. Installing only the adapter cannot add instance control to ordinary unwrapped sessions.
+
+To use `/ompi instances` from ordinary `omp`, install the controller through OMP's public plugin manager:
+
+```bash
+omp plugin install github:klondikemarlen/omp-instance-control
+omp plugin list
+```
+
+Start a fresh OMP process afterward. This adds peer controls, not an endpoint or self-restart capability to an unwrapped process. Restartable sessions still launch with `ompi`. Installing the plugin alongside the wrapper does not register duplicate commands or endpoints.
 
 ## Usage
 
@@ -47,6 +56,7 @@ From another terminal:
 
 ```bash
 ompi instances list
+ompi instances
 ompi instances restart --instance FULL_INSTANCE_ID
 ompi instances restart --all
 ompi instances list --profile work --json
@@ -55,17 +65,25 @@ ompi instances --help
 
 External restart waits until every accepted target has a verified live replacement. A terminal shows updating rows with compact instance IDs and the current project directory; redirected output logs state changes without cursor-control sequences. Small terminals, long rows, and non-ASCII paths use the same append-only fallback. `ompi instances list` and JSON retain full instance IDs.
 
-Use `ompi instances restart --all --no-wait` for acknowledgement-only behavior, or `ompi instances restart --all --timeout 2m` to bound completion observation after acknowledgement. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. A timeout exits with status 1 and reports the incomplete rows. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
+Use `ompi instances restart --all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
-From a participating OMP instance:
+From OMP with the plugin loaded:
 
 ```text
-/instances list
-/instances restart --instance FULL_INSTANCE_ID
-/instances restart --all
+/ompi instances
+/ompi instances list --json
+/ompi instances restart --instance FULL_INSTANCE_ID
+/ompi instances restart --all
+/ompi instances list --profile work
+/ompi instances --help
+/ompi instances --version
 ```
 
-The in-session `/instances restart` command remains acknowledgement-only: waiting for its own relaunch would prevent shutdown. Use `--no-wait` for the same reason when invoking the external command as an OMP tool in a selected session.
+Both surfaces expose `list` and `restart`, with five control options: `--all`, `--instance ID`, `--profile NAME`, `--json`, and `--no-wait`. `instances` defaults to listing; restart requires an explicit selector. Control-command `--cwd` and `--timeout` are removed; standard OMP launch arguments, including `--cwd`, are unchanged.
+
+Inside OMP, peer restart waits with visible progress and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
+
+Argument autocomplete covers the namespace, actions, options, and full online instance IDs. ID suggestions are cached per profile/config-root scope and refreshed at startup, after listing or observed peer relaunch, and on session lifecycle events. List the selected profile first to refresh its IDs. The former `/instances` command is removed, not aliased.
 
 `--all` selects a snapshot in the current profile/config-root scope. Replacement instances do not receive the old request. Select another profile explicitly with control-command `--profile`; use the same `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and `XDG_RUNTIME_DIR` as the participating launchers. Named profiles ignore `PI_CODING_AGENT_DIR`, as OMP does.
 
@@ -77,7 +95,7 @@ The wrapper does not register or shadow OMP flags. A parsed extension value shar
 
 - `accepted` means OMP's graceful shutdown was requested, not that restart completed. Active turns, queued submissions, and background jobs remain OMP's responsibility. A stuck instance stays pending; the helper never kills it.
 - A replacement's `lastRestart` identifies the completed operation and previous instance. Every boot has a fresh instance identity, independent of PID or transcript ID.
-- External CLI progress distinguishes `waiting` for OMP settlement, `restarting` through endpoint transitions, and `restarted` after a live replacement confirms both the operation ID and previous instance ID. Disappearance or a PID change alone never proves completion; closing status connections are transient, not failures.
+- External CLI and in-OMP peer progress distinguish `waiting` for OMP settlement, `restarting` through endpoint transitions, and `restarted` after a live replacement confirms both the operation ID and previous instance ID. Disappearance or a PID change alone never proves completion; closing status connections are transient, not failures.
 - `failed` reports explicit rejection, including a missing persisted session or no matching target. `unreachable` means a missing/refused endpoint; `unknown` means acknowledgement was inconclusive. Requests are never automatically replayed.
 - Normal `/exit`, unsuccessful child exit, and termination signals do not relaunch. Handoffs are validated and consumed once after successful child exit.
 - Relaunch resumes the actual current session file and cwd, not the original selector. Original configuration paths and relative default-profile agent-directory overrides remain anchored across directory changes.
@@ -129,9 +147,9 @@ Follow issue-named branches, linked PRs, complete self-review, focused QA, and m
 
 ```bash
 dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
-dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.3.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.4.0~ppa1_source.changes
 ```
 
-Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/instances` autocomplete in fresh isolated OMP processes. System installation additionally requires authorized apt access; extracted-package QA is not a system-install claim.
+Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/ompi instances` autocomplete in fresh isolated OMP processes. Also uninstall/reinstall the public GitHub plugin and verify its version and ordinary-OMP peer controls in a fresh process. System installation additionally requires authorized apt access; isolated-root QA is not a system-install claim.
 
 Runtime QA uses isolated homes/config roots and real terminals. Verify current session/cwd, fresh module loading, profile isolation, duplicate-request coalescing, normal exit, and settlement with queued prompts/background delivery. Do not change the operator's configured models, credentials, or plugins during QA.

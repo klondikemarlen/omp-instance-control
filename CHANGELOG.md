@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 - 2026-10-14
+
+### Changed
+
+- Replace `/instances` with `/ompi instances`, automatically loaded by the Ubuntu wrapper and installable through the public OMP plugin manager for ordinary-OMP peer control.
+- Mirror default listing, restart, help/version, and five control options inside and outside OMP: `--all`, `--instance`, `--profile`, `--json`, and `--no-wait`. Remove control-command `--cwd` and `--timeout`; ordinary OMP launch arguments are unchanged.
+- Wait for verified peer relaunch with in-OMP progress and cancellable observation. Self-selected snapshots return accepted/pending without waiting on their own shutdown.
+- Complete actions/options and full online instance IDs with profile-scoped caches.
+
+### Fixed
+
+- Claim one adapter binding through the public host event bus when installed and injected paths resolve to the same extension; avoid duplicate endpoints and self-wait deadlocks.
+- Match Ctrl-C through public in-memory keybindings, including extended terminal encodings, without changing user keybindings.
+- Preserve empty and repeated profile-option semantics between native and in-OMP controls.
+
 ## 0.3.0 - 2026-10-14
 
 ### Changed
