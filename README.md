@@ -157,12 +157,16 @@ git diff --check
 
 `make build` produces `dist/ompi` without cgo or runtime dependencies. The installed wrapper resolves its adapter relative to the real executable, not the working directory.
 
-Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Create or verify the dedicated public [OMP Instance Control PPA](https://launchpad.net/~klondikemarlen/+archive/ubuntu/omp-instance-control) before uploading. Do not reuse another project's archive. Build and sign the Debian native source package from the merged release checkout:
+Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Create or verify the dedicated public [OMP Instance Control PPA](https://launchpad.net/~klondikemarlen/+archive/ubuntu/omp-instance-control) before uploading. Do not reuse another project's archive. Prepare the unsigned Debian native source package from the merged release checkout, then sign the prepared files with `debsign` from `devscripts` (`sudo apt install --no-install-recommends devscripts`). It updates the signatures and upload checksums without rebuilding. Use the existing registered upload key and enter its passphrase only in your own terminal:
 
 ```bash
-dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
+dpkg-buildpackage -S -d -us -uc
+export GPG_TTY="$(tty)"
+debsign -kYOUR_UPLOAD_KEY ../omp-instance-control_0.5.2~ppa1_source.changes
 dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.2~ppa1_source.changes
 ```
+
+SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.
 
 Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/ompi instances` autocomplete in fresh isolated OMP processes. Also uninstall/reinstall the public GitHub plugin and verify its version and ordinary-OMP peer controls in a fresh process. System installation additionally requires authorized apt access; isolated-root QA is not a system-install claim.
 
