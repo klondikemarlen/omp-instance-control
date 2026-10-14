@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 - 2026-10-14
+
+### Changed
+
+- Wait for verified relaunch by default in external `ompi instances restart`, with per-instance terminal progress and transition-only output when redirected.
+- Add explicit `--no-wait` acknowledgement-only behavior and optional `--timeout DURATION`; JSON returns final completion results unless `--no-wait` is selected.
+- Keep in-session `/instances restart` request-only to avoid waiting on its own shutdown.
+
+### Fixed
+
+- Stop displaying omitted restart-acknowledgement capabilities as `launcher=unmanaged canRestart=false`.
+- Treat closing status connections and endpoint gaps as transient restart phases; require matching operation and previous-instance metadata from a live replacement before reporting success.
+- Cancel blocked status probes when observation is interrupted. Ctrl-C and timeout leave accepted OMP requests intact.
+
 ## 0.2.0 - 2026-10-09
 
 ### Changed
