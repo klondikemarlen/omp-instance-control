@@ -161,7 +161,7 @@ Follow issue-named branches, linked PRs, complete self-review, focused QA, and m
 
 ```bash
 dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
-dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.1~ppa1_source.changes
 ```
 
 Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/ompi instances` autocomplete in fresh isolated OMP processes. Also uninstall/reinstall the public GitHub plugin and verify its version and ordinary-OMP peer controls in a fresh process. System installation additionally requires authorized apt access; isolated-root QA is not a system-install claim.
