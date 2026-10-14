@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -eq 1 && ( "$1" == --help || "$1" == -h ) ]]; then
+  printf 'Usage: dev sign\nSign the current prepared source upload in build/debian/ using the existing maintainer key.\nNo build or upload is performed.\n'
+  exit 0
+fi
+
+if [[ $# -ne 0 ]]; then
+  printf 'Usage: dev sign\n' >&2
+  exit 2
+fi
+
+repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repository"
+source=$(dpkg-parsechangelog --show-field Source)
+version=$(dpkg-parsechangelog --show-field Version)
+changes="build/debian/${source}_${version}_source.changes"
+
+if [[ ! -f "$changes" ]]; then
+  printf 'Prepared source upload not found: %s\nRun dev package first.\n' "$changes" >&2
+  exit 1
+fi
+
+if ! command -v debsign >/dev/null; then
+  printf 'Install the signing helper: sudo apt install --no-install-recommends devscripts\n' >&2
+  exit 1
+fi
+
+if [[ ! -t 0 ]]; then
+  printf 'Run dev sign in your terminal so GPG can prompt locally.\n' >&2
+  exit 1
+fi
+
+GPG_TTY=$(tty)
+export GPG_TTY
+exec debsign --no-re-sign "$changes"

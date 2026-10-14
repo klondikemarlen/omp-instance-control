@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -gt 1 ]]; then
+  printf 'Usage: dev package [source|binary]\n' >&2
+  exit 2
+fi
+
+mode=${1:-source}
+case "$mode" in
+  source|binary) ;;
+  --help|-h)
+    printf 'Usage: dev package [source|binary]\nBuild unsigned packages from a clean tracked checkout into build/debian/.\n'
+    exit 0
+    ;;
+  *)
+    printf 'Usage: dev package [source|binary]\n' >&2
+    exit 2
+    ;;
+esac
+
+repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$repository"
+
+if [[ -n $(git status --porcelain) ]]; then
+  printf 'Commit or preserve local changes before packaging the tracked checkout.\n' >&2
+  exit 1
+fi
+
+source=$(dpkg-parsechangelog --show-field Source)
+version=$(dpkg-parsechangelog --show-field Version)
+output="$repository/build/debian"
+
+if [[ "$mode" == source ]]; then
+  artifacts=("$output/${source}_${version}.dsc" "$output/${source}_${version}.tar."* "$output/${source}_${version}_source."*)
+else
+  architecture=$(dpkg-architecture --query DEB_HOST_ARCH)
+  artifacts=("$output/${source}_${version}_${architecture}."*)
+fi
+
+for artifact in "${artifacts[@]}"; do
+  if [[ -e "$artifact" ]]; then
+    printf 'Package output already exists: %s\nKeep the existing release or increment debian/changelog before rebuilding.\n' "$artifact" >&2
+    exit 1
+  fi
+done
+
+staging="$output/$source"
+mkdir -p "$output"
+rm -rf -- "$staging"
+mkdir "$staging"
+trap 'rm -rf -- "$staging"' EXIT
+git archive HEAD | tar -xf - -C "$staging"
+
+cd "$staging"
+dpkg-buildpackage --no-pre-clean --build="$mode" -d -us -uc

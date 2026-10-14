@@ -1,6 +1,7 @@
 tar-ignore = .git
 tar-ignore = node_modules
 tar-ignore = dist
+tar-ignore = build
 tar-ignore = coverage
 tar-ignore = .env
 tar-ignore = .env.*
