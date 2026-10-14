@@ -34,7 +34,7 @@ omp plugin install github:klondikemarlen/omp-instance-control
 omp plugin list
 ```
 
-Start a fresh OMP process afterward. This adds peer controls, not an endpoint or self-restart capability to an unwrapped process. Restartable sessions still launch with `ompi`. Installing the plugin alongside the wrapper does not register duplicate commands or endpoints.
+Start a fresh OMP process afterward. This adds peer controls, not an endpoint or automatic self-restart capability to an unwrapped process. To move its saved conversation under the wrapper, use `/ompi take-over` below. Restartable sessions still launch with `ompi`. Installing the plugin alongside the wrapper does not register duplicate commands or endpoints.
 
 ## Usage
 
@@ -90,6 +90,20 @@ Argument autocomplete covers the namespace, actions, options, and full online in
 Use `--` before flag-shaped initial messages. Initial messages and startup session actions are never replayed after a controlled restart. For custom string-valued extension flags, use `--custom=value`; for custom boolean flags before a message, separate the message with `--`. An unknown bare flag followed by a non-flag token, a missing string value, or a flag-looking spaced string value makes controlled restart unavailable. Use `--system-prompt=--literal` for a flag-shaped string value. Initial OMP invocation still passes through unchanged.
 
 The wrapper does not register or shadow OMP flags. A parsed extension value sharing a built-in option used by the launch makes controlled restart unavailable rather than guessing its parsing or changing the original invocation. Ordinary spaced options such as `--model MODEL` remain supported.
+
+### Taking Over a Plain-OMP Session
+
+With the plugin loaded in ordinary `omp` and the native `ompi` executable on `PATH`, run:
+
+```text
+/ompi take-over
+```
+
+Copy the shell command from the dialog, then confirm graceful exit. After OMP has exited and your shell prompt returns, paste that command once in the same terminal. It resumes the exact saved session under `ompi`, preserving its current working directory, profile, config root, default-profile agent-directory override, and runtime-directory scope.
+
+The command is a snapshot of the session you selected; do not switch sessions while waiting for exit. Preparation is saved in session metadata without starting a model turn. Cancelling the dialog or changing sessions before confirmation leaves OMP running. Missing, empty, or ephemeral session files, an unavailable `ompi`, and control characters in command values are refused before shutdown. Already wrapped sessions use `/ompi instances restart` instead.
+
+OMP owns settlement, transcript persistence, teardown, and terminal release. There is no automatic takeover, process killing, terminal-input injection, or replay of original startup arguments. The manual paste is required because plain OMP has no wrapper parent to relaunch it.
 
 ## Outcomes and Safety
 
@@ -147,7 +161,7 @@ Follow issue-named branches, linked PRs, complete self-review, focused QA, and m
 
 ```bash
 dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
-dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.4.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.0~ppa1_source.changes
 ```
 
 Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/ompi instances` autocomplete in fresh isolated OMP processes. Also uninstall/reinstall the public GitHub plugin and verify its version and ordinary-OMP peer controls in a fresh process. System installation additionally requires authorized apt access; isolated-root QA is not a system-install claim.

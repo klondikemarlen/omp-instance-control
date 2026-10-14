@@ -33,6 +33,8 @@ Observation has no default deadline. Ctrl-C stops watching without cancelling an
 
 The installed controller can run in ordinary OMP without publishing an endpoint. Only a launcher-managed main terminal is a restart target. Installed and injected extension paths can both be bound by the host, even when they resolve to the same file. A synchronous claim on the public extension event bus gives that host one registration owner; shutdown releases the claim. It does not use PID identity, private registration state, or process-global ownership.
 
+`/ompi take-over` prepares a manually invoked resume command for an ordinary-OMP session. It resolves configuration paths against the host process directory, shell-quotes the current persisted session and cwd, displays a copy-and-confirm dialog, and revalidates the snapshot before public shutdown. The command is stored through public `appendEntry` without injecting a model message. OMP still owns settlement; the user waits for the shell and pastes the prepared command. This is not automatic executable or terminal handoff, and the prepared snapshot is not rewritten if the user switches sessions during a pending exit.
+
 ## Scope and Trust
 
 Scope includes OMP config root, normalized profile, and effective agent directory. Default-profile `PI_CODING_AGENT_DIR` overrides remain distinct; named profiles ignore that override, as OMP does. The Linux transport chooses its own private runtime path. Shared client code receives a transport object and never constructs Linux socket paths.

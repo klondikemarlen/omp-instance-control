@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -85,19 +85,24 @@ async function createFixture() {
   }
 }
 
-function createCommand(ctx, { runtime, cancelOnProgress = false } = {}) {
+function createCommand(ctx, { runtime, cancelOnProgress = false, confirmTakeover } = {}) {
   const commands = new Map()
   const notifications = []
+  const entries = []
   let terminalInput
   let cancelled = false
   const pi = {
     pi: createSdk(),
+    appendEntry(customType, data) {
+      entries.push({ customType, data })
+    },
     registerCommand(name, command) {
       commands.set(name, command)
     },
   }
   registerOmpiCommand(pi, { getRuntime: () => runtime })
   ctx.ui = {
+    confirm: confirmTakeover,
     notify(message, level) {
       notifications.push({ message, level })
     },
@@ -481,6 +486,137 @@ test("separate entry URLs claim one endpoint and a self-safe command", async () 
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
+    await fixture.close()
+  }
+})
+
+test("take-over with instance-control options leaves the session running", async () => {
+  // Arrange
+  const ctx = createContext(process.cwd())
+  let shutdownRequested = false
+  ctx.shutdown = () => {
+    shutdownRequested = true
+  }
+  const { command, notifications } = createCommand(ctx)
+
+  // Act
+  await command.handler("take-over --profile work", ctx)
+
+  // Assert
+  assert.equal(shutdownRequested, false)
+  assert.equal(notifications[0].level, "error")
+})
+
+test("take-over of an already managed session leaves it running", async () => {
+  // Arrange
+  const ctx = createContext(process.cwd())
+  let shutdownRequested = false
+  ctx.shutdown = () => {
+    shutdownRequested = true
+  }
+  const { command, notifications } = createCommand(ctx, { runtime: {} })
+
+  // Act
+  await command.handler("take-over", ctx)
+
+  // Assert
+  assert.equal(shutdownRequested, false)
+  assert.equal(notifications[0].level, "error")
+})
+
+test("take-over of an unpersisted session leaves it running", async () => {
+  // Arrange
+  const ctx = createContext(process.cwd())
+  ctx.sessionManager = {
+    getSessionId: () => "unpersisted-session",
+    getSessionFile: () => undefined,
+  }
+  let shutdownRequested = false
+  ctx.shutdown = () => {
+    shutdownRequested = true
+  }
+  const { command, notifications } = createCommand(ctx)
+
+  // Act
+  await command.handler("take-over", ctx)
+
+  // Assert
+  assert.equal(shutdownRequested, false)
+  assert.equal(notifications[0].level, "error")
+})
+
+test("cancelling the take-over dialog leaves the session running", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  const executable = path.join(fixture.root, "ompi")
+  const sessionFile = path.join(fixture.root, "session.jsonl")
+  await writeFile(executable, "#!/bin/sh\nexit 0\n")
+  await chmod(executable, 0o755)
+  await writeFile(sessionFile, "persisted session\n")
+  const previousPath = process.env.PATH
+  process.env.PATH = fixture.root
+  const ctx = createContext(fixture.cwd)
+  ctx.sessionManager = {
+    getSessionId: () => "persisted-session",
+    getSessionFile: () => sessionFile,
+  }
+  let shutdownRequested = false
+  ctx.shutdown = () => {
+    shutdownRequested = true
+  }
+  const { command, notifications } = createCommand(ctx, { confirmTakeover: async () => false })
+
+  try {
+    // Act
+    await command.handler("take-over", ctx)
+
+    // Assert
+    assert.equal(shutdownRequested, false)
+    assert.deepEqual(notifications, [])
+  } finally {
+    process.env.PATH = previousPath
+    await fixture.close()
+  }
+})
+
+test("a session switch during take-over confirmation prevents shutdown", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  const executable = path.join(fixture.root, "ompi")
+  const sessionFile = path.join(fixture.root, "session.jsonl")
+  const switchedFile = path.join(fixture.root, "switched.jsonl")
+  await writeFile(executable, "#!/bin/sh\nexit 0\n")
+  await chmod(executable, 0o755)
+  await writeFile(sessionFile, "persisted session\n")
+  await writeFile(switchedFile, "switched session\n")
+  const previousPath = process.env.PATH
+  process.env.PATH = fixture.root
+  let currentFile = sessionFile
+  const ctx = createContext(fixture.cwd)
+  ctx.sessionManager = {
+    getSessionId: () => "persisted-session",
+    getSessionFile: () => currentFile,
+  }
+  let shutdownRequested = false
+  ctx.shutdown = () => {
+    shutdownRequested = true
+  }
+  const { command, notifications } = createCommand(ctx, {
+    confirmTakeover: async () => {
+      currentFile = switchedFile
+      return true
+    },
+  })
+
+  try {
+    // Act
+    await command.handler("take-over", ctx)
+
+    // Assert
+    assert.equal(shutdownRequested, false)
+    assert.equal(notifications[0].level, "error")
+  } finally {
+    process.env.PATH = previousPath
     await fixture.close()
   }
 })
