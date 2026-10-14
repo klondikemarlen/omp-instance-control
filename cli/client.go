@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // Transport is the shared client surface implemented by Linux filesystem and IPC code.
 type Transport interface {
 	ReadRecords() ([]protocol.Record, error)
-	Request(protocol.Record, protocol.Request) (protocol.Response, error)
+	Request(context.Context, protocol.Record, protocol.Request) (protocol.Response, error)
 }
 
 // Row is the stable JSON result shape used by list and restart commands.
@@ -33,25 +34,26 @@ func ListInstances(transport Transport) ([]Row, error) {
 		return nil, err
 	}
 	rows := make([]Row, len(records))
+	ctx := context.Background()
 	var group sync.WaitGroup
 	group.Add(len(records))
 	for index := range records {
 		index := index
 		go func() {
 			defer group.Done()
-			rows[index] = listRecord(transport, records[index])
+			rows[index] = listRecord(ctx, transport, records[index])
 		}()
 	}
 	group.Wait()
 	return rows, nil
 }
 
-func listRecord(transport Transport, record protocol.Record) Row {
+func listRecord(ctx context.Context, transport Transport, record protocol.Record) Row {
 	request, err := protocol.CreateRequest(record.InstanceID, "status")
 	if err != nil {
 		return Row{Record: &record, Status: "failed", Error: err.Error()}
 	}
-	response, err := transport.Request(record, request)
+	response, err := transport.Request(ctx, record, request)
 	if err != nil {
 		return Row{Record: &record, Status: outcomeForError(err), Error: err.Error()}
 	}
@@ -90,25 +92,26 @@ func RestartInstances(transport Transport, all bool, instanceID string) ([]Row, 
 	}
 
 	rows := make([]Row, len(selected))
+	ctx := context.Background()
 	var group sync.WaitGroup
 	group.Add(len(selected))
 	for index := range selected {
 		index := index
 		go func() {
 			defer group.Done()
-			rows[index] = restartRecord(transport, selected[index])
+			rows[index] = restartRecord(ctx, transport, selected[index])
 		}()
 	}
 	group.Wait()
 	return rows, nil
 }
 
-func restartRecord(transport Transport, record protocol.Record) Row {
+func restartRecord(ctx context.Context, transport Transport, record protocol.Record) Row {
 	request, err := protocol.CreateRequest(record.InstanceID, "restart")
 	if err != nil {
 		return Row{InstanceID: record.InstanceID, Status: "failed", Error: err.Error()}
 	}
-	response, err := transport.Request(record, request)
+	response, err := transport.Request(ctx, record, request)
 	if err != nil {
 		return Row{InstanceID: record.InstanceID, Status: outcomeForError(err), Error: err.Error()}
 	}
@@ -120,7 +123,7 @@ func restartRecord(transport Transport, record protocol.Record) Row {
 			ErrorCode:  response.Error.Code,
 		}
 	}
-	return Row{InstanceID: record.InstanceID, Status: "accepted", Data: response.Data}
+	return Row{Record: &record, InstanceID: record.InstanceID, Status: "accepted", Data: response.Data}
 }
 
 func outcomeForError(err error) string {
@@ -168,7 +171,7 @@ func FormatRows(rows []Row) string {
 			restart = fmt.Sprintf(" completed-after-relaunch:%s:%s", safeText(row.Data.LastRestart.OperationID), safeText(row.Data.LastRestart.PreviousInstanceID))
 		}
 		lifecycle := ""
-		if row.Data != nil {
+		if row.Data != nil && (row.Status == "online" || row.Status == "restarted") {
 			lifecycle = fmt.Sprintf(" launcher=%s canRestart=%t", managedLabel(row.Data.LauncherManaged), row.Data.CanRestart)
 		}
 		line := safeText(id) + "\t" + safeText(row.Status) + cwd + lifecycle + restart

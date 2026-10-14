@@ -2,6 +2,7 @@ package linux
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/klondikemarlen/omp-instance-control/cli"
 	"github.com/klondikemarlen/omp-instance-control/protocol"
@@ -280,7 +282,7 @@ func TestRequestInteroperatesWithCorrelatedOMPResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := transport.Request(record, request)
+	response, err := transport.Request(context.Background(), record, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +347,7 @@ func TestRequestMissingSocketIsUnreachableAndOversizedAckUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transport.Request(record, request); !errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED) {
+	if _, err := transport.Request(context.Background(), record, request); !errors.Is(err, syscall.ENOENT) && !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Fatalf("missing socket should be unreachable, got %v", err)
 	}
 
@@ -414,6 +416,47 @@ func TestNativeJSONPreservesStatusNullsAndRestartCapabilityAbsence(t *testing.T)
 				t.Fatalf("native JSON changed host field presence: %s", encoded)
 			}
 		})
+	}
+}
+
+func TestRequestCancellationUnblocksAnUnresponsiveEndpoint(t *testing.T) {
+	transport, scope := testTransport(t)
+	record := testRecord(scope, testInstanceID)
+	request, err := protocol.CreateRequest(record.InstanceID, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	received := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	startSocketBytesWithRequest(t, transport, func(protocol.Request) []byte {
+		close(received)
+		<-release
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := transport.Request(ctx, record, request)
+		result <- err
+	}()
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("endpoint did not receive the status request")
+	}
+
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled status read must report context cancellation, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not release the blocked acknowledgement read")
 	}
 }
 

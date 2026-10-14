@@ -344,7 +344,7 @@ func isNullableObject(value json.RawMessage) bool {
 }
 
 // Request sends one bounded JSON frame and validates the correlated acknowledgement.
-func (transport *Transport) Request(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+func (transport *Transport) Request(ctx context.Context, record protocol.Record, request protocol.Request) (protocol.Response, error) {
 	if err := protocol.ValidateRecord(record, transport.scope); err != nil {
 		return protocol.Response{}, err
 	}
@@ -367,28 +367,45 @@ func (transport *Transport) Request(record protocol.Record, request protocol.Req
 		return protocol.Response{}, errors.New("IPC frame exceeds the maximum size")
 	}
 	deadline := time.Now().Add(requestTimeout)
-	dialContext, cancel := context.WithDeadline(context.Background(), deadline)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	dialContext, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	connection, err := (&net.Dialer{}).DialContext(dialContext, "unix", socket)
 	if err != nil {
 		return protocol.Response{}, err
 	}
 	defer connection.Close()
+	if ctx.Done() != nil {
+		stopCancellation := context.AfterFunc(ctx, func() { _ = connection.Close() })
+		defer stopCancellation()
+	}
 	if err := connection.SetDeadline(deadline); err != nil {
 		return protocol.Response{}, err
 	}
 	if err := writeAll(connection, frame); err != nil {
-		return protocol.Response{}, &AmbiguousError{Message: fmt.Sprintf("IPC request write failed; request outcome is unknown: %v", err)}
+		return protocol.Response{}, requestIOError(ctx, request, "IPC request write failed", err)
 	}
 	responseFrame, err := readFrame(connection)
 	if err != nil {
-		return protocol.Response{}, &AmbiguousError{Message: fmt.Sprintf("IPC acknowledgement unavailable; request outcome is unknown: %v", err)}
+		return protocol.Response{}, requestIOError(ctx, request, "IPC acknowledgement unavailable", err)
 	}
 	response, err := decodeResponse(responseFrame, request)
 	if err != nil {
 		return protocol.Response{}, &AmbiguousError{Message: fmt.Sprintf("Invalid IPC acknowledgement; request outcome is unknown: %v", err)}
 	}
 	return response, nil
+}
+
+func requestIOError(ctx context.Context, request protocol.Request, operation string, err error) error {
+	if request.Action == "status" {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return fmt.Errorf("%s: %w", operation, err)
+	}
+	return &AmbiguousError{Message: fmt.Sprintf("%s; request outcome is unknown: %v", operation, err)}
 }
 
 // AmbiguousError means a request may have reached OMP but no valid acknowledgement arrived.

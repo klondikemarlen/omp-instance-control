@@ -91,9 +91,10 @@ export function formatRows(rows) {
       const restart = row.data?.lastRestart
         ? ` completed-after-relaunch:${safeText(row.data.lastRestart.operationId)}:${safeText(row.data.lastRestart.previousInstanceId)}`
         : ""
-      const lifecycle = row.data
-        ? ` launcher=${row.data.launcherManaged ? "managed" : "unmanaged"} canRestart=${row.data.canRestart === true}`
-        : ""
+      const lifecycle =
+        row.status === "online" && row.data
+          ? ` launcher=${row.data.launcherManaged ? "managed" : "unmanaged"} canRestart=${row.data.canRestart === true}`
+          : ""
       return `${safeText(id)}\t${safeText(status)}${cwd}${lifecycle}${restart}${details ? `\t${safeText(details)}` : ""}`
     })
     .join("\n")

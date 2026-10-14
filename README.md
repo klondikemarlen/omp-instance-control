@@ -53,6 +53,10 @@ ompi instances list --profile work --json
 ompi instances --help
 ```
 
+External restart waits until every accepted target has a verified live replacement. A terminal shows updating rows with compact instance IDs and the current project directory; redirected output logs state changes without cursor-control sequences. Small terminals, long rows, and non-ASCII paths use the same append-only fallback. `ompi instances list` and JSON retain full instance IDs.
+
+Use `ompi instances restart --all --no-wait` for acknowledgement-only behavior, or `ompi instances restart --all --timeout 2m` to bound completion observation after acknowledgement. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. A timeout exits with status 1 and reports the incomplete rows. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
+
 From a participating OMP instance:
 
 ```text
@@ -60,6 +64,8 @@ From a participating OMP instance:
 /instances restart --instance FULL_INSTANCE_ID
 /instances restart --all
 ```
+
+The in-session `/instances restart` command remains acknowledgement-only: waiting for its own relaunch would prevent shutdown. Use `--no-wait` for the same reason when invoking the external command as an OMP tool in a selected session.
 
 `--all` selects a snapshot in the current profile/config-root scope. Replacement instances do not receive the old request. Select another profile explicitly with control-command `--profile`; use the same `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and `XDG_RUNTIME_DIR` as the participating launchers. Named profiles ignore `PI_CODING_AGENT_DIR`, as OMP does.
 
@@ -71,6 +77,7 @@ The wrapper does not register or shadow OMP flags. A parsed extension value shar
 
 - `accepted` means OMP's graceful shutdown was requested, not that restart completed. Active turns, queued submissions, and background jobs remain OMP's responsibility. A stuck instance stays pending; the helper never kills it.
 - A replacement's `lastRestart` identifies the completed operation and previous instance. Every boot has a fresh instance identity, independent of PID or transcript ID.
+- External CLI progress distinguishes `waiting` for OMP settlement, `restarting` through endpoint transitions, and `restarted` after a live replacement confirms both the operation ID and previous instance ID. Disappearance or a PID change alone never proves completion; closing status connections are transient, not failures.
 - `failed` reports explicit rejection, including a missing persisted session or no matching target. `unreachable` means a missing/refused endpoint; `unknown` means acknowledgement was inconclusive. Requests are never automatically replayed.
 - Normal `/exit`, unsuccessful child exit, and termination signals do not relaunch. Handoffs are validated and consumed once after successful child exit.
 - Relaunch resumes the actual current session file and cwd, not the original selector. Original configuration paths and relative default-profile agent-directory overrides remain anchored across directory changes.
@@ -122,7 +129,7 @@ Follow issue-named branches, linked PRs, complete self-review, focused QA, and m
 
 ```bash
 dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
-dput ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.2.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.3.0~ppa1_source.changes
 ```
 
 Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/instances` autocomplete in fresh isolated OMP processes. System installation additionally requires authorized apt access; extracted-package QA is not a system-install claim.

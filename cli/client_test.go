@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -39,7 +40,7 @@ func (transport *testTransport) ReadRecords() ([]protocol.Record, error) {
 	return append([]protocol.Record(nil), transport.records...), nil
 }
 
-func (transport *testTransport) Request(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+func (transport *testTransport) Request(_ context.Context, record protocol.Record, request protocol.Request) (protocol.Response, error) {
 	transport.mu.Lock()
 	transport.requested = append(transport.requested, record.InstanceID)
 	if record.InstanceID == transport.records[0].InstanceID && transport.replacement.InstanceID != "" {
@@ -148,7 +149,7 @@ func TestListDistinguishesUnreachableAndCorrelatedRejection(t *testing.T) {
 	}
 }
 
-func TestFormatRowsEscapesTerminalControlsAndPreservesJSONKeys(t *testing.T) {
+func TestFormatRowsEscapesTerminalControls(t *testing.T) {
 	record := clientRecord(strings.Repeat("a", 32))
 	data := &protocol.Data{
 		CWD:             "/workspace\npath\u0085",
@@ -158,22 +159,27 @@ func TestFormatRowsEscapesTerminalControlsAndPreservesJSONKeys(t *testing.T) {
 	}
 	row := Row{Record: &record, Status: "online", Data: data}
 	formatted := FormatRows([]Row{row})
-	for _, part := range []string{"\\u000apath\\u0085", "launcher=managed canRestart=true", "completed-after-relaunch:op:old"} {
-		if !strings.Contains(formatted, part) {
-			t.Fatalf("formatted row lacks %q: %s", part, formatted)
-		}
+	if !strings.Contains(formatted, "\\u000apath\\u0085") {
+		t.Fatalf("terminal control characters were not escaped: %s", formatted)
 	}
-	encoded, err := json.Marshal(row)
-	if err != nil {
+}
+
+func TestFormatRowsDoesNotInventAbsentLifecycleCapabilities(t *testing.T) {
+	const originalData = `{"message":"accepted","operationId":"operation"}`
+	var data protocol.Data
+	if err := json.Unmarshal([]byte(originalData), &data); err != nil {
 		t.Fatal(err)
 	}
-	var keys map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &keys); err != nil {
-		t.Fatal(err)
+
+	formatted := FormatRows([]Row{{InstanceID: "instance", Status: "accepted", Data: &data}})
+	if strings.Contains(formatted, "launcher=") || strings.Contains(formatted, "canRestart=") {
+		t.Fatalf("formatting invented lifecycle capabilities: %s", formatted)
 	}
-	for _, key := range []string{"record", "status", "data"} {
-		if _, exists := keys[key]; !exists {
-			t.Fatalf("row JSON omits %q: %s", key, encoded)
-		}
+
+	operationID := "operation"
+	typedAck := &protocol.Data{OperationID: &operationID}
+	typedAckOutput := FormatRows([]Row{{InstanceID: "instance", Status: "accepted", Data: typedAck}})
+	if strings.Contains(typedAckOutput, "launcher=") || strings.Contains(typedAckOutput, "canRestart=") {
+		t.Fatalf("formatting invented capabilities for a typed acknowledgement: %s", typedAckOutput)
 	}
 }

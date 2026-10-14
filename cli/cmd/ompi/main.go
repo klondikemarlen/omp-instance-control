@@ -18,7 +18,7 @@ var version = "dev"
 
 const instancesHelp = `Usage:
   ompi instances list [--profile NAME] [--cwd PATH] [--json]
-  ompi instances restart (--all | --instance ID) [--profile NAME] [--cwd PATH] [--json]
+  ompi instances restart (--all | --instance ID) [--profile NAME] [--cwd PATH] [--json] [--no-wait | --timeout DURATION]
   ompi instances --help
   ompi instances --version
 
@@ -95,17 +95,34 @@ func runInstances(args []string) (int, error) {
 	jsonOutput := flags.Bool("json", false, "JSON output")
 	all := flags.Bool("all", false, "restart all discovered instances")
 	instance := flags.String("instance", "", "instance ID to restart")
+	noWait := flags.Bool("no-wait", false, "return after restart requests are accepted")
+	timeout := flags.Duration("timeout", 0, "maximum time to wait for restarts (0 means unlimited)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return 0, usageError(err.Error())
 	}
+	timeoutSet, noWaitSet := false, false
+	flags.Visit(func(option *flag.Flag) {
+		if option.Name == "timeout" {
+			timeoutSet = true
+		}
+		if option.Name == "no-wait" {
+			noWaitSet = true
+		}
+	})
 	if flags.NArg() != 0 {
 		return 0, usageError("unexpected positional argument")
 	}
-	if action == "list" && (*all || *instance != "") {
-		return 0, usageError("--all and --instance are only valid with restart")
+	if action == "list" && (*all || *instance != "" || noWaitSet || timeoutSet) {
+		return 0, usageError("--all, --instance, --no-wait, and --timeout are only valid with restart")
 	}
 	if action == "restart" && (*all == (*instance != "")) {
 		return 0, usageError("choose exactly one of --all or --instance <id>")
+	}
+	if *timeout < 0 {
+		return 0, usageError("--timeout must be nonnegative")
+	}
+	if noWaitSet && timeoutSet {
+		return 0, usageError("--no-wait and --timeout cannot be used together")
 	}
 	scope, err := protocol.GetScope(*profile, *cwd)
 	if err != nil {
@@ -115,30 +132,39 @@ func runInstances(args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var rows []cli.Row
 	if action == "list" {
-		rows, err = cli.ListInstances(transport)
-	} else {
-		rows, err = cli.RestartInstances(transport, *all, *instance)
-	}
-	if err != nil {
-		return 0, err
-	}
-	if *jsonOutput {
-		encoded, err := json.Marshal(rows)
+		rows, err := cli.ListInstances(transport)
 		if err != nil {
 			return 0, err
 		}
-		fmt.Println(string(encoded))
+		return printRows(rows, *jsonOutput), nil
+	}
+
+	return runRestart(transport, *all, *instance, *jsonOutput, *noWait, *timeout)
+}
+
+func printRows(rows []cli.Row, jsonOutput bool) int {
+	if jsonOutput {
+		if err := json.NewEncoder(os.Stdout).Encode(rows); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	} else {
 		fmt.Println(cli.FormatRows(rows))
 	}
+	return restartExitCode(rows, false)
+}
+
+func restartExitCode(rows []cli.Row, waiting bool) int {
 	for _, row := range rows {
 		if row.Status == "failed" || row.Status == "unreachable" || row.Status == "unknown" {
-			return 1, nil
+			return 1
+		}
+		if waiting && row.Status != "restarted" {
+			return 1
 		}
 	}
-	return 0, nil
+	return 0
 }
 
 func usageError(message string) error {
