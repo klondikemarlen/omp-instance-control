@@ -8,4 +8,6 @@ Use private same-user local IPC rather than a public TCP listener. Do not use pr
 
 `take-over.js` accepts a plain session-file/cwd snapshot and owns Linux filesystem/permission checks, executable discovery, scope resolution, and the quoted POSIX resume command. It does not receive OMP host contexts or invoke UI/lifecycle methods. Its behavior tests live in `test/linux/`; host session capture and revalidation remain in `omp/`.
 
+`profiles.js` enumerates valid named-profile directories within one configuration root for cached OMP autocomplete. It includes `default` and the selected profile without creating directories or probing other profiles' control endpoints.
+
 Keep shared request semantics in [`../protocol/`](../protocol/README.md) and OMP host integration in [`../omp/`](../omp/README.md). Future macOS or Windows implementations belong in separate platform directories; none is supported or implemented now.

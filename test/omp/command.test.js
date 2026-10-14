@@ -245,6 +245,103 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
   }
 })
 
+test("when completing a profile value, candidates stay within the active configuration root", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    process.env.OMP_PROFILE = "active"
+    const profiles = path.join(fixture.root, "config", "profiles")
+    await mkdir(path.join(profiles, "work"), { recursive: true })
+    await mkdir(path.join(profiles, "invalid name"))
+    await writeFile(path.join(profiles, "not-a-profile"), "")
+    await mkdir(path.join(fixture.root, "other-config", "profiles", "private"), { recursive: true })
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+
+    // Act
+    await ui.command.handler("instances list", ctx)
+    const candidates = ui.command.getArgumentCompletions("instances list --profile ")
+
+    // Assert
+    assert.deepEqual(
+      candidates.map((item) => item.value),
+      [
+        "instances list --profile active",
+        "instances list --profile default",
+        "instances list --profile work",
+      ]
+    )
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when a profile value is inline, completion preserves its command and option prefix", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    await mkdir(path.join(fixture.root, "config", "profiles", "work"), { recursive: true })
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+    await ui.command.handler("instances list", ctx)
+
+    // Act
+    const candidates = ui.command.getArgumentCompletions("instances restart --json --profile=wo")
+
+    // Assert
+    assert.deepEqual(
+      candidates.map((item) => item.value),
+      ["instances restart --json --profile=work"]
+    )
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when default listing uses an inline profile, completion fills the profile value", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    await mkdir(path.join(fixture.root, "config", "profiles", "work"), { recursive: true })
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+    await ui.command.handler("instances", ctx)
+
+    // Act
+    const candidates = ui.command.getArgumentCompletions("instances --profile=wo")
+
+    // Assert
+    assert.deepEqual(
+      candidates.map((item) => item.value),
+      ["instances --profile=work"]
+    )
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when no named profiles exist, completion still offers the active and default profiles", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    process.env.OMP_PROFILE = "active"
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+
+    // Act
+    await ui.command.handler("instances list", ctx)
+    const candidates = ui.command.getArgumentCompletions("instances --profile ")
+
+    // Assert
+    assert.deepEqual(
+      candidates.map((item) => item.value),
+      ["instances --profile active", "instances --profile default"]
+    )
+  } finally {
+    await fixture.close()
+  }
+})
+
 test("when profile selection is empty or repeated, discovery uses the effective profile", async () => {
   // Arrange
   const fixture = await createFixture()

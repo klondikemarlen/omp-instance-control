@@ -3,6 +3,7 @@ import { parseArgs } from "node:util"
 import packageJson from "../package.json" with { type: "json" }
 import { formatRows, listInstances, restartInstances } from "../cli/client.js"
 import { waitForRestarts } from "../cli/restart-wait.js"
+import { listProfileNames } from "../linux/profiles.js"
 import { createTransport } from "../linux/transport.js"
 import { getScope } from "../protocol/index.js"
 import { prepareTakeover } from "./take-over.js"
@@ -226,7 +227,7 @@ function scopeInstanceIds(completionIds, cwd, tokens) {
   }
 }
 
-function getArgumentCompletions(argumentText, completionIds, cwd) {
+function getArgumentCompletions(argumentText, completionIds, profileNames, cwd) {
   const trailingSpace = /\s$/.test(argumentText)
   const tokens = argumentText.trim() ? argumentText.trim().split(/\s+/) : []
   let tokenPrefix = trailingSpace ? "" : (tokens.pop() ?? "")
@@ -262,7 +263,7 @@ function getArgumentCompletions(argumentText, completionIds, cwd) {
   if (completedTokens[0] !== "instances") {
     return null
   }
-  if (completedTokens.length === 1) {
+  if (completedTokens.length === 1 && !tokenPrefix.startsWith("--profile=")) {
     const defaults = [
       ...ACTION_COMPLETIONS,
       ...LIST_COMPLETIONS.filter((option) => !ACTION_COMPLETIONS.includes(option)),
@@ -311,8 +312,19 @@ function getArgumentCompletions(argumentText, completionIds, cwd) {
       .filter((id) => id.startsWith(idPrefix))
       .map((id) => completionItem(`${argumentPrefix}--instance=${id}`))
   }
-  if (optionTokens.at(-1) === "--profile" || tokenPrefix.startsWith("--profile=")) {
-    return null
+  if (optionTokens.at(-1) === "--profile") {
+    return completionValues(
+      profileNames.map((name) => completionItem(name)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (tokenPrefix.startsWith("--profile=")) {
+    return completionValues(
+      profileNames.map((name) => completionItem(`--profile=${name}`, name)),
+      completedTokens,
+      tokenPrefix
+    )
   }
 
   let options = action === "list" ? LIST_COMPLETIONS : RESTART_COMPLETIONS
@@ -362,12 +374,22 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   const keybindings = pi.pi.KeybindingsManager.inMemory({ "app.clear": "ctrl+c" })
   const completionIds = new Map()
   let completionCwd
+  let profileNames = ["default"]
+
+  async function refreshProfileNames(scope) {
+    try {
+      profileNames = await listProfileNames(scope)
+    } catch {
+      profileNames = [...new Set(["default", scope.profile])]
+    }
+  }
 
   async function refreshCompletionIds(ctx, profile) {
     completionCwd = ctx.cwd
     let scope
     try {
       scope = getScope({ cwd: ctx.cwd, profile: normalizeProfile(profile) })
+      await refreshProfileNames(scope)
       const transport = await createTransport(scope)
       const rows = await listInstances(transport)
       replaceCompletionIds(scope, rows, completionIds)
@@ -381,7 +403,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   pi.registerCommand(COMMAND, {
     description: "Control participating instances or prepare a manual takeover",
     getArgumentCompletions(argumentText) {
-      return getArgumentCompletions(argumentText, completionIds, completionCwd)
+      return getArgumentCompletions(argumentText, completionIds, profileNames, completionCwd)
     },
     async handler(args, ctx) {
       if (!isMainTerminal(ctx)) {
@@ -442,6 +464,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         if (action === "list") {
           const rows = await listInstances(transport)
           replaceCompletionIds(scope, rows, completionIds)
+          await refreshProfileNames(scope)
           notifyRows(ctx, rows, values.json === true)
           return
         }
