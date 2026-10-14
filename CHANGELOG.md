@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 - 2026-10-14
+
+### Fixed
+
+- Keep Linux takeover file/permission checks, executable discovery, environment handling, and shell command construction in `linux/`; keep public host session capture/revalidation in `omp/`.
+- Group the Linux takeover behavior tests under `test/linux/` and align affected test names with the shared verification baseline without changing their assertions.
+
 ## 0.5.0 - 2026-10-14
 
 ### Added

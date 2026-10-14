@@ -163,7 +163,7 @@ function createEventBus() {
   }
 }
 
-test("default listing uses ctx.cwd and explicit profile listing discovers that profile", async () => {
+test("when listing a selected profile, discovery uses its scope and ctx.cwd", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -245,7 +245,7 @@ test("default listing uses ctx.cwd and explicit profile listing discovers that p
   }
 })
 
-test("empty profile inherits the current profile and repeated profile completion uses the last value", async () => {
+test("when profile selection is empty or repeated, discovery uses the effective profile", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -275,7 +275,7 @@ test("empty profile inherits the current profile and repeated profile completion
   }
 })
 
-test("restart selectors and list-only restrictions reject invalid invocations", async () => {
+test("when restart selectors or list options conflict, the command rejects", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -300,7 +300,7 @@ test("restart selectors and list-only restrictions reject invalid invocations", 
   }
 })
 
-test("an explicitly false all flag leaves the instance selector effective", async () => {
+test("when all is explicitly false, the instance selector remains effective", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -327,7 +327,7 @@ test("an explicitly false all flag leaves the instance selector effective", asyn
   }
 })
 
-test("all-selected self restart returns pending acknowledgements without starting observation", async () => {
+test("when a broadcast selects this session, restart returns pending without observation", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -360,7 +360,7 @@ test("all-selected self restart returns pending acknowledgements without startin
   }
 })
 
-test("Ctrl-C cancels peer observation but leaves accepted restart pending", async () => {
+test("when Ctrl-C cancels peer observation, accepted restart remains pending", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -384,7 +384,7 @@ test("Ctrl-C cancels peer observation but leaves accepted restart pending", asyn
   }
 })
 
-test("separate entry URLs claim one endpoint and a self-safe command", async () => {
+test("when separate entry URLs bind one host, one endpoint and self-safe command are registered", async () => {
   // Arrange
   const fixture = await createFixture()
   const launchDirectory = path.join(fixture.root, "launch")
@@ -490,7 +490,7 @@ test("separate entry URLs claim one endpoint and a self-safe command", async () 
   }
 })
 
-test("take-over with instance-control options leaves the session running", async () => {
+test("when take-over receives instance-control options, the session stays running", async () => {
   // Arrange
   const ctx = createContext(process.cwd())
   let shutdownRequested = false
@@ -507,7 +507,7 @@ test("take-over with instance-control options leaves the session running", async
   assert.equal(notifications[0].level, "error")
 })
 
-test("take-over of an already managed session leaves it running", async () => {
+test("when take-over targets an already managed session, it stays running", async () => {
   // Arrange
   const ctx = createContext(process.cwd())
   let shutdownRequested = false
@@ -524,7 +524,7 @@ test("take-over of an already managed session leaves it running", async () => {
   assert.equal(notifications[0].level, "error")
 })
 
-test("take-over of an unpersisted session leaves it running", async () => {
+test("when take-over targets an unpersisted session, it stays running", async () => {
   // Arrange
   const ctx = createContext(process.cwd())
   ctx.sessionManager = {
@@ -545,7 +545,7 @@ test("take-over of an unpersisted session leaves it running", async () => {
   assert.equal(notifications[0].level, "error")
 })
 
-test("cancelling the take-over dialog leaves the session running", async () => {
+test("when the take-over dialog is cancelled, the session stays running", async () => {
   // Arrange
   const fixture = await createFixture()
   const executable = path.join(fixture.root, "ompi")
@@ -579,7 +579,7 @@ test("cancelling the take-over dialog leaves the session running", async () => {
   }
 })
 
-test("a session switch during take-over confirmation prevents shutdown", async () => {
+test("when the session switches during take-over confirmation, shutdown is refused", async () => {
   // Arrange
   const fixture = await createFixture()
   const executable = path.join(fixture.root, "ompi")
