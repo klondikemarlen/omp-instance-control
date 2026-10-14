@@ -83,7 +83,7 @@ Both surfaces expose `list` and `restart`, with five control options: `--all`, `
 
 Inside OMP, peer restart waits with visible progress and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
 
-Argument autocomplete covers the namespace, actions, options, and full online instance IDs. ID suggestions are cached per profile/config-root scope and refreshed at startup, after listing or observed peer relaunch, and on session lifecycle events. List the selected profile first to refresh its IDs. The former `/instances` command is removed, not aliased.
+Argument autocomplete covers the namespace, actions, options, configured profile names, and full online instance IDs. Profile values complete in both `--profile NAME` and `--profile=NAME` forms, including default listing without an explicit `list` action. Suggestions include `default` and the active profile and stay inside the current configuration root. ID suggestions are cached per profile/config-root scope and refreshed at startup, after listing or observed peer relaunch, and on session lifecycle events. List the selected profile first to refresh its IDs. The former `/instances` command is removed, not aliased.
 
 `--all` selects a snapshot in the current profile/config-root scope. Replacement instances do not receive the old request. Select another profile explicitly with control-command `--profile`; use the same `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and `XDG_RUNTIME_DIR` as the participating launchers. Named profiles ignore `PI_CODING_AGENT_DIR`, as OMP does.
 
@@ -161,7 +161,7 @@ Follow issue-named branches, linked PRs, complete self-review, focused QA, and m
 
 ```bash
 dpkg-buildpackage -S -d -kYOUR_UPLOAD_KEY
-dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.1~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.2~ppa1_source.changes
 ```
 
 Wait for Launchpad's Resolute/amd64 build and public package index before claiming publication. Download the released package, uninstall the isolated QA installation, reinstall that artifact, verify its installed version, and exercise standard commands, restart/resume, and `/ompi instances` autocomplete in fresh isolated OMP processes. Also uninstall/reinstall the public GitHub plugin and verify its version and ordinary-OMP peer controls in a fresh process. System installation additionally requires authorized apt access; isolated-root QA is not a system-install claim.

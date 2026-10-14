@@ -1,3 +1,10 @@
+omp-instance-control (0.5.2~ppa1) resolute; urgency=medium
+
+  * Complete profile names in spaced and inline OMP command options.
+  * Preserve configuration-root boundaries and live instance autocomplete.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 14 Oct 2026 16:00:00 -0700
+
 omp-instance-control (0.5.1~ppa1) resolute; urgency=medium
 
   * Keep Linux takeover preparation separate from OMP host lifecycle handling.

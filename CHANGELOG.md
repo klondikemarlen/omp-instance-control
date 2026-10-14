@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2 - 2026-10-14
+
+### Fixed
+
+- Complete configured profile names in spaced and inline `/ompi instances --profile` options, including default listing without an explicit action.
+- Keep profile candidates within the active configuration root and preserve action, option, and live instance-ID autocomplete.
+
 ## 0.5.1 - 2026-10-14
 
 ### Fixed
