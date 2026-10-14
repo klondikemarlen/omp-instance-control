@@ -7,6 +7,10 @@
 - `dev sign` selects and signs the current prepared source upload with the existing maintainer key and local GPG prompting, without rebuilding, uploading, or forcing new signatures.
 - `dev package` prepares tracked-only source uploads; `dev package binary` builds local binary packages. Outputs stay under ignored `build/debian/`, temporary staging is removed, and existing artifacts cannot be overwritten.
 
+### Fixed
+
+- Provide a repository-local `./bin/dev` entrypoint so development commands work outside OMP's injected PATH; local direnv setup can expose it as `dev`.
+
 ## 0.5.2 - 2026-10-14
 
 ### Fixed

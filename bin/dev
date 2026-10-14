@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+shared_dev="$HOME/.omp/plugins/node_modules/marlens-skills-rules-and-tools/bin/dev"
+
+if [[ ! -x "$shared_dev" ]]; then
+  printf 'Install the marlens-skills-rules-and-tools OMP plugin in ~/.omp/plugins before using bin/dev.\n' >&2
+  exit 1
+fi
+
+exec "$shared_dev" --config "$repository/dev.config.rb" "$@"

@@ -159,6 +159,8 @@ git diff --check
 
 Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Create or verify the dedicated public [OMP Instance Control PPA](https://launchpad.net/~klondikemarlen/+archive/ubuntu/omp-instance-control) before uploading. Do not reuse another project's archive.
 
+Development commands require Ruby and the `marlens-skills-rules-and-tools` OMP plugin installed under `~/.omp/plugins/`. Run `./bin/dev sign` directly from the checkout; `./dev` is a directory containing the project plugin, not an executable. To use the shorter `dev sign`, add `PATH_add bin` to an ignored local `.envrc`, then run `direnv allow`. Your shell must have the direnv hook enabled; otherwise use `./bin/dev`.
+
 From a clean, committed release checkout, `dev package` prepares an unsigned source upload using only tracked files. `dev package binary` builds a local binary package. Both keep outputs under ignored `build/debian/` and remove their temporary staging tree after the build. Existing artifacts are never overwritten; keep them or increment `debian/changelog` before preparing another build.
 
 Run `dev sign` in your terminal to sign the current prepared upload. It selects the source/version from `debian/changelog`, sets `GPG_TTY`, and uses `debsign`'s normal maintainer-key selection. Install the helper once with `sudo apt install --no-install-recommends devscripts` if needed. Enter the existing key's passphrase locally; signing neither rebuilds nor uploads, and an already signed upload is left unchanged.
