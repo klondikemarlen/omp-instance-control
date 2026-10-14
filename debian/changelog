@@ -1,3 +1,10 @@
+omp-instance-control (0.5.3~ppa1) resolute; urgency=medium
+
+  * Provide short development package and signing commands.
+  * Keep package outputs and staging inside the ignored repository build directory.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 14 Oct 2026 16:30:00 -0700
+
 omp-instance-control (0.5.2~ppa1) resolute; urgency=medium
 
   * Complete profile names in spaced and inline OMP command options.

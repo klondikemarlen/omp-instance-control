@@ -157,13 +157,16 @@ git diff --check
 
 `make build` produces `dist/ompi` without cgo or runtime dependencies. The installed wrapper resolves its adapter relative to the real executable, not the working directory.
 
-Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Create or verify the dedicated public [OMP Instance Control PPA](https://launchpad.net/~klondikemarlen/+archive/ubuntu/omp-instance-control) before uploading. Do not reuse another project's archive. Prepare the unsigned Debian native source package from the merged release checkout, then sign the prepared files with `debsign` from `devscripts` (`sudo apt install --no-install-recommends devscripts`). It updates the signatures and upload checksums without rebuilding. Use the existing registered upload key and enter its passphrase only in your own terminal:
+Follow issue-named branches, linked PRs, complete self-review, focused QA, and merge commits. Create or verify the dedicated public [OMP Instance Control PPA](https://launchpad.net/~klondikemarlen/+archive/ubuntu/omp-instance-control) before uploading. Do not reuse another project's archive.
+
+From a clean, committed release checkout, `dev package` prepares an unsigned source upload using only tracked files. `dev package binary` builds a local binary package. Both keep outputs under ignored `build/debian/` and remove their temporary staging tree after the build. Existing artifacts are never overwritten; keep them or increment `debian/changelog` before preparing another build.
+
+Run `dev sign` in your terminal to sign the current prepared upload. It selects the source/version from `debian/changelog`, sets `GPG_TTY`, and uses `debsign`'s normal maintainer-key selection. Install the helper once with `sudo apt install --no-install-recommends devscripts` if needed. Enter the existing key's passphrase locally; signing neither rebuilds nor uploads, and an already signed upload is left unchanged.
 
 ```bash
-dpkg-buildpackage -S -d -us -uc
-export GPG_TTY="$(tty)"
-debsign -kYOUR_UPLOAD_KEY ../omp-instance-control_0.5.2~ppa1_source.changes
-dput ssh-ppa:klondikemarlen/omp-instance-control ../omp-instance-control_0.5.2~ppa1_source.changes
+dev package
+dev sign
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.5.3~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.
