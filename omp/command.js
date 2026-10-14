@@ -5,11 +5,12 @@ import { formatRows, listInstances, restartInstances } from "../cli/client.js"
 import { waitForRestarts } from "../cli/restart-wait.js"
 import { createTransport } from "../linux/transport.js"
 import { getScope } from "../protocol/index.js"
+import { prepareTakeover } from "./take-over.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
 const RESTART_ONLY_OPTIONS = ["all", "instance", "no-wait"]
-const ROOT_COMPLETIONS = ["instances", "--help", "-h", "--version"]
+const ROOT_COMPLETIONS = ["instances", "take-over", "--help", "-h", "--version"]
 const ACTION_COMPLETIONS = ["list", "restart", "--help", "-h", "--version"]
 const LIST_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
 const RESTART_COMPLETIONS = [
@@ -135,6 +136,21 @@ function parseOmpiArguments(args) {
 
   const positionTokens = parsed.tokens.filter((token) => token.kind === "positional")
   const rootToken = positionTokens[0]
+  if (positionals[0] === "take-over") {
+    if (
+      positionals.length !== 1 ||
+      [...present].some((name) => !["help", "version"].includes(name))
+    ) {
+      throw new Error("Usage: /ompi take-over")
+    }
+    if (parsed.values.help) {
+      return { action: "help", values: parsed.values, present }
+    }
+    if (parsed.values.version) {
+      return { action: "version", values: parsed.values, present }
+    }
+    return { action: "take-over", values: parsed.values, present }
+  }
   if (positionals.shift() !== "instances") {
     throw new Error(`Usage: /${COMMAND} instances list|restart [options]`)
   }
@@ -217,7 +233,7 @@ function getArgumentCompletions(argumentText, completionIds, cwd) {
   const completedTokens = trailingSpace ? tokens : [...tokens]
   const completedActionOrOption =
     tokenPrefix === "instances" ||
-    ["list", "restart"].includes(tokenPrefix) ||
+    ["list", "restart", "take-over"].includes(tokenPrefix) ||
     COMPLETABLE_OPTIONS.has(tokenPrefix)
 
   if (
@@ -232,6 +248,13 @@ function getArgumentCompletions(argumentText, completionIds, cwd) {
   if (completedTokens.length === 0) {
     return completionValues(
       ROOT_COMPLETIONS.map((value) => completionItem(value)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (completedTokens[0] === "take-over") {
+    return completionValues(
+      ["--help", "-h", "--version"].map((value) => completionItem(value)),
       completedTokens,
       tokenPrefix
     )
@@ -356,7 +379,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   }
 
   pi.registerCommand(COMMAND, {
-    description: "List launcher-managed instances or request a scoped restart",
+    description: "Control participating instances or prepare a manual takeover",
     getArgumentCompletions(argumentText) {
       return getArgumentCompletions(argumentText, completionIds, completionCwd)
     },
@@ -371,13 +394,36 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         const { action, values, present } = parseOmpiArguments(args)
         if (action === "help") {
           ctx.ui.notify(
-            "Usage: /ompi instances [list|restart] [--all | --instance ID] [--profile NAME] [--json] [--no-wait]\nRestart requires exactly one explicit --all or --instance selector. Listing is the default action.",
+            "Usage: /ompi instances [list|restart] [--all | --instance ID] [--profile NAME] [--json] [--no-wait]\nRestart requires exactly one explicit --all or --instance selector. Listing is the default action.\n/ompi take-over prepares a shell command for the current saved session and requests graceful exit. Copy it, then paste it in your shell after OMP exits.",
             "info"
           )
           return
         }
         if (action === "version") {
           ctx.ui.notify(`omp-instance-control ${packageJson.version}`, "info")
+          return
+        }
+        if (action === "take-over") {
+          if (getRuntime()) {
+            throw new Error("This session already runs under ompi; use /ompi instances restart.")
+          }
+          const command = await prepareTakeover(ctx)
+          const confirmed = await ctx.ui.confirm(
+            "Take Over With ompi",
+            `Copy this command now. After OMP exits, paste it in your shell:\n\n${command}\n\nExit gracefully? No replacement starts automatically.`
+          )
+          if (!confirmed) {
+            return
+          }
+
+          if ((await prepareTakeover(ctx)) !== command) {
+            throw new Error(
+              "The session changed while the command was displayed; run /ompi take-over again."
+            )
+          }
+
+          pi.appendEntry("ompi-take-over", { command })
+          ctx.shutdown()
           return
         }
 
