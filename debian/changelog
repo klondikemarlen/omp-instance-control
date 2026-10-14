@@ -1,3 +1,11 @@
+omp-instance-control (0.4.0~ppa1) resolute; urgency=medium
+
+  * Mirror scoped instance commands inside OMP through the installed plugin.
+  * Wait for peer relaunch while safely returning for self-selected restarts.
+  * Reduce control options and add argument and instance autocomplete.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 14 Oct 2026 11:30:00 -0700
+
 omp-instance-control (0.3.0~ppa1) resolute; urgency=medium
 
   * Wait for verified instance relaunch with live terminal progress.

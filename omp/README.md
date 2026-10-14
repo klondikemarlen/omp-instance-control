@@ -2,7 +2,9 @@
 
 Own extension registration for main interactive instances, lifecycle request admission, and invoking supported public OMP host APIs.
 
-`index.js` registers `/instances` and a control endpoint only for launcher-managed main TUI instances. It calls public `ctx.shutdown()` after acknowledgement, leaving OMP core to decide settlement, persist the transcript, tear down, and release the terminal.
+`index.js` registers the canonical `/ompi` command and claims one binding through the public extension event bus, avoiding duplicate registration from installed/injected paths. Only launcher-managed main TUI instances publish control endpoints. It calls public `ctx.shutdown()` after acknowledgement, leaving OMP core to decide settlement, persist the transcript, tear down, and release the terminal.
+
+`command.js` mirrors native `ompi instances` actions, options, and profile scope. Ordinary OMP can control wrapped peers without advertising self-restart. Peer observation uses the shared JS client; a self-selected snapshot returns acceptance without waiting. Public widgets and in-memory host keybindings own progress/cancellation; full-ID autocomplete caches online peers per scope and refreshes through listing and lifecycle events.
 
 Linux transport belongs in [`../linux/`](../linux/README.md); wire semantics belong in [`../protocol/`](../protocol/README.md).
 
