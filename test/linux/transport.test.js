@@ -57,11 +57,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
-test("private directory and JSON operations refuse permissive paths and symlink targets", async () => {
+test("when private paths are permissive or symlinked, filesystem operations reject them", async () => {
+  // Arrange
   const root = await createRoot()
   const permissive = path.join(root, "permissive")
   await mkdir(permissive, { mode: 0o700 })
   await chmod(permissive, 0o755)
+  // Act / Assert
   await assert.rejects(ensurePrivateDirectory(permissive), /accessible by other users/)
 
   const privateDirectory = path.join(root, "private")
@@ -75,7 +77,8 @@ test("private directory and JSON operations refuse permissive paths and symlink 
   assert.equal(await readFile(target, "utf8"), "original")
 })
 
-test("discovery keeps surviving instances when another record disappears after enumeration", async (t) => {
+test("when a record disappears after enumeration, discovery keeps surviving instances", async (t) => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   await transport.writeRecord(makeRecord(SCOPE_A, INSTANCE_A))
@@ -90,6 +93,7 @@ test("discovery keeps surviving instances when another record disappears after e
   })
   syncBuiltinESMExports()
   try {
+    // Act / Assert
     assert.deepEqual(
       (await transport.readRecords()).map((record) => record.instanceId),
       [INSTANCE_A]
@@ -100,7 +104,8 @@ test("discovery keeps surviving instances when another record disappears after e
   }
 })
 
-test("real socket dispatch returns handler protocol errors and rejects wrong instance identities", async () => {
+test("when socket requests fail admission, dispatch reports protocol errors and identity mismatches", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const record = makeRecord(SCOPE_A)
@@ -110,7 +115,9 @@ test("real socket dispatch returns handler protocol errors and rejects wrong ins
     throw new ProtocolError("NOT_READY", "The instance is not ready")
   })
   try {
+    // Act
     const response = await transport.request(record, makeRequest())
+    // Assert
     assert.deepEqual(response, {
       version: 1,
       instanceId: INSTANCE_A,
@@ -143,13 +150,15 @@ test("real socket dispatch returns handler protocol errors and rejects wrong ins
   }
 })
 
-test("invalid acknowledgements stay unknown while correlated rejection reports failure", async () => {
+test("when acknowledgements are invalid or rejected, clients report unknown or failed outcomes", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const record = makeRecord(SCOPE_A)
   await transport.writeRecord(record)
   const socketPath = path.join(transport.directory, `${INSTANCE_A}.sock`)
 
+  // Act / Assert
   for (const { reply, status } of [
     { reply: { instanceId: INSTANCE_B, ok: true, data: {} }, status: "unknown" },
     { reply: { requestId: "different-request", ok: true, data: {} }, status: "unknown" },
@@ -187,12 +196,14 @@ test("invalid acknowledgements stay unknown while correlated rejection reports f
   }
 })
 
-test("records and sockets are isolated by scope, and close destroys pending clients", async () => {
+test("when transports use different scopes, records remain isolated and closing releases clients", async () => {
+  // Arrange
   const root = await createRoot()
   const first = await transportFor(root, SCOPE_A)
   const second = await transportFor(root, SCOPE_B)
   await first.writeRecord(makeRecord(SCOPE_A))
   await second.writeRecord(makeRecord(SCOPE_B))
+  // Act / Assert
   assert.deepEqual(
     (await first.readRecords()).map(({ scope }) => scope),
     [SCOPE_A.id]
@@ -211,7 +222,8 @@ test("records and sockets are isolated by scope, and close destroys pending clie
   await rejected
 })
 
-test("request cancellation interrupts a blocked socket probe", async () => {
+test("when a socket probe is blocked, cancellation interrupts the request", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const record = makeRecord(SCOPE_A)
@@ -226,24 +238,29 @@ test("request cancellation interrupts a blocked socket probe", async () => {
   const cancellation = new Error("stop probing")
 
   try {
+    // Act
     const pending = transport.request(record, makeRequest(), { signal: controller.signal })
     const rejected = assert.rejects(pending, (error) => error === cancellation)
     await requestReceived.promise
     controller.abort(cancellation)
+    // Assert
     await rejected
   } finally {
     await server.close()
   }
 })
 
-test("cleanup removes a validated record after confirming its owner is absent", async () => {
+test("when a validated record's owner is absent, cleanup removes the record", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const record = { ...makeRecord(SCOPE_A), pid: spawnSync("/usr/bin/true").pid }
   await transport.writeRecord(record)
 
+  // Act
   const results = await transport.cleanupRecords()
 
+  // Assert
   assert.deepEqual(
     results.map(({ instanceId, status }) => ({ instanceId, status })),
     [{ instanceId: INSTANCE_A, status: "removed" }]
@@ -253,7 +270,8 @@ test("cleanup removes a validated record after confirming its owner is absent", 
   })
 })
 
-test("cleanup removes a refused stale socket and its absent owner's record", async () => {
+test("when a stale socket refuses connections and its owner is absent, cleanup removes both artifacts", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const endpoint = path.join(transport.directory, `${INSTANCE_A}.sock`)
@@ -273,8 +291,10 @@ test("cleanup removes a refused stale socket and its absent owner's record", asy
   await chmod(endpoint, 0o600)
 
   assert.equal((await fsPromises.lstat(endpoint)).isSocket(), true)
+  // Act
   const results = await transport.cleanupRecords()
 
+  // Assert
   assert.deepEqual(
     results.map(({ instanceId, status }) => [instanceId, status]),
     [[INSTANCE_A, "removed"]]
@@ -285,7 +305,8 @@ test("cleanup removes a refused stale socket and its absent owner's record", asy
   })
 })
 
-test("cleanup preserves a live process and a responsive endpoint with a missing owner", async () => {
+test("when an owner is live or its endpoint responds, cleanup preserves the registration", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const liveRecord = makeRecord(SCOPE_A, INSTANCE_A)
@@ -296,8 +317,10 @@ test("cleanup preserves a live process and a responsive endpoint with a missing 
   const server = await transport.serve(INSTANCE_B, async () => ({ data: {} }))
 
   try {
+    // Act
     const results = await transport.cleanupRecords()
 
+    // Assert
     assert.deepEqual(
       results.map(({ instanceId, status }) => [instanceId, status]),
       [
@@ -318,7 +341,8 @@ test("cleanup preserves a live process and a responsive endpoint with a missing 
   }
 })
 
-test("cleanup reports unsafe records and endpoints while continuing eligible records", async () => {
+test("when records or sockets are unsafe, cleanup preserves them and continues eligible records", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const invalidRecordPath = path.join(transport.directory, `${INSTANCE_A}.json`)
@@ -336,8 +360,10 @@ test("cleanup reports unsafe records and endpoints while continuing eligible rec
     pid: spawnSync("/usr/bin/true").pid,
   })
 
+  // Act
   const results = await transport.cleanupRecords()
 
+  // Assert
   assert.deepEqual(
     results.map(({ instanceId, status }) => [instanceId, status]),
     [
@@ -356,13 +382,15 @@ test("cleanup reports unsafe records and endpoints while continuing eligible rec
   })
 })
 
-test("cleanup leaves socket-only endpoints without records untouched", async () => {
+test("when a socket has no discovery record, cleanup leaves it untouched", async () => {
+  // Arrange
   const root = await createRoot()
   const transport = await transportFor(root, SCOPE_A)
   const endpoint = path.join(transport.directory, `${INSTANCE_A}.sock`)
   const server = await transport.serve(INSTANCE_A, async () => ({ data: {} }))
 
   try {
+    // Act / Assert
     assert.deepEqual(await transport.cleanupRecords(), [])
     assert.equal((await fsPromises.lstat(endpoint)).isSocket(), true)
   } finally {

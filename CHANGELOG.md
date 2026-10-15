@@ -11,6 +11,10 @@
 
 - Preserve live/reused PIDs, uncertain owners, responsive endpoints, unsafe or changed files, and socket-only artifacts. Discovery stays read-only; package installation does not sweep runtime state.
 
+### Development
+
+- Align transport and cleanup command regressions with the shared test naming and Arrange/Act/Assert baseline.
+
 ## 0.6.0 - 2026-10-15
 
 ### Added
