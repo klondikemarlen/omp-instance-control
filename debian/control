@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: omp-instance-control
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: bash-completion (>= 1:2.12), ${shlibs:Depends}, ${misc:Depends}
 Description: Native ompi wrapper for participating OMP terminals
  Launches standard OMP through ompi and adds explicit scoped instance
  discovery and settled-boundary restart/resume in the same terminal.

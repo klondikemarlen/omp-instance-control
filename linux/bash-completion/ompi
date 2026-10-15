@@ -1,0 +1,68 @@
+# Bash completion for the native ompi wrapper.
+
+_ompi_omp_completion()
+{
+    # Reuse the installed OMP catalog, including its dynamic value completions.
+    if ! declare -F _omp >/dev/null; then
+        command -v omp >/dev/null 2>&1 || return 0
+        source <(command omp completions bash 2>/dev/null)
+    fi
+
+    if declare -F _omp >/dev/null; then
+        _omp "$@"
+    fi
+}
+
+_ompi()
+{
+    local cur prev words cword
+    _comp_initialize -n = || return
+
+    if (( cword == 1 )); then
+        _ompi_omp_completion "$@"
+        if [[ instances == "$cur"* ]]; then
+            COMPREPLY+=(instances)
+        fi
+        return 0
+    fi
+
+    if [[ ${words[1]} != instances ]]; then
+        _ompi_omp_completion "$@"
+        return 0
+    fi
+
+    local options='--profile --json --help -h --version'
+    if (( cword == 2 )); then
+        COMPREPLY=( $(compgen -W "list restart cleanup $options" -- "$cur") )
+        return 0
+    fi
+
+    local action=list
+    case ${words[2]} in
+        list|restart|cleanup) action=${words[2]} ;;
+        -*) ;;
+        *) return 0 ;;
+    esac
+
+    # Values are free-form here; do not mistake them for actions or options.
+    case "$prev" in
+        --profile|--instance) return 0 ;;
+    esac
+    [[ $cur == *=* ]] && return 0
+
+    local index
+    for (( index=2; index<cword; index++ )); do
+        case ${words[index]} in
+            --profile|--instance) (( index++ )) ;;
+            --) return 0 ;;
+        esac
+    done
+
+    if [[ $action == restart ]]; then
+        options+=' --all --instance --no-wait'
+    fi
+    COMPREPLY=( $(compgen -W "$options" -- "$cur") )
+    return 0
+}
+
+complete -F _ompi ompi

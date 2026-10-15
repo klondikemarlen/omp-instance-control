@@ -25,6 +25,8 @@ ompi instances --version
 
 The package installs `/usr/bin/ompi` and the plugin under `/usr/share/omp-instance-control/`. `ompi` loads it automatically; no separate plugin installation is required for wrapped sessions. Existing processes retain their loaded modules; launch fresh processes after installation or upgrade.
 
+The apt package includes Bash completion at `/usr/share/bash-completion/completions/ompi` and depends on `bash-completion`. Open a fresh interactive Bash shell after installation; no completion setup command or shell-configuration edit is required when the standard Ubuntu Bash completion startup is enabled. Tab completes `ompi instances r` to `ompi instances restart`, lists `list`, `restart`, and `cleanup` after `ompi instances `, and offers action-specific flags. Profile names and instance IDs remain free-form values. Ordinary OMP commands and launch options reuse the installed OMP's generated completion, loaded on first use.
+
 The old npm launcher and `omp-instance-control launch` interface are replaced, not aliased. If previously installed globally through npm, remove that old package with `npm uninstall --global omp-instance-control`. Installing only the adapter cannot add instance control to ordinary unwrapped sessions.
 
 To use `/ompi instances` from ordinary `omp`, install the controller through OMP's public plugin manager:

@@ -1,3 +1,11 @@
+omp-instance-control (0.8.0~ppa1) resolute; urgency=medium
+
+  * Install Bash completion for ompi instance-control commands and options.
+  * Reuse installed OMP completions for ordinary commands and launch flags.
+  * Include the Bash completion framework in the apt dependency set.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Thu, 15 Oct 2026 17:00:00 -0700
+
 omp-instance-control (0.7.0~ppa1) resolute; urgency=medium
 
   * Add explicit scoped cleanup for legacy registrations with absent owners.
