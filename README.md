@@ -63,7 +63,9 @@ ompi instances list --profile work --json
 ompi instances --help
 ```
 
-External restart waits until every accepted target has a verified live replacement. A terminal shows updating rows with compact instance IDs and the current project directory; redirected output logs state changes without cursor-control sequences. Small terminals, long rows, and non-ASCII paths use the same append-only fallback. `ompi instances list` and JSON retain full instance IDs.
+External restart waits until every accepted target has a verified live replacement. Each pending target has an animated loader; the header shows elapsed time, restarted/pending counts, and issues. Rows update in place with semantic colors, safely shortened paths, and a pending-first viewport when the terminal is too small. Resizing and Unicode paths do not disable live progress. `NO_COLOR` disables colors, not animation; redirected output and `TERM=dumb` log plain state transitions without cursor controls.
+
+Human-facing lists show short display IDs, current state, the final two project-path components, concise connection failures, and a small annotation for a previous completed restart. These display IDs are not abbreviated selectors: use `--json` or in-OMP Tab completion for full IDs. JSON retains full paths, restart correlation, and raw diagnostics. Partial-failure warnings distinguish unreachable registrations from reachable instances.
 
 Use `ompi instances restart --all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
@@ -81,7 +83,7 @@ From OMP with the plugin loaded:
 
 Both surfaces expose `list` and `restart`, with five control options: `--all`, `--instance ID`, `--profile NAME`, `--json`, and `--no-wait`. `instances` defaults to listing; restart requires an explicit selector. Control-command `--cwd` and `--timeout` are removed; standard OMP launch arguments, including `--cwd`, are unchanged.
 
-Inside OMP, peer restart waits with visible progress and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
+Inside OMP, peer restart waits with animated, themed progress, elapsed time, and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
 
 Argument autocomplete covers the namespace, actions, options, configured profile names, and full online instance IDs. Profile values complete in both `--profile NAME` and `--profile=NAME` forms, including default listing without an explicit `list` action. Suggestions include `default` and the active profile and stay inside the current configuration root. ID suggestions are cached per profile/config-root scope and refreshed at startup, after listing or observed peer relaunch, and on session lifecycle events. List the selected profile first to refresh its IDs. The former `/instances` command is removed, not aliased.
 
@@ -115,7 +117,7 @@ OMP owns settlement, transcript persistence, teardown, and terminal release. The
 - Relaunch resumes the actual current session file and cwd, not the original selector. Original configuration paths and relative default-profile agent-directory overrides remain anchored across directory changes.
 - Restart admission checks OMP's private parsed extension-flag map read-only at `session_start`. Missing metadata or a parsed built-in collision refuses restart before shutdown. This map is not a registry: unused no-default flags may be absent. Generated restart uses the unshadowable `-r` alias and the child's process cwd, not injectable long options. The explicit compatibility dependency is verified on OMP 18.8.7; it does not mutate flags or replace public lifecycle APIs.
 - Private same-user Unix sockets and discovery records live under `$XDG_RUNTIME_DIR/omp-instance-control`, or `/tmp/omp-instance-control-<uid>` when unset. Unsafe permissions, symlinks, and overlong socket paths fail explicitly.
-- Crashed instances can leave unreachable records. Discovery reports them without deleting another instance's state. Same-user IPC is not a sandbox against other programs running as your account.
+- Before publishing an endpoint, the adapter writes a private token-bound ownership handoff. After reaping its child, the wrapper removes only that launch's unchanged registration/socket, including after abnormal child exit. It preserves mismatched identities and unsafe files. Discovery never deletes on connection failure or PID guesses; legacy records without ownership proof and records left by a crashed wrapper can remain unreachable. Same-user IPC is not a sandbox against other programs running as your account.
 
 ## Temporary Ownership and Upstream Removal
 
@@ -168,7 +170,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.5.3~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.6.0~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.

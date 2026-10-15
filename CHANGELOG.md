@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 - 2026-10-15
+
+### Added
+
+- Animate each pending restart with semantic colors, elapsed time, outcome counts, and an explicit settlement/cancellation explanation.
+- Keep terminal progress live through resize and long Unicode paths; prioritize pending targets and disclose hidden rows when the snapshot exceeds the viewport. Honor `NO_COLOR` without disabling animation.
+- Remove only a reaped child's token-bound, unchanged registrations and sockets, including after abnormal exit and across native same-PID restarts.
+
+### Changed
+
+- Compact CLI and OMP listings to short display IDs, current states, project-path tails, and concise connection failures. Keep full identifiers, paths, history, and raw errors in JSON.
+- Explain partial failures without implying that reachable instances failed. Preserve nonzero failure exits, read-only discovery, and plain transition-only redirected output.
+
 ## 0.5.3 - 2026-10-14
 
 ### Added

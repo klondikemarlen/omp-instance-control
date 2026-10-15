@@ -363,11 +363,59 @@ function rowsFromProgress(rows, watchedRows) {
   return rows.map((row) => watchedById.get(row.instanceId) ?? row)
 }
 
+function outcomeSummary(rows) {
+  const counts = new Map()
+  for (const row of rows) {
+    const label = row.status === "online" ? "reachable" : row.status
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+
+  if (rows.length === 0) {
+    return "No participating instances in this scope."
+  }
+
+  return [...counts].map(([label, count]) => `${count} ${label}`).join(", ")
+}
+
 function notifyRows(ctx, rows, json) {
   const hasFailure = rows.some((row) =>
     ["failed", "unknown", "unreachable", "restarting", "waiting"].includes(row.status)
   )
-  ctx.ui.notify(json ? JSON.stringify(rows) : formatRows(rows), hasFailure ? "warning" : "info")
+  if (json) {
+    ctx.ui.notify(JSON.stringify(rows), hasFailure ? "warning" : "info")
+    return
+  }
+
+  const lines = [outcomeSummary(rows), formatRows(rows)]
+  if (rows.some((row) => row.status === "unreachable")) {
+    lines.push("Unreachable registrations may be stale; reachable instances remain usable.")
+  }
+
+  ctx.ui.notify(lines.filter(Boolean).join("\n"), hasFailure ? "warning" : "info")
+}
+
+function renderPeerProgress(ctx, rows, started, frame) {
+  const spinner = ["|", "/", "-", "\\"][frame % 4]
+  const elapsed = Math.floor((Date.now() - started) / 1000)
+  const lines = [`Peer restarts: ${outcomeSummary(rows)} (${elapsed}s)`]
+  for (const row of rows) {
+    const pending = row.status === "waiting" || row.status === "restarting"
+    let marker = "!"
+    let color = "error"
+    if (pending) {
+      marker = spinner
+      color = "accent"
+    } else if (row.status === "restarted") {
+      marker = "+"
+      color = "success"
+    }
+
+    const line = `${marker} ${formatRows([row])}`
+    lines.push(process.env.NO_COLOR === undefined ? ctx.ui.theme.fg(color, line) : line)
+  }
+
+  lines.push("OMP owns settlement. Ctrl-C stops watching, not accepted restarts.")
+  ctx.ui.setWidget(PROGRESS_WIDGET, lines, { placement: "aboveEditor" })
 }
 
 export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
@@ -490,7 +538,10 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           const acceptedRows = rows.filter((row) => row.status === "accepted")
           if (acceptedRows.length > 0) {
             const controller = new AbortController()
-            let lastProgress = acceptedRows.map((row) => ({ ...row, status: "restarting" }))
+            let lastProgress = acceptedRows.map((row) => ({ ...row, status: "waiting" }))
+            const started = Date.now()
+            let frame = 0
+            const renderProgress = () => renderPeerProgress(ctx, lastProgress, started, frame++)
             const stopListening = ctx.ui.onTerminalInput((data) => {
               if (keybindings.matches(data, "app.clear")) {
                 controller.abort(new Error("Restart observation cancelled."))
@@ -498,19 +549,13 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               }
               return undefined
             })
+            const animation = setInterval(renderProgress, 125)
             try {
               const watchedRows = await waitForRestarts(transport, acceptedRows, {
                 signal: controller.signal,
                 onProgress(progressRows) {
                   lastProgress = progressRows.map((row) => ({ ...row }))
-                  ctx.ui.setWidget(
-                    PROGRESS_WIDGET,
-                    [
-                      "Waiting for peer restarts (Ctrl-C stops watching):",
-                      ...formatRows(progressRows).split("\n"),
-                    ],
-                    { placement: "aboveEditor" }
-                  )
+                  renderProgress()
                 },
               })
               finalRows = rowsFromProgress(rows, watchedRows)
@@ -523,6 +568,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
                 ? "Restart observation cancelled; accepted restart requests remain active."
                 : `Restart requests were accepted, but observation stopped: ${error.message}`
             } finally {
+              clearInterval(animation)
               stopListening()
               ctx.ui.setWidget(PROGRESS_WIDGET, undefined)
             }

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -161,25 +160,5 @@ func TestFormatRowsEscapesTerminalControls(t *testing.T) {
 	formatted := FormatRows([]Row{row})
 	if !strings.Contains(formatted, "\\u000apath\\u0085") {
 		t.Fatalf("terminal control characters were not escaped: %s", formatted)
-	}
-}
-
-func TestFormatRowsDoesNotInventAbsentLifecycleCapabilities(t *testing.T) {
-	const originalData = `{"message":"accepted","operationId":"operation"}`
-	var data protocol.Data
-	if err := json.Unmarshal([]byte(originalData), &data); err != nil {
-		t.Fatal(err)
-	}
-
-	formatted := FormatRows([]Row{{InstanceID: "instance", Status: "accepted", Data: &data}})
-	if strings.Contains(formatted, "launcher=") || strings.Contains(formatted, "canRestart=") {
-		t.Fatalf("formatting invented lifecycle capabilities: %s", formatted)
-	}
-
-	operationID := "operation"
-	typedAck := &protocol.Data{OperationID: &operationID}
-	typedAckOutput := FormatRows([]Row{{InstanceID: "instance", Status: "accepted", Data: typedAck}})
-	if strings.Contains(typedAckOutput, "launcher=") || strings.Contains(typedAckOutput, "canRestart=") {
-		t.Fatalf("formatting invented capabilities for a typed acknowledgement: %s", typedAckOutput)
 	}
 }

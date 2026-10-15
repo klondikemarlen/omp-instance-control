@@ -27,7 +27,9 @@ A control endpoint belongs to a main interactive launch, not a subagent or persi
 
 Normal exit without a handoff does not restart. Nonzero child exit and launcher termination signals prevent relaunch. A native OMP `/restart` can replace the child in-place; its new plugin binding clears a same-token handoff so a later `/exit` cannot replay it.
 
-A request accepted before a manual graceful exit may be satisfied by that exit. A request whose acknowledgement is lost has an unknown outcome; clients never retry automatically. Stale records are reported as unreachable rather than pruning state based on PID guesses.
+A request accepted before a manual graceful exit may be satisfied by that exit. A request whose acknowledgement is lost has an unknown outcome; clients never retry automatically.
+
+Before binding an endpoint, each instance writes a private registration handoff containing the launcher token, scope, fresh instance ID, and host PID. Native OMP restarts retain earlier identity handoffs even when the PID stays the same. Only after `cmd.Wait` has reaped the child does the launcher validate these handoffs and remove matching, unchanged private records/sockets. Cleanup uses the launch token and actual reaped child, not PID-existence guesses. Changed identities, unsafe paths, and legacy registrations without ownership proof are preserved; discovery itself remains read-only.
 
 Observation has no default deadline. Ctrl-C stops watching without cancelling an accepted restart or killing OMP. Missing endpoints and status connections closed during teardown remain a `restarting` transition; malformed or uncorrelated acknowledgements remain unknown, never successful. In-session peer commands wait by default, but any selection containing the invoking wrapped session returns acceptance for the whole snapshot because waiting would block its own settlement. `--no-wait` is explicit on both surfaces.
 

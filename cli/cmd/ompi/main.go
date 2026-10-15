@@ -146,8 +146,22 @@ func printRows(rows []cli.Row, jsonOutput bool) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
+	} else if len(rows) == 0 {
+		fmt.Println("No participating instances in this scope.")
 	} else {
 		fmt.Println(cli.FormatRows(rows))
+		unreachable, reachable := 0, 0
+		for _, row := range rows {
+			switch row.Status {
+			case "unreachable":
+				unreachable++
+			case "online", "restarted":
+				reachable++
+			}
+		}
+		if unreachable > 0 {
+			fmt.Fprintf(os.Stderr, "%d unreachable registration(s), %d reachable; unreachable entries may be stale. Use --json for full diagnostics.\n", unreachable, reachable)
+		}
 	}
 	return restartExitCode(rows, false)
 }

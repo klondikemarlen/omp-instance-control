@@ -1,3 +1,11 @@
+omp-instance-control (0.6.0~ppa1) resolute; urgency=medium
+
+  * Show animated in-place restart progress, colors, elapsed time and pending totals.
+  * Compact instance listings and explain partial failures without hiding diagnostics.
+  * Remove only token-bound launch registrations after the owning child exits.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Thu, 15 Oct 2026 09:04:20 -0700
+
 omp-instance-control (0.5.3~ppa1) resolute; urgency=medium
 
   * Provide short development package and signing commands.

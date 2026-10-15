@@ -102,6 +102,11 @@ function createCommand(ctx, { runtime, cancelOnProgress = false, confirmTakeover
   }
   registerOmpiCommand(pi, { getRuntime: () => runtime })
   ctx.ui = {
+    theme: {
+      fg(_color, text) {
+        return text
+      },
+    },
     confirm: confirmTakeover,
     notify(message, level) {
       notifications.push({ message, level })
@@ -191,8 +196,6 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     await ui.command.handler("instances", ctx)
 
     // Assert
-    assert.match(ui.notifications[0].message, new RegExp(defaultId))
-    assert.match(ui.notifications[0].message, new RegExp(path.join(fixture.root, "default-peer")))
     assert.deepEqual(
       ui.command
         .getArgumentCompletions("instances restart --instance 11111111")
