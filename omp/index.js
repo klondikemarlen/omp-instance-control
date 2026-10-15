@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url"
 
 import { createTransport } from "../linux/transport.js"
 import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
-import { readLauncherContext, writeRestartHandoff } from "./launcher-context.js"
+import {
+  readLauncherContext,
+  recordLaunchRegistration,
+  writeRestartHandoff,
+} from "./launcher-context.js"
 import { registerOmpiCommand } from "./command.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
@@ -161,6 +165,8 @@ export default async function instanceControl(pi) {
         instanceId: randomBytes(16).toString("hex"),
         pending: null,
       }
+      // Persist ownership before binding the socket or publishing the public record.
+      await recordLaunchRegistration(launch, scope, runtime.instanceId)
       runtime.server = await transport.serve(runtime.instanceId, handleRequest, (error) => {
         ctx.ui.notify(`Instance control: ${error.message}`, "error")
       })

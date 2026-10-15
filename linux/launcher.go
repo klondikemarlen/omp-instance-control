@@ -163,12 +163,19 @@ func Launch(args []string, extensionPath string) (int, error) {
 		if resumeFile != "" {
 			childCWD = cwd
 		}
-		code, signaled, err := runChild(executable, childArgs, childCWD, childEnv, signals)
+		child, err := runChild(executable, childArgs, childCWD, childEnv, signals)
 		if err != nil {
 			return 1, err
 		}
-		if signaled || code != 0 {
-			return code, nil
+		// Reap first: registrations are eligible for cleanup only after cmd.Wait completes.
+		if !child.reaped {
+			return 1, errors.New("OMP child completion was not verified")
+		}
+		if err := cleanupLaunchRegistrations(launchDir, token, scope, child.pid); err != nil {
+			return 1, err
+		}
+		if child.signaled || child.code != 0 {
+			return child.code, nil
 		}
 		if restartArgsErr != nil {
 			return 0, nil
@@ -203,8 +210,8 @@ func runPassthrough(args []string) (int, error) {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
-	code, _, err := runChild(executable, args, "", os.Environ(), signals)
-	return code, err
+	result, err := runChild(executable, args, "", os.Environ(), signals)
+	return result.code, err
 }
 
 func isInteractiveLaunch(args []string) bool {
@@ -299,14 +306,22 @@ func replaceEnvironment(env []string, updates map[string]string) []string {
 	return result
 }
 
-func runChild(executable string, args []string, cwd string, env []string, signals <-chan os.Signal) (int, bool, error) {
+type childResult struct {
+	code     int
+	signaled bool
+	pid      int
+	reaped   bool // True only after cmd.Wait completed; early runner errors leave it false.
+}
+
+func runChild(executable string, args []string, cwd string, env []string, signals <-chan os.Signal) (childResult, error) {
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = cwd
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
-		return 1, false, err
+		return childResult{code: 1}, err
 	}
+	childPID := cmd.Process.Pid
 	childDone := make(chan error, 1)
 	go func() { childDone <- cmd.Wait() }()
 	for {
@@ -314,29 +329,37 @@ func runChild(executable string, args []string, cwd string, env []string, signal
 		case err := <-childDone:
 			select {
 			case received := <-signals:
-				return 128 + int(received.(syscall.Signal)), true, nil
+				return childResult{
+					code: 128 + int(received.(syscall.Signal)), signaled: true, pid: childPID, reaped: true,
+				}, nil
 			default:
 			}
 			if err == nil {
-				return 0, false, nil
+				return childResult{pid: childPID, reaped: true}, nil
 			}
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-					return 128 + int(status.Signal()), true, nil
+					return childResult{
+						code: 128 + int(status.Signal()), signaled: true, pid: childPID, reaped: true,
+					}, nil
 				}
-				return exitErr.ExitCode(), false, nil
+				return childResult{code: exitErr.ExitCode(), pid: childPID, reaped: true}, nil
 			}
-			return 1, false, err
+			return childResult{code: 1, pid: childPID, reaped: true}, err
 		case received := <-signals:
 			signal := received.(syscall.Signal)
 			if err := cmd.Process.Signal(signal); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				return 1, false, err
+				return childResult{code: 1, pid: childPID}, err
 			}
-			if err := <-childDone; err != nil {
-				return 128 + int(signal), true, nil
+			waitErr := <-childDone
+			if waitErr != nil {
+				var exitErr *exec.ExitError
+				if !errors.As(waitErr, &exitErr) {
+					return childResult{code: 1, pid: childPID}, waitErr
+				}
 			}
-			return 128 + int(signal), true, nil
+			return childResult{code: 128 + int(signal), signaled: true, pid: childPID, reaped: true}, nil
 		}
 	}
 }

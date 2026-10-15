@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
 
 func TestRestartArgumentsDropsStartupSourcesAndNormalizesPaths(t *testing.T) {
@@ -221,6 +224,10 @@ func TestFakeOMPChild(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("OMPI_TEST_REGISTER") == "1" {
+		writeFakeRegistration(t, launch, entry.Token, callNumber)
+	}
+
 	if os.Getenv("OMPI_TEST_BLOCK") == "1" {
 		termination := make(chan os.Signal, 1)
 		signal.Notify(termination, syscall.SIGTERM)
@@ -247,10 +254,69 @@ func TestFakeOMPChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if exitCode := os.Getenv("OMPI_TEST_EXIT_CODE"); exitCode != "" {
+		code, err := strconv.Atoi(exitCode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Exit(code)
+	}
+}
+
+func writeFakeRegistration(t *testing.T, launch map[string]any, token string, callNumber int) {
+	t.Helper()
+	launchScope, ok := launch["scope"].(map[string]any)
+	if !ok {
+		t.Fatal("fake launch record has no scope")
+	}
+	scopeID, ok := launchScope["id"].(string)
+	if !ok {
+		t.Fatal("fake launch record has no scope identity")
+	}
+	scope := protocol.Scope{ID: scopeID}
+	transport, err := NewTransport(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instanceID := fmt.Sprintf("%032x", callNumber)
+	registration := launchRegistration{
+		Version: protocol.Version, Token: token, Scope: scopeID, InstanceID: instanceID, PID: os.Getpid(),
+	}
+	registrationPath := filepath.Join(
+		os.Getenv(launchDirectoryEnv),
+		launchRegistrationPrefix+instanceID+launchRegistrationSuffix,
+	)
+	if err := WritePrivateJSON(registrationPath, registration); err != nil {
+		t.Fatal(err)
+	}
+
+	file, err := socketPath(transport.directory, instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	if err := os.Chmod(file, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record := testRecord(scope, instanceID)
+	if err := WritePrivateJSON(filepath.Join(transport.directory, instanceID+".json"), record); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLaunchFakeOMPResumesWithCurrentCWDAndNoPromptReplay(t *testing.T) {
-	root := t.TempDir()
+	root, err := os.MkdirTemp("", "l-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	cwd := filepath.Join(root, "handoff-cwd")
 	if err := os.Mkdir(cwd, 0700); err != nil {
 		t.Fatal(err)
@@ -265,6 +331,7 @@ func TestLaunchFakeOMPResumesWithCurrentCWDAndNoPromptReplay(t *testing.T) {
 	}
 	logPath := filepath.Join(root, "invocations.jsonl")
 	prepareFakeOMP(t, root, logPath, session, cwd, "valid")
+	t.Setenv("OMPI_TEST_REGISTER", "1")
 	changeDirectory(t, root)
 	code, err := Launch([]string{
 		"--profile", "work", "--cwd", "project", "--config", "settings.json",
@@ -297,6 +364,7 @@ func TestLaunchFakeOMPResumesWithCurrentCWDAndNoPromptReplay(t *testing.T) {
 	if calls[1].CWD != cwd || !containsPair(second, "-r", session) || contains(second, "--cwd") {
 		t.Fatalf("restart did not use the handoff process cwd/session: cwd=%q args=%#v", calls[1].CWD, second)
 	}
+	assertFakeRegistrationsRemoved(t, calls)
 }
 
 func TestLaunchRejectsInvalidHandoffWithoutSecondChild(t *testing.T) {
@@ -320,11 +388,38 @@ func TestLaunchRejectsInvalidHandoffWithoutSecondChild(t *testing.T) {
 	}
 }
 
+func TestLaunchCleansOwnedRegistrationAfterNonzeroChildExit(t *testing.T) {
+	root, err := os.MkdirTemp("", "l-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	logPath := filepath.Join(root, "invocations.jsonl")
+	prepareFakeOMP(t, root, logPath, "", "", "")
+	t.Setenv("OMPI_TEST_REGISTER", "1")
+	t.Setenv("OMPI_TEST_EXIT_CODE", "23")
+
+	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"))
+	if err != nil || code != 23 {
+		t.Fatalf("Launch returned code=%d err=%v", code, err)
+	}
+	calls := readInvocations(t, logPath)
+	if len(calls) != 1 {
+		t.Fatalf("expected one child launch, got %d", len(calls))
+	}
+	assertFakeRegistrationsRemoved(t, calls)
+}
+
 func TestLaunchForwardsSignalAndDoesNotRestart(t *testing.T) {
-	root := t.TempDir()
+	root, err := os.MkdirTemp("", "l-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	logPath := filepath.Join(root, "invocations.jsonl")
 	prepareFakeOMP(t, root, logPath, "", "", "")
 	readyPath := filepath.Join(root, "ready")
+	t.Setenv("OMPI_TEST_REGISTER", "1")
 	t.Setenv("OMPI_TEST_BLOCK", "1")
 	t.Setenv("OMPI_TEST_READY", readyPath)
 	type launchResult struct {
@@ -353,9 +448,11 @@ func TestLaunchForwardsSignalAndDoesNotRestart(t *testing.T) {
 	if result.err != nil || result.code != 128+int(syscall.SIGTERM) {
 		t.Fatalf("signal result code=%d err=%v", result.code, result.err)
 	}
-	if calls := readInvocations(t, logPath); len(calls) != 1 {
+	calls := readInvocations(t, logPath)
+	if len(calls) != 1 {
 		t.Fatalf("signal-triggered child exit was restarted: %d calls", len(calls))
 	}
+	assertFakeRegistrationsRemoved(t, calls)
 }
 
 func TestAmbiguousOptionDisablesRestartWithoutChangingFirstLaunch(t *testing.T) {
@@ -384,6 +481,39 @@ func TestAmbiguousOptionDisablesRestartWithoutChangingFirstLaunch(t *testing.T) 
 	}
 }
 
+func assertFakeRegistrationsRemoved(t *testing.T, calls []fakeInvocation) {
+	t.Helper()
+	for _, call := range calls {
+		scopeValue, ok := call.Launch["scope"].(map[string]any)
+		if !ok {
+			t.Fatal("fake launch record has no scope")
+		}
+		scopeID, ok := scopeValue["id"].(string)
+		if !ok {
+			t.Fatal("fake launch record has no scope identity")
+		}
+		transport, err := NewTransport(protocol.Scope{ID: scopeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		records, err := transport.ReadRecords()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 0 {
+			t.Fatalf("reaped child left instance records: %#v", records)
+		}
+		instanceID := fmt.Sprintf("%032x", call.CallNumber)
+		file, err := socketPath(transport.directory, instanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(file); !os.IsNotExist(err) {
+			t.Fatalf("reaped child left socket %s: %v", file, err)
+		}
+	}
+}
+
 func prepareFakeOMP(t *testing.T, root, logPath, session, cwd, handoff string) {
 	t.Helper()
 	if err := os.Chmod(root, 0700); err != nil {
@@ -395,6 +525,8 @@ func prepareFakeOMP(t *testing.T, root, logPath, session, cwd, handoff string) {
 	t.Setenv("XDG_RUNTIME_DIR", root)
 	t.Setenv("OMP_INSTANCE_CONTROL_OMP", filepath.Join(root, "fake-omp"))
 	t.Setenv("OMPI_TEST_CHILD", "1")
+	t.Setenv("OMPI_TEST_REGISTER", "0")
+	t.Setenv("OMPI_TEST_EXIT_CODE", "")
 	t.Setenv("OMPI_TEST_LOG", logPath)
 	t.Setenv("OMPI_TEST_CALLS", filepath.Join(root, "calls"))
 	t.Setenv("OMPI_TEST_HANDOFF", handoff)

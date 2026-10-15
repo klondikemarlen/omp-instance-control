@@ -3,7 +3,7 @@ import { renameSync, writeFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import path from "node:path"
 
-import { ensurePrivateDirectory, readPrivateJson } from "../linux/transport.js"
+import { ensurePrivateDirectory, readPrivateJson, writePrivateJson } from "../linux/transport.js"
 import { ProtocolError, PROTOCOL_VERSION, validateInstanceId } from "../protocol/index.js"
 
 export async function readLauncherContext(env = process.env) {
@@ -56,6 +56,36 @@ export async function readLauncherContext(env = process.env) {
   }
 
   return { ...launch, directory, handoffPath }
+}
+
+export async function recordLaunchRegistration(launch, scope, instanceId) {
+  if (process.ppid !== launch.pid) {
+    throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
+  }
+
+  validateInstanceId(instanceId)
+
+  if (!scope || !/^[a-f0-9]{16}$/.test(scope.id) || scope.id !== launch.scope.id) {
+    throw new ProtocolError("INVALID_LAUNCHER", "Instance registration scope is invalid.")
+  }
+
+  const registrationPath = path.join(launch.directory, `registration-${instanceId}.json`)
+  try {
+    await readPrivateJson(registrationPath)
+    throw new ProtocolError("INVALID_LAUNCHER", "Instance identity is already registered.")
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error
+    }
+  }
+
+  await writePrivateJson(registrationPath, {
+    version: PROTOCOL_VERSION,
+    token: launch.token,
+    scope: scope.id,
+    instanceId,
+    pid: process.pid,
+  })
 }
 
 export function writeRestartHandoff(launch, operationId, instanceId, ctx) {
