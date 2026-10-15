@@ -3,10 +3,19 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
 
 	"github.com/klondikemarlen/omp-instance-control/cli"
 	"github.com/klondikemarlen/omp-instance-control/linux"
+)
+
+const (
+	restartAnimationInterval = 120 * time.Millisecond
+	restartProgressFooter    = "OMP owns settlement; Ctrl-C stops watching only."
 )
 
 func restartRowText(row cli.Row) string {
@@ -17,7 +26,12 @@ func restartRowText(row cli.Row) string {
 	if id == "" {
 		id = "unknown"
 	}
-	line := displayInstanceID(id) + "  " + restartStatusText(row.Status)
+
+	line := restartStatusText(row.Status) + "  " + displayInstanceID(id)
+	if row.Data != nil && row.Data.LastRestart != nil && row.Status == "restarted" {
+		line += " -> " + displayInstanceID(row.Data.InstanceID)
+	}
+
 	cwd := ""
 	if row.Data != nil {
 		cwd = row.Data.CWD
@@ -25,21 +39,35 @@ func restartRowText(row cli.Row) string {
 	if cwd == "" && row.Record != nil {
 		cwd = row.Record.CWD
 	}
-	if row.Data != nil && row.Data.LastRestart != nil && row.Status == "restarted" {
-		line += " -> " + displayInstanceID(row.Data.InstanceID)
-	}
 	if cwd != "" {
-		line += "  " + safeTerminalText(cwd)
+		line += "  " + compactRestartPath(cwd)
 	}
-	if row.Error != "" {
-		line += "  " + safeTerminalText(row.Error)
+
+	if details := cli.ErrorSummary(row); details != "" {
+		line += "  " + safeTerminalText(details)
 	}
 	return line
 }
 
+func compactRestartPath(value string) string {
+	path := filepath.Clean(safeTerminalText(value))
+	if path == "." || path == string(filepath.Separator) {
+		return path
+	}
+	parts := strings.Split(strings.Trim(path, string(filepath.Separator)), string(filepath.Separator))
+	if len(parts) <= 2 {
+		return path
+	}
+	return "..." + string(filepath.Separator) + strings.Join(parts[len(parts)-2:], string(filepath.Separator))
+}
+
 func displayInstanceID(value string) string {
 	if len(value) == 32 {
-		value = value[:12]
+		end := 12
+		for end > 0 && !utf8.RuneStart(value[end]) {
+			end--
+		}
+		value = value[:end]
 	}
 	return safeTerminalText(value)
 }
@@ -47,9 +75,9 @@ func displayInstanceID(value string) string {
 func restartStatusText(status string) string {
 	switch status {
 	case "accepted":
-		return "Accepted (not completed)"
+		return "Accepted"
 	case "waiting":
-		return "Waiting for OMP to settle"
+		return "Waiting"
 	case "restarting":
 		return "Restarting"
 	case "restarted":
@@ -61,64 +89,252 @@ func restartStatusText(status string) string {
 
 func safeTerminalText(value string) string {
 	var out strings.Builder
-	for _, r := range value {
-		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
-			fmt.Fprintf(&out, "\\u%04x", r)
+	for _, character := range value {
+		if character < 0x20 || (character >= 0x7f && character <= 0x9f) {
+			fmt.Fprintf(&out, "\\u%04x", character)
 		} else {
-			out.WriteRune(r)
+			out.WriteRune(character)
 		}
 	}
 	return out.String()
 }
 
+func truncateTerminalText(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+
+	suffix := ".."
+	if maxBytes < len(suffix) {
+		suffix = ""
+	}
+	limit := maxBytes - len(suffix)
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit] + suffix
+}
+
 type restartRenderer struct {
 	file         *os.File
-	inPlace      bool
-	lineCount    int
+	canAnimate   bool
+	useColors    bool
+	startedAt    time.Time
+	mu           sync.Mutex
+	rowLines     []progressLine
+	counts       restartRowCounts
+	frame        []progressLine
+	cursorHidden bool
+	outcome      string
 	previous     []string
-	columns      int
-	terminalRows int
+	lineCount    int
+	frameNumber  int
+	stop         chan struct{}
+	done         chan struct{}
 }
 
 func newRestartRenderer(file *os.File) *restartRenderer {
-	renderer := &restartRenderer{file: file}
-	if os.Getenv("TERM") == "dumb" {
-		return renderer
+	_, _, hasTerminal := linux.TerminalSize(file)
+	termIsDumb := os.Getenv("TERM") == "dumb"
+	_, noColor := os.LookupEnv("NO_COLOR")
+	return &restartRenderer{
+		file:       file,
+		canAnimate: hasTerminal && !termIsDumb,
+		useColors:  hasTerminal && !termIsDumb && !noColor,
+		startedAt:  time.Now(),
 	}
-	columns, terminalRows, ok := linux.TerminalSize(file)
-	renderer.inPlace = ok && columns > 0 && terminalRows > 2
-	renderer.columns, renderer.terminalRows = columns, terminalRows
-	return renderer
 }
 
 func (renderer *restartRenderer) progress(rows []cli.Row) {
-	if renderer.inPlace {
-		columns, terminalRows, ok := linux.TerminalSize(renderer.file)
-		if !ok || columns != renderer.columns || terminalRows != renderer.terminalRows {
-			renderer.finish()
-			renderer.inPlace = false
-		}
+	renderer.mu.Lock()
+	renderer.setRows(rows)
+	renderer.drawLocked()
+	renderer.mu.Unlock()
+}
+
+func (renderer *restartRenderer) showOutcome(rows []cli.Row, outcome string) {
+	renderer.mu.Lock()
+	renderer.setRows(rows)
+	renderer.outcome = outcome
+	renderer.drawLocked()
+	renderer.mu.Unlock()
+}
+
+func (renderer *restartRenderer) setRows(rows []cli.Row) {
+	renderer.rowLines = renderer.rowLines[:0]
+	for _, row := range rows {
+		renderer.rowLines = append(renderer.rowLines, progressLine{text: restartRowText(row), status: row.Status})
 	}
-	lines := make([]string, len(rows))
-	for index, row := range rows {
-		lines[index] = restartRowText(row)
+	renderer.counts = countRestartRows(rows)
+}
+
+func (renderer *restartRenderer) startAnimation() {
+	renderer.mu.Lock()
+	if !renderer.canAnimate || renderer.stop != nil {
+		renderer.mu.Unlock()
+		return
 	}
-	if !renderer.inPlace || len(lines)+1 > renderer.terminalRows-1 || !renderer.fits(lines) {
-		if renderer.inPlace {
-			renderer.finish()
+
+	renderer.stop = make(chan struct{})
+	renderer.done = make(chan struct{})
+	stop := renderer.stop
+	done := renderer.done
+	renderer.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(restartAnimationInterval)
+		defer ticker.Stop()
+		defer close(done)
+
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				renderer.animate()
+			}
 		}
-		renderer.inPlace = false
-		renderer.appendTransitions(lines)
+	}()
+}
+
+func (renderer *restartRenderer) animate() {
+	renderer.mu.Lock()
+	renderer.drawLocked()
+	renderer.mu.Unlock()
+}
+
+func (renderer *restartRenderer) drawLocked() {
+	columns, terminalRows, hasTerminal := linux.TerminalSize(renderer.file)
+	if hasTerminal && columns > 0 && terminalRows > 0 && os.Getenv("TERM") != "dumb" {
+		frame := renderer.terminalFrame(terminalRows)
+		renderer.frameNumber++
+		renderer.writeInPlace(frame, columns, terminalRows)
 		return
 	}
 	if renderer.lineCount > 0 {
-		fmt.Fprintf(renderer.file, "\x1b[%dA", renderer.lineCount)
+		fmt.Fprintln(renderer.file)
+		renderer.lineCount = 0
+		renderer.previous = nil
 	}
-	for _, line := range lines {
-		fmt.Fprintf(renderer.file, "\r\x1b[2K%s\n", line)
+	frame := renderer.plainFrame()
+	lines := plainLines(frame)
+	renderer.appendTransitions(lines)
+}
+
+func (renderer *restartRenderer) terminalFrame(terminalRows int) []progressLine {
+	counts := renderer.counts
+
+	footer := renderer.outcome
+	if footer == "" {
+		footer = restartProgressFooter
 	}
-	renderer.lineCount = len(lines)
-	renderer.previous = append(renderer.previous[:0], lines...)
+	if terminalRows <= 2 {
+		text := fmt.Sprintf(
+			"%c %d/%d restarted, %d pending, %d issues, %d hidden, %s | %s",
+			loaderFrames[renderer.frameNumber%len(loaderFrames)],
+			counts.restarted,
+			counts.total,
+			counts.pending,
+			counts.failed,
+			counts.total,
+			renderer.elapsed(),
+			footer,
+		)
+		return []progressLine{{text: text}}
+	}
+
+	header := fmt.Sprintf(
+		"%d/%d restarted | %d pending | %d issues | %s",
+		counts.restarted,
+		counts.total,
+		counts.pending,
+		counts.failed,
+		renderer.elapsed(),
+	)
+
+	maximumTargets := terminalRows - 3
+	lines := renderer.frame[:0]
+	lines = append(lines, progressLine{text: header})
+	var hidden int
+	lines, hidden = appendVisibleRestartRows(lines, renderer.rowLines, maximumTargets)
+	if hidden > 0 {
+		footer = fmt.Sprintf("%d hidden | %s", hidden, footer)
+	}
+	lines = append(lines, progressLine{text: footer})
+	renderer.frame = lines
+	return lines
+}
+
+func (renderer *restartRenderer) plainFrame() []progressLine {
+	counts := renderer.counts
+	header := fmt.Sprintf(
+		"Restart progress | %d/%d restarted | %d pending | %d issues | %s",
+		counts.restarted,
+		counts.total,
+		counts.pending,
+		counts.failed,
+		renderer.elapsed(),
+	)
+
+	footer := renderer.outcome
+	if footer == "" {
+		footer = restartProgressFooter
+	}
+
+	lines := renderer.frame[:0]
+	lines = append(lines, progressLine{text: header})
+	lines = append(lines, renderer.rowLines...)
+	lines = append(lines, progressLine{text: footer})
+	renderer.frame = lines
+	return lines
+}
+
+func (renderer *restartRenderer) writeInPlace(lines []progressLine, columns, terminalRows int) {
+	if !renderer.cursorHidden {
+		fmt.Fprint(renderer.file, "\x1b[?25l")
+		renderer.cursorHidden = true
+	}
+	linesAbove := renderer.lineCount - 1
+	if linesAbove >= terminalRows {
+		linesAbove = terminalRows - 1
+	}
+	if linesAbove > 0 {
+		fmt.Fprintf(renderer.file, "\x1b[%dA", linesAbove)
+	}
+	fmt.Fprint(renderer.file, "\r")
+	for index, line := range lines {
+		if index > 0 {
+			fmt.Fprint(renderer.file, "\r\n")
+		}
+		fmt.Fprint(renderer.file, "\x1b[2K")
+		text := line.text
+		if isPendingRestartStatus(line.status) {
+			text = string(loaderFrames[renderer.frameNumber%len(loaderFrames)]) + " " + text
+		}
+		text = truncateTerminalText(text, columns-1)
+		if renderer.useColors {
+			fmt.Fprint(renderer.file, colorizeRestartLine(text, line.status))
+		} else {
+			fmt.Fprint(renderer.file, text)
+		}
+	}
+
+	previouslyVisibleLines := renderer.lineCount
+	if previouslyVisibleLines > terminalRows {
+		previouslyVisibleLines = terminalRows
+	}
+	extraLines := previouslyVisibleLines - len(lines)
+	if extraLines > 0 {
+		for range extraLines {
+			fmt.Fprint(renderer.file, "\x1b[1B\r\x1b[2K")
+		}
+	}
+	if len(lines) > renderer.lineCount {
+		renderer.lineCount = len(lines)
+	}
 }
 
 func (renderer *restartRenderer) appendTransitions(lines []string) {
@@ -130,23 +346,127 @@ func (renderer *restartRenderer) appendTransitions(lines []string) {
 	renderer.previous = append(renderer.previous[:0], lines...)
 }
 
-func (renderer *restartRenderer) fits(lines []string) bool {
-	for _, line := range lines {
-		if len(line) >= renderer.columns {
-			return false
-		}
-		for _, r := range line {
-			if r > 0x7e {
-				return false
-			}
-		}
-	}
-	return true
+func (renderer *restartRenderer) elapsed() string {
+	seconds := int64(time.Since(renderer.startedAt).Seconds())
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	remainder := seconds % 60
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainder)
 }
 
-func (renderer *restartRenderer) finish() {
+func (renderer *restartRenderer) close() {
+	renderer.mu.Lock()
+	stop := renderer.stop
+	done := renderer.done
+	renderer.stop = nil
+	renderer.done = nil
+	if stop != nil {
+		close(stop)
+	}
+	renderer.mu.Unlock()
+
+	if done != nil {
+		<-done
+	}
+
+	renderer.mu.Lock()
 	if renderer.lineCount > 0 {
-		fmt.Fprint(renderer.file, "\n")
+		fmt.Fprintln(renderer.file)
 		renderer.lineCount = 0
 	}
+	if renderer.cursorHidden {
+		fmt.Fprint(renderer.file, "\x1b[?25h")
+		renderer.cursorHidden = false
+	}
+	renderer.mu.Unlock()
+}
+
+type progressLine struct {
+	text   string
+	status string
+}
+
+type restartRowCounts struct {
+	total     int
+	restarted int
+	pending   int
+	failed    int
+}
+
+var loaderFrames = [...]rune{'|', '/', '-', '\\'}
+
+func countRestartRows(rows []cli.Row) restartRowCounts {
+	counts := restartRowCounts{total: len(rows)}
+	for _, row := range rows {
+		switch row.Status {
+		case "restarted":
+			counts.restarted++
+		case "accepted", "waiting", "restarting":
+			counts.pending++
+		case "unreachable", "failed", "unknown":
+			counts.failed++
+		}
+	}
+	return counts
+}
+
+func appendVisibleRestartRows(lines []progressLine, rows []progressLine, maximum int) ([]progressLine, int) {
+	if len(rows) <= maximum {
+		for _, row := range rows {
+			lines = append(lines, row)
+		}
+		return lines, 0
+	}
+
+	visibleCount := 0
+	for _, row := range rows {
+		if visibleCount == maximum {
+			break
+		}
+		if isPendingRestartStatus(row.status) {
+			lines = append(lines, row)
+			visibleCount++
+		}
+	}
+	for _, row := range rows {
+		if visibleCount == maximum {
+			break
+		}
+		if isPendingRestartStatus(row.status) {
+			continue
+		}
+		lines = append(lines, row)
+		visibleCount++
+	}
+	return lines, len(rows) - visibleCount
+}
+
+func isPendingRestartStatus(status string) bool {
+	return status == "accepted" || status == "waiting" || status == "restarting"
+}
+
+func plainLines(lines []progressLine) []string {
+	result := make([]string, len(lines))
+	for index, line := range lines {
+		result[index] = line.text
+	}
+	return result
+}
+
+func colorizeRestartLine(text, status string) string {
+	color := ""
+	switch status {
+	case "restarted":
+		color = "32"
+	case "accepted", "waiting":
+		color = "33"
+	case "restarting":
+		color = "36"
+	case "unreachable", "failed", "unknown":
+		color = "31"
+	}
+	if color == "" {
+		return text
+	}
+	return "\x1b[" + color + "m" + text + "\x1b[0m"
 }

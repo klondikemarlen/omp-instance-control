@@ -137,10 +137,13 @@ func outcomeForError(err error) string {
 	return "unknown"
 }
 
-// FormatRows creates the tab-separated human-readable output used by the CLI.
+// FormatRows creates compact operational output; JSON retains diagnostic details.
 func FormatRows(rows []Row) string {
-	formatted := make([]string, len(rows))
+	var formatted strings.Builder
 	for index, row := range rows {
+		if index > 0 {
+			formatted.WriteByte('\n')
+		}
 		id := row.InstanceID
 		if id == "" && row.Record != nil {
 			id = row.Record.InstanceID
@@ -148,46 +151,66 @@ func FormatRows(rows []Row) string {
 		if id == "" {
 			id = "unknown"
 		}
-		details := row.Error
-		if details == "" && row.Data != nil {
-			details = row.Data.Message
-			if details == "" {
-				details = row.Data.State
-			}
+		if len(id) == 32 {
+			id = id[:12]
 		}
-		currentCWD := ""
-		if row.Data != nil {
-			currentCWD = row.Data.CWD
+		state := row.Status
+		if state == "online" && row.Data != nil && row.Data.State != "" {
+			state = row.Data.State
 		}
-		if currentCWD == "" && row.Record != nil {
-			currentCWD = row.Record.CWD
+		if state == "restart-requested" {
+			state = "restart pending"
 		}
+		formatted.WriteString(safeText(id))
+		formatted.WriteString("  ")
+		formatted.WriteString(safeText(state))
 		cwd := ""
-		if currentCWD != "" {
-			cwd = " " + safeText(currentCWD)
+		if row.Data != nil {
+			cwd = row.Data.CWD
 		}
-		restart := ""
-		if row.Data != nil && row.Data.LastRestart != nil {
-			restart = fmt.Sprintf(" completed-after-relaunch:%s:%s", safeText(row.Data.LastRestart.OperationID), safeText(row.Data.LastRestart.PreviousInstanceID))
+		if cwd == "" && row.Record != nil {
+			cwd = row.Record.CWD
 		}
-		lifecycle := ""
-		if row.Data != nil && (row.Status == "online" || row.Status == "restarted") {
-			lifecycle = fmt.Sprintf(" launcher=%s canRestart=%t", managedLabel(row.Data.LauncherManaged), row.Data.CanRestart)
+		if cwd != "" {
+			formatted.WriteString("  ")
+			formatted.WriteString(safeText(compactProjectPath(cwd)))
 		}
-		line := safeText(id) + "\t" + safeText(row.Status) + cwd + lifecycle + restart
-		if details != "" {
-			line += "\t" + safeText(details)
+		if row.Status == "online" && row.Data != nil && row.Data.LastRestart != nil {
+			formatted.WriteString("  (previous restart completed)")
 		}
-		formatted[index] = line
+		if details := ErrorSummary(row); details != "" {
+			formatted.WriteString("  ")
+			formatted.WriteString(safeText(details))
+		}
 	}
-	return strings.Join(formatted, "\n")
+	return formatted.String()
 }
 
-func managedLabel(managed bool) string {
-	if managed {
-		return "managed"
+func compactProjectPath(value string) string {
+	trimmed := strings.TrimRight(value, "/")
+	last := strings.LastIndex(trimmed, "/")
+	if last <= 0 {
+		return value
 	}
-	return "unmanaged"
+	parent := strings.LastIndex(trimmed[:last], "/")
+	if parent <= 0 {
+		return value
+	}
+	return "..." + trimmed[parent:]
+}
+
+// ErrorSummary omits socket internals from human output, not from JSON results.
+func ErrorSummary(row Row) string {
+	if row.Status == "unreachable" {
+		if strings.Contains(row.Error, "connect ENOENT") || strings.HasSuffix(row.Error, "no such file or directory") {
+			return "socket missing"
+		}
+		if strings.Contains(row.Error, "connect ECONNREFUSED") || strings.HasSuffix(row.Error, "connection refused") {
+			return "connection refused"
+		}
+		return "endpoint unavailable"
+	}
+	return row.Error
 }
 
 func safeText(value string) string {

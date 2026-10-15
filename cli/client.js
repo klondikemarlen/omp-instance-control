@@ -84,23 +84,60 @@ function safeText(value) {
   )
 }
 
+function compactProjectPath(value) {
+  const parts = value.split("/").filter(Boolean)
+  if (parts.length <= 2) {
+    return value
+  }
+
+  return `.../${parts.slice(-2).join("/")}`
+}
+
+function errorSummary(row) {
+  if (row.status !== "unreachable") {
+    return row.error ?? ""
+  }
+
+  if (row.error?.includes("connect ENOENT") || row.error?.endsWith("no such file or directory")) {
+    return "socket missing"
+  }
+
+  if (row.error?.includes("connect ECONNREFUSED") || row.error?.endsWith("connection refused")) {
+    return "connection refused"
+  }
+
+  return "endpoint unavailable"
+}
+
 export function formatRows(rows) {
   return rows
     .map((row) => {
-      const record = row.record
-      const id = row.instanceId ?? record?.instanceId ?? "unknown"
-      const status = row.status
-      const details = row.error ?? row.data?.message ?? row.data?.state ?? ""
-      const currentCwd = row.data?.cwd ?? record?.cwd
-      const cwd = currentCwd ? ` ${safeText(currentCwd)}` : ""
-      const restart = row.data?.lastRestart
-        ? ` completed-after-relaunch:${safeText(row.data.lastRestart.operationId)}:${safeText(row.data.lastRestart.previousInstanceId)}`
-        : ""
-      const lifecycle =
-        row.data && (row.status === "online" || row.status === "restarted")
-          ? ` launcher=${row.data.launcherManaged ? "managed" : "unmanaged"} canRestart=${row.data.canRestart === true}`
-          : ""
-      return `${safeText(id)}\t${safeText(status)}${cwd}${lifecycle}${restart}${details ? `\t${safeText(details)}` : ""}`
+      let id = row.instanceId || row.record?.instanceId || "unknown"
+      if (id.length === 32) {
+        id = id.slice(0, 12)
+      }
+
+      let state = row.status === "online" ? row.data?.state || row.status : row.status
+      if (state === "restart-requested") {
+        state = "restart pending"
+      }
+
+      const currentCwd = row.data?.cwd || row.record?.cwd
+      const parts = [id, state]
+      if (currentCwd) {
+        parts.push(compactProjectPath(currentCwd))
+      }
+
+      if (row.status === "online" && row.data?.lastRestart) {
+        parts.push("(previous restart completed)")
+      }
+
+      const error = errorSummary(row)
+      if (error) {
+        parts.push(error)
+      }
+
+      return parts.map(safeText).join("  ")
     })
     .join("\n")
 }
