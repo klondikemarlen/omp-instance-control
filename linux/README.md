@@ -6,6 +6,8 @@ Use private same-user local IPC rather than a public TCP listener. Do not use pr
 
 `transport.go` provides native client transport and private filesystem helpers; `transport.js` remains the OMP adapter's bounded Unix-socket server. `launcher.go` inherits terminal streams, validates and consumes a one-shot restart handoff after successful child exit, and resumes the current session/cwd without replaying initial messages. Signals cancel relaunch and forward only to the owning child. Native launch-argument rewriting is temporary until OMP provides the supported host restart request.
 
+`registration.go` removes a reaped child's registrations using private per-identity handoffs bound to its launcher token, scope, and actual child PID. It reuses the transport's runtime-directory rules, verifies record contents and socket identity before removal, and preserves changed or unsafe artifacts. A failed connection alone never triggers cleanup; legacy records without ownership handoffs remain visible.
+
 `take-over.js` accepts a plain session-file/cwd snapshot and owns Linux filesystem/permission checks, executable discovery, scope resolution, and the quoted POSIX resume command. It does not receive OMP host contexts or invoke UI/lifecycle methods. Its behavior tests live in `test/linux/`; host session capture and revalidation remain in `omp/`.
 
 `profiles.js` enumerates valid named-profile directories within one configuration root for cached OMP autocomplete. It includes `default` and the selected profile without creating directories or probing other profiles' control endpoints.
