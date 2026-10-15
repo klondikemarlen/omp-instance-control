@@ -60,6 +60,7 @@ ompi instances
 ompi instances restart --instance FULL_INSTANCE_ID
 ompi instances restart --all
 ompi instances list --profile work --json
+ompi instances cleanup
 ompi instances --help
 ```
 
@@ -77,17 +78,20 @@ From OMP with the plugin loaded:
 /ompi instances restart --instance FULL_INSTANCE_ID
 /ompi instances restart --all
 /ompi instances list --profile work
+/ompi instances cleanup
 /ompi instances --help
 /ompi instances --version
 ```
 
-Both surfaces expose `list` and `restart`, with five control options: `--all`, `--instance ID`, `--profile NAME`, `--json`, and `--no-wait`. `instances` defaults to listing; restart requires an explicit selector. Control-command `--cwd` and `--timeout` are removed; standard OMP launch arguments, including `--cwd`, are unchanged.
+Both surfaces expose `list`, `restart`, and `cleanup`, with five control options: `--all`, `--instance ID`, `--profile NAME`, `--json`, and `--no-wait`. `instances` defaults to listing; restart requires an explicit selector. Cleanup accepts only `--profile` and `--json` (plus help/version). Control-command `--cwd` and `--timeout` are removed; standard OMP launch arguments, including `--cwd`, are unchanged.
 
 Inside OMP, peer restart waits with animated, themed progress, elapsed time, and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
 
 Argument autocomplete covers the namespace, actions, options, configured profile names, and full online instance IDs. Profile values complete in both `--profile NAME` and `--profile=NAME` forms, including default listing without an explicit `list` action. Suggestions include `default` and the active profile and stay inside the current configuration root. ID suggestions are cached per profile/config-root scope and refreshed at startup, after listing or observed peer relaunch, and on session lifecycle events. List the selected profile first to refresh its IDs. The former `/instances` command is removed, not aliased.
 
 `--all` selects a snapshot in the current profile/config-root scope. Replacement instances do not receive the old request. Select another profile explicitly with control-command `--profile`; use the same `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and `XDG_RUNTIME_DIR` as the participating launchers. Named profiles ignore `PI_CODING_AGENT_DIR`, as OMP does.
+
+Run `ompi instances cleanup` (or `/ompi instances cleanup`) to retire old registrations in the selected scope. It requires both a positively absent recorded PID and a missing/refused endpoint, then rechecks private file contents and socket identity before removal. JSON reports each full `instanceId`, `status` (`removed`, `preserved`, or `failed`), and `reason`; native cleanup exits nonzero on failures while still cleaning independent eligible records. Live or reused PIDs, uncertain owners, reachable endpoints, changed files, and socket-only files without records are preserved. Listing and autocomplete remain read-only. Cleanup sends no shutdown/restart requests, and installation never deletes runtime state.
 
 Use `--` before flag-shaped initial messages. Initial messages and startup session actions are never replayed after a controlled restart. For custom string-valued extension flags, use `--custom=value`; for custom boolean flags before a message, separate the message with `--`. An unknown bare flag followed by a non-flag token, a missing string value, or a flag-looking spaced string value makes controlled restart unavailable. Use `--system-prompt=--literal` for a flag-shaped string value. Initial OMP invocation still passes through unchanged.
 
@@ -117,7 +121,7 @@ OMP owns settlement, transcript persistence, teardown, and terminal release. The
 - Relaunch resumes the actual current session file and cwd, not the original selector. Original configuration paths and relative default-profile agent-directory overrides remain anchored across directory changes.
 - Restart admission checks OMP's private parsed extension-flag map read-only at `session_start`. Missing metadata or a parsed built-in collision refuses restart before shutdown. This map is not a registry: unused no-default flags may be absent. Generated restart uses the unshadowable `-r` alias and the child's process cwd, not injectable long options. The explicit compatibility dependency is verified on OMP 18.8.7; it does not mutate flags or replace public lifecycle APIs.
 - Private same-user Unix sockets and discovery records live under `$XDG_RUNTIME_DIR/omp-instance-control`, or `/tmp/omp-instance-control-<uid>` when unset. Unsafe permissions, symlinks, and overlong socket paths fail explicitly.
-- Before publishing an endpoint, the adapter writes a private token-bound ownership handoff. After reaping its child, the wrapper removes only that launch's unchanged registration/socket, including after abnormal child exit. It preserves mismatched identities and unsafe files. Discovery never deletes on connection failure or PID guesses; legacy records without ownership proof and records left by a crashed wrapper can remain unreachable. Same-user IPC is not a sandbox against other programs running as your account.
+- Before publishing an endpoint, the adapter writes a private token-bound ownership handoff. After reaping its child, the wrapper removes only that launch's unchanged registration/socket, including after abnormal child exit. It preserves mismatched identities and unsafe files. Explicit `instances cleanup` can retire legacy registrations or records left by a crashed wrapper only when owner absence and endpoint failure are both confirmed; connection failure or PID reuse alone is not enough. Same-user IPC is not a sandbox against other programs running as your account.
 
 ## Temporary Ownership and Upstream Removal
 

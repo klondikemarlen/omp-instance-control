@@ -12,8 +12,9 @@ const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
 const RESTART_ONLY_OPTIONS = ["all", "instance", "no-wait"]
 const ROOT_COMPLETIONS = ["instances", "take-over", "--help", "-h", "--version"]
-const ACTION_COMPLETIONS = ["list", "restart", "--help", "-h", "--version"]
+const ACTION_COMPLETIONS = ["list", "restart", "cleanup", "--help", "-h", "--version"]
 const LIST_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
+const CLEANUP_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
 const RESTART_COMPLETIONS = [
   "--all",
   "--instance",
@@ -132,7 +133,7 @@ function parseOmpiArguments(args) {
     if (present.size === 0) {
       return { action: "help", values: parsed.values, present }
     }
-    throw new Error(`Usage: /${COMMAND} instances list|restart [options]`)
+    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
   }
 
   const positionTokens = parsed.tokens.filter((token) => token.kind === "positional")
@@ -153,7 +154,7 @@ function parseOmpiArguments(args) {
     return { action: "take-over", values: parsed.values, present }
   }
   if (positionals.shift() !== "instances") {
-    throw new Error(`Usage: /${COMMAND} instances list|restart [options]`)
+    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
   }
   if (
     parsed.tokens.some(
@@ -164,7 +165,7 @@ function parseOmpiArguments(args) {
         token.name !== "version"
     )
   ) {
-    throw new Error(`Usage: /${COMMAND} instances list|restart [options]`)
+    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
   }
 
   const actionToken = positionTokens[1]
@@ -175,11 +176,17 @@ function parseOmpiArguments(args) {
         token.kind === "option" && token.index > rootToken.index && token.index < actionToken.index
     )
   ) {
-    throw new Error(`Usage: /${COMMAND} instances list|restart [options]`)
+    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
   }
   const action = positionals.shift() ?? "list"
-  if (positionals.length > 0 || !["list", "restart"].includes(action)) {
-    throw new Error(`Usage: /${COMMAND} instances list|restart [options]`)
+  if (positionals.length > 0 || !["list", "restart", "cleanup"].includes(action)) {
+    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
+  }
+  if (
+    action === "cleanup" &&
+    [...present].some((name) => !["profile", "json", "help", "version"].includes(name))
+  ) {
+    throw new Error("Usage: /ompi instances cleanup [--profile NAME] [--json]")
   }
   if (parsed.values.help) {
     return { action: "help", values: parsed.values, present }
@@ -234,9 +241,8 @@ function getArgumentCompletions(argumentText, completionIds, profileNames, cwd) 
   const completedTokens = trailingSpace ? tokens : [...tokens]
   const completedActionOrOption =
     tokenPrefix === "instances" ||
-    ["list", "restart", "take-over"].includes(tokenPrefix) ||
+    ["list", "restart", "cleanup", "take-over"].includes(tokenPrefix) ||
     COMPLETABLE_OPTIONS.has(tokenPrefix)
-
   if (
     !trailingSpace &&
     completedActionOrOption &&
@@ -275,7 +281,7 @@ function getArgumentCompletions(argumentText, completionIds, profileNames, cwd) 
     )
   }
 
-  const explicitAction = ["list", "restart"].includes(completedTokens[1])
+  const explicitAction = ["list", "restart", "cleanup"].includes(completedTokens[1])
   const action = explicitAction ? completedTokens[1] : "list"
   const optionTokens = completedTokens.slice(explicitAction ? 2 : 1)
   if (!explicitAction) {
@@ -327,7 +333,12 @@ function getArgumentCompletions(argumentText, completionIds, profileNames, cwd) 
     )
   }
 
-  let options = action === "list" ? LIST_COMPLETIONS : RESTART_COMPLETIONS
+  let options = RESTART_COMPLETIONS
+  if (action === "list") {
+    options = LIST_COMPLETIONS
+  } else if (action === "cleanup") {
+    options = CLEANUP_COMPLETIONS
+  }
   if (action === "restart") {
     options = options.filter(
       (option) =>
@@ -392,6 +403,38 @@ function notifyRows(ctx, rows, json) {
   }
 
   ctx.ui.notify(lines.filter(Boolean).join("\n"), hasFailure ? "warning" : "info")
+}
+
+function cleanupSummary(results) {
+  if (results.length === 0) {
+    return "No stale instance records or sockets found."
+  }
+
+  const counts = new Map()
+  for (const result of results) {
+    counts.set(result.status, (counts.get(result.status) ?? 0) + 1)
+  }
+  return [...counts].map(([status, count]) => `${count} ${status}`).join(", ")
+}
+
+function notifyCleanup(ctx, results, json) {
+  const hasFailure = results.some((result) => result.status === "failed")
+  if (json) {
+    ctx.ui.notify(JSON.stringify(results), hasFailure ? "warning" : "info")
+    return
+  }
+
+  const lines = [cleanupSummary(results)]
+  for (const result of results) {
+    const line = `${result.instanceId.slice(0, 12)} ${result.status}: ${result.reason}`
+    lines.push(
+      line.replace(
+        /[\u0000-\u001f\u007f-\u009f]/g,
+        (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+      )
+    )
+  }
+  ctx.ui.notify(lines.join("\n"), hasFailure ? "warning" : "info")
 }
 
 function renderPeerProgress(ctx, rows, started, frame) {
@@ -464,7 +507,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         const { action, values, present } = parseOmpiArguments(args)
         if (action === "help") {
           ctx.ui.notify(
-            "Usage: /ompi instances [list|restart] [--all | --instance ID] [--profile NAME] [--json] [--no-wait]\nRestart requires exactly one explicit --all or --instance selector. Listing is the default action.\n/ompi take-over prepares a shell command for the current saved session and requests graceful exit. Copy it, then paste it in your shell after OMP exits.",
+            "Usage: /ompi instances [list|restart|cleanup] [options]\nRestart requires exactly one explicit --all or --instance selector. Listing is the default action. Cleanup removes only safely confirmed stale records and endpoints; it supports --profile NAME and --json.\n/ompi take-over prepares a shell command for the current saved session and requests graceful exit. Copy it, then paste it in your shell after OMP exits.",
             "info"
           )
           return
@@ -509,6 +552,12 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
 
         const scope = getScope({ cwd: ctx.cwd, profile: normalizeProfile(values.profile) })
         const transport = await createTransport(scope)
+        if (action === "cleanup") {
+          const results = await transport.cleanupRecords()
+          notifyCleanup(ctx, results, values.json === true)
+          return
+        }
+
         if (action === "list") {
           const rows = await listInstances(transport)
           replaceCompletionIds(scope, rows, completionIds)

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -717,6 +718,100 @@ test("when the session switches during take-over confirmation, shutdown is refus
     assert.equal(notifications[0].level, "error")
   } finally {
     process.env.PATH = previousPath
+    await fixture.close()
+  }
+})
+
+test("when cleanup is requested with JSON, ompi reports and removes a confirmed stale record", async () => {
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const scope = getScope({ cwd: ctx.cwd })
+    const instanceId = "d".repeat(32)
+    const transport = await createTransport(scope)
+    await transport.writeRecord({
+      version: 1,
+      instanceId,
+      scope: scope.id,
+      pid: spawnSync("/usr/bin/true").pid,
+      cwd: fixture.cwd,
+      sessionId: "stale-session",
+      sessionFile: null,
+      launcherManaged: true,
+      state: "running",
+      lastRestart: null,
+    })
+    const ui = createCommand(ctx)
+
+    await ui.command.handler("instances cleanup --json", ctx)
+
+    assert.equal(ui.notifications[0].level, "info")
+    assert.deepEqual(
+      JSON.parse(ui.notifications[0].message).map(({ instanceId, status }) => ({
+        instanceId,
+        status,
+      })),
+      [{ instanceId, status: "removed" }]
+    )
+    await ui.command.handler("instances cleanup --json", ctx)
+    assert.equal(ui.notifications[1].message, "[]")
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when completing cleanup, ompi offers only cleanup options and profile values", async () => {
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+
+    const options = ui.command
+      .getArgumentCompletions("instances cleanup ")
+      .map(({ value }) => value)
+    const profiles = ui.command
+      .getArgumentCompletions("instances cleanup --profile ")
+      .map(({ value }) => value)
+
+    assert.deepEqual(options, [
+      "instances cleanup --profile",
+      "instances cleanup --json",
+      "instances cleanup --help",
+      "instances cleanup -h",
+      "instances cleanup --version",
+    ])
+    assert.deepEqual(profiles, ["instances cleanup --profile default"])
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when cleanup receives restart-only options, ompi rejects without cleaning records", async () => {
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const scope = getScope({ cwd: ctx.cwd })
+    const instanceId = "e".repeat(32)
+    const transport = await createTransport(scope)
+    await transport.writeRecord({
+      version: 1,
+      instanceId,
+      scope: scope.id,
+      pid: spawnSync("/usr/bin/true").pid,
+      cwd: fixture.cwd,
+      sessionId: "stale-session",
+      sessionFile: null,
+      launcherManaged: true,
+      state: "running",
+      lastRestart: null,
+    })
+    const ui = createCommand(ctx)
+
+    await ui.command.handler("instances cleanup --all", ctx)
+
+    assert.equal(ui.notifications[0].level, "error")
+    assert.equal((await transport.readRecords()).length, 1)
+  } finally {
     await fixture.close()
   }
 })

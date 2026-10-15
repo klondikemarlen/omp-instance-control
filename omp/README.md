@@ -6,6 +6,8 @@ Own extension registration for main interactive instances, lifecycle request adm
 
 `command.js` mirrors native `ompi instances` actions, options, and profile scope. Ordinary OMP can control wrapped peers without advertising self-restart. Peer observation uses the shared JS client; a self-selected snapshot returns acceptance without waiting. Public widgets and in-memory host keybindings own progress/cancellation; autocomplete caches online peers per scope and configured profile names from the Linux boundary, refreshing through listing and lifecycle events. The host completion callback remains synchronous.
 
+Explicit `/ompi instances cleanup` invokes the Linux transport's conservative legacy cleanup, with `--profile`/`--json` and action/profile autocomplete. It does not invoke OMP shutdown or restart and can run from ordinary OMP. Listing and completion never remove records.
+
 `take-over.js` captures the public host session ID/file/cwd, delegates command preparation to [`../linux/take-over.js`](../linux/take-over.js), and rejects session changes during that asynchronous work. `command.js` displays the result in a public confirmation dialog, revalidates after confirmation, records preparation through `appendEntry`, then calls `ctx.shutdown()`. Cancellation and preparation failures never request shutdown. The dialog is required so teardown cannot hide the command before the user copies it; the user alone performs the subsequent shell paste.
 
 Linux transport belongs in [`../linux/`](../linux/README.md); wire semantics belong in [`../protocol/`](../protocol/README.md).

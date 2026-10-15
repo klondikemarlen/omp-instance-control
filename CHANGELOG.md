@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 - 2026-10-15
+
+### Added
+
+- Explicit `ompi instances cleanup` and `/ompi instances cleanup` retire legacy registrations only after positive owner absence and missing/refused endpoint checks, with private file and unchanged-identity safeguards.
+- Report per-record removed, preserved, and failed outcomes; support existing profile/JSON options and fresh OMP action/profile autocomplete without adding control flags.
+
+### Safety
+
+- Preserve live/reused PIDs, uncertain owners, responsive endpoints, unsafe or changed files, and socket-only artifacts. Discovery stays read-only; package installation does not sweep runtime state.
+
 ## 0.6.0 - 2026-10-15
 
 ### Added
