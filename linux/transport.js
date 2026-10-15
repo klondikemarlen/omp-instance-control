@@ -182,6 +182,103 @@ function socketPath(directory, instanceId) {
   return result
 }
 
+function sameFileIdentity(first, second) {
+  return first.dev === second.dev && first.ino === second.ino
+}
+
+function sameSocketIdentity(first, second) {
+  return (
+    first.exists === second.exists &&
+    (!first.exists ||
+      (first.dev === second.dev &&
+        first.ino === second.ino &&
+        first.uid === second.uid &&
+        first.mode === second.mode))
+  )
+}
+
+function inspectSocketInfo(info, file) {
+  if (info.isSymbolicLink() || !info.isSocket()) {
+    throw new Error(`Unsafe endpoint: ${file} is not a Unix socket`)
+  }
+  if (info.uid !== currentUid() || (info.mode & 0o077) !== 0) {
+    throw new Error(`Unsafe endpoint: ${file} is foreign-owned or accessible by other users`)
+  }
+  return {
+    exists: true,
+    dev: info.dev,
+    ino: info.ino,
+    uid: info.uid,
+    mode: info.mode,
+  }
+}
+
+async function inspectSocket(file) {
+  let info
+  try {
+    info = await lstat(file)
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { exists: false }
+    }
+    throw error
+  }
+  return inspectSocketInfo(info, file)
+}
+
+function probeEndpoint(file) {
+  const { promise, resolve } = Promise.withResolvers()
+  const socket = net.createConnection(file)
+  let settled = false
+  const finish = (result) => {
+    if (settled) {
+      return
+    }
+
+    settled = true
+    clearTimeout(timer)
+    socket.destroy()
+    resolve(result)
+  }
+  const timer = setTimeout(
+    () =>
+      finish({
+        error: Object.assign(new Error("Endpoint connection timed out"), {
+          code: "ETIMEDOUT",
+        }),
+      }),
+    REQUEST_TIMEOUT_MS
+  )
+  socket.once("connect", () => finish({ connected: true }))
+  socket.once("error", (error) => finish({ error }))
+  return promise
+}
+
+function ownerIsAbsent(pid) {
+  try {
+    process.kill(pid, 0)
+    return { absent: false, reason: "recorded process is still present" }
+  } catch (error) {
+    if (error.code === "ESRCH") {
+      return { absent: true }
+    }
+    if (error.code === "EPERM") {
+      return { absent: false, reason: "permission denied while checking the recorded process" }
+    }
+    return {
+      absent: false,
+      reason: `could not verify the recorded process: ${error.message}`,
+    }
+  }
+}
+
+function connectionFailureReason(error) {
+  if (error.code === "ENOENT" || error.code === "ECONNREFUSED") {
+    return undefined
+  }
+  return `endpoint could not be checked safely: ${error.message}`
+}
+
 function encodeFrame(value) {
   const frame = Buffer.from(`${JSON.stringify(value)}\n`)
   if (frame.byteLength > MAX_FRAME_BYTES) throw new Error("IPC frame exceeds the maximum size")
@@ -229,6 +326,231 @@ export async function createTransport(scope, { env = process.env } = {}) {
       records.push(record)
     }
     return records
+  }
+
+  async function readCleanupSnapshot(instanceId) {
+    const file = recordPath(directory, instanceId)
+    const listedInfo = await assertPrivateFile(file)
+    if (!listedInfo) {
+      return null
+    }
+
+    const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    try {
+      const openedInfo = await handle.stat()
+      if (
+        !openedInfo.isFile() ||
+        openedInfo.uid !== currentUid() ||
+        (openedInfo.mode & 0o077) !== 0 ||
+        !sameFileIdentity(listedInfo, openedInfo)
+      ) {
+        throw new Error(`Unsafe private file: ${file} changed while it was being read`)
+      }
+      const bytes = await handle.readFile()
+      const record = validateRecord(JSON.parse(bytes.toString("utf8")), scope)
+      if (record.instanceId !== instanceId) {
+        throw new Error(`Instance record filename does not match identity: ${instanceId}.json`)
+      }
+      return { file, record, bytes, info: openedInfo }
+    } finally {
+      await handle.close()
+    }
+  }
+
+  async function cleanupOneRecord(instanceId) {
+    const result = (status, reason) => ({ instanceId, status, reason })
+    let snapshot
+    try {
+      snapshot = await readCleanupSnapshot(instanceId)
+    } catch (error) {
+      return result("failed", `record is invalid or unsafe: ${error.message}`)
+    }
+    if (!snapshot) {
+      return result("preserved", "record disappeared before it could be checked")
+    }
+
+    const owner = ownerIsAbsent(snapshot.record.pid)
+    if (!owner.absent) {
+      return result("preserved", owner.reason)
+    }
+
+    const endpoint = socketPath(directory, instanceId)
+    let originalSocket
+    try {
+      originalSocket = await inspectSocket(endpoint)
+    } catch (error) {
+      return result("failed", `endpoint is unsafe: ${error.message}`)
+    }
+    const probe = await probeEndpoint(endpoint)
+    if (probe.connected) {
+      return result("preserved", "endpoint is responsive despite the missing process")
+    }
+    if (probe.error) {
+      const reason = connectionFailureReason(probe.error)
+      if (reason) {
+        return result("preserved", reason)
+      }
+    }
+
+    let checkedSocket
+    try {
+      checkedSocket = await inspectSocket(endpoint)
+    } catch (error) {
+      return result("failed", `endpoint is unsafe: ${error.message}`)
+    }
+    if (!sameSocketIdentity(originalSocket, checkedSocket)) {
+      return result("preserved", "endpoint changed while it was being checked")
+    }
+
+    const latestRecord = await readCleanupSnapshot(instanceId).catch((error) => ({ error }))
+    if (latestRecord?.error || !latestRecord) {
+      return result("preserved", "record changed or disappeared while cleanup was being checked")
+    }
+    if (
+      !sameFileIdentity(snapshot.info, latestRecord.info) ||
+      !snapshot.bytes.equals(latestRecord.bytes)
+    ) {
+      return result("preserved", "record changed while cleanup was being checked")
+    }
+    const latestOwner = ownerIsAbsent(snapshot.record.pid)
+    if (!latestOwner.absent) {
+      return result("preserved", latestOwner.reason)
+    }
+
+    const finalProbe = await probeEndpoint(endpoint)
+    if (finalProbe.connected) {
+      return result("preserved", "endpoint became responsive during cleanup")
+    }
+    if (finalProbe.error) {
+      const reason = connectionFailureReason(finalProbe.error)
+      if (reason) {
+        return result("preserved", reason)
+      }
+    }
+    try {
+      checkedSocket = await inspectSocket(endpoint)
+    } catch (error) {
+      return result("failed", `endpoint is unsafe: ${error.message}`)
+    }
+    if (!sameSocketIdentity(originalSocket, checkedSocket)) {
+      return result("preserved", "endpoint changed while it was being checked")
+    }
+
+    if (originalSocket.exists) {
+      const recordBeforeSocketUnlink = await readCleanupSnapshot(instanceId).catch((error) => ({
+        error,
+      }))
+      if (recordBeforeSocketUnlink?.error || !recordBeforeSocketUnlink) {
+        return result("preserved", "record changed or disappeared while cleanup was being checked")
+      }
+      if (
+        !sameFileIdentity(snapshot.info, recordBeforeSocketUnlink.info) ||
+        !snapshot.bytes.equals(recordBeforeSocketUnlink.bytes)
+      ) {
+        return result("preserved", "record changed while cleanup was being checked")
+      }
+
+      let socketBeforeUnlink
+      try {
+        socketBeforeUnlink = await inspectSocket(endpoint)
+      } catch (error) {
+        return result("failed", `endpoint is unsafe: ${error.message}`)
+      }
+      if (!sameSocketIdentity(originalSocket, socketBeforeUnlink)) {
+        return result("preserved", "endpoint changed while it was being checked")
+      }
+
+      const ownerBeforeSocketUnlink = ownerIsAbsent(snapshot.record.pid)
+      if (!ownerBeforeSocketUnlink.absent) {
+        return result("preserved", ownerBeforeSocketUnlink.reason)
+      }
+
+      try {
+        await unlink(endpoint)
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          return result("failed", `could not remove stale endpoint: ${error.message}`)
+        }
+      }
+    }
+
+    const finalEndpointProbe = await probeEndpoint(endpoint)
+    if (finalEndpointProbe.connected) {
+      return result("preserved", "endpoint became responsive before the record could be removed")
+    }
+    if (finalEndpointProbe.error) {
+      const reason = connectionFailureReason(finalEndpointProbe.error)
+      if (reason) {
+        return result("preserved", reason)
+      }
+    }
+    let finalSocket
+    try {
+      finalSocket = await inspectSocket(endpoint)
+    } catch (error) {
+      return result("failed", `endpoint is unsafe: ${error.message}`)
+    }
+    if (originalSocket.exists && finalSocket.exists) {
+      return result("preserved", "endpoint reappeared before the record could be removed")
+    }
+    if (!originalSocket.exists && finalSocket.exists) {
+      return result("preserved", "endpoint appeared before the record could be removed")
+    }
+
+    const finalRecord = await readCleanupSnapshot(instanceId).catch((error) => ({ error }))
+    if (finalRecord?.error || !finalRecord) {
+      return result("preserved", "endpoint was removed, but the record changed or disappeared")
+    }
+    if (
+      !sameFileIdentity(snapshot.info, finalRecord.info) ||
+      !snapshot.bytes.equals(finalRecord.bytes)
+    ) {
+      return result("preserved", "endpoint was removed, but the record changed")
+    }
+    const finalOwner = ownerIsAbsent(snapshot.record.pid)
+    if (!finalOwner.absent) {
+      return result("preserved", `endpoint was removed, but ${finalOwner.reason}`)
+    }
+
+    try {
+      await unlink(snapshot.file)
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        return result("failed", `could not remove stale record: ${error.message}`)
+      }
+    }
+    return result("removed", "stale record and endpoint removed")
+  }
+
+  async function cleanupRecords() {
+    await ensurePrivateDirectory(runtimeRoot)
+    await ensurePrivateDirectory(directory)
+    const entries = await readdir(directory, { withFileTypes: true })
+    const instanceIds = entries
+      .filter((entry) => entry.name.endsWith(".json"))
+      .map((entry) => entry.name.slice(0, -5))
+      .sort()
+    const results = []
+    for (const instanceId of instanceIds) {
+      if (!INSTANCE_ID.test(instanceId)) {
+        results.push({
+          instanceId,
+          status: "failed",
+          reason: "record filename is not a valid instance identity",
+        })
+        continue
+      }
+      try {
+        results.push(await cleanupOneRecord(instanceId))
+      } catch (error) {
+        results.push({
+          instanceId,
+          status: "failed",
+          reason: `cleanup failed: ${error.message}`,
+        })
+      }
+    }
+    return results
   }
 
   async function writeRecord(record) {
@@ -436,5 +758,14 @@ export async function createTransport(scope, { env = process.env } = {}) {
     })
   }
 
-  return { scope, directory, readRecords, writeRecord, removeRecord, serve, request }
+  return {
+    scope,
+    directory,
+    readRecords,
+    writeRecord,
+    removeRecord,
+    cleanupRecords,
+    serve,
+    request,
+  }
 }

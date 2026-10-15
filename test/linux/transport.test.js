@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
 import fsPromises from "node:fs/promises"
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, chmod } from "node:fs/promises"
 import net from "node:net"
@@ -18,6 +19,7 @@ import {
 
 const INSTANCE_A = "a".repeat(32)
 const INSTANCE_B = "b".repeat(32)
+const INSTANCE_C = "c".repeat(32)
 const SCOPE_A = { id: "1".repeat(32) }
 const SCOPE_B = { id: "2".repeat(32) }
 const roots = []
@@ -229,6 +231,140 @@ test("request cancellation interrupts a blocked socket probe", async () => {
     await requestReceived.promise
     controller.abort(cancellation)
     await rejected
+  } finally {
+    await server.close()
+  }
+})
+
+test("cleanup removes a validated record after confirming its owner is absent", async () => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const record = { ...makeRecord(SCOPE_A), pid: spawnSync("/usr/bin/true").pid }
+  await transport.writeRecord(record)
+
+  const results = await transport.cleanupRecords()
+
+  assert.deepEqual(
+    results.map(({ instanceId, status }) => ({ instanceId, status })),
+    [{ instanceId: INSTANCE_A, status: "removed" }]
+  )
+  await assert.rejects(readPrivateJson(path.join(transport.directory, `${INSTANCE_A}.json`)), {
+    code: "ENOENT",
+  })
+})
+
+test("cleanup removes a refused stale socket and its absent owner's record", async () => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const endpoint = path.join(transport.directory, `${INSTANCE_A}.sock`)
+  const detachedEndpoint = `${endpoint}.detached`
+  await transport.writeRecord({ ...makeRecord(SCOPE_A), pid: spawnSync("/usr/bin/true").pid })
+
+  const server = net.createServer()
+  await new Promise((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(endpoint, resolve)
+  })
+  await fsPromises.rename(endpoint, detachedEndpoint)
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()))
+  })
+  await fsPromises.rename(detachedEndpoint, endpoint)
+  await chmod(endpoint, 0o600)
+
+  assert.equal((await fsPromises.lstat(endpoint)).isSocket(), true)
+  const results = await transport.cleanupRecords()
+
+  assert.deepEqual(
+    results.map(({ instanceId, status }) => [instanceId, status]),
+    [[INSTANCE_A, "removed"]]
+  )
+  await assert.rejects(fsPromises.lstat(endpoint), { code: "ENOENT" })
+  await assert.rejects(readPrivateJson(path.join(transport.directory, `${INSTANCE_A}.json`)), {
+    code: "ENOENT",
+  })
+})
+
+test("cleanup preserves a live process and a responsive endpoint with a missing owner", async () => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const liveRecord = makeRecord(SCOPE_A, INSTANCE_A)
+  const deadPID = spawnSync("/usr/bin/true").pid
+  const responsiveRecord = { ...makeRecord(SCOPE_A, INSTANCE_B), pid: deadPID }
+  await transport.writeRecord(liveRecord)
+  await transport.writeRecord(responsiveRecord)
+  const server = await transport.serve(INSTANCE_B, async () => ({ data: {} }))
+
+  try {
+    const results = await transport.cleanupRecords()
+
+    assert.deepEqual(
+      results.map(({ instanceId, status }) => [instanceId, status]),
+      [
+        [INSTANCE_A, "preserved"],
+        [INSTANCE_B, "preserved"],
+      ]
+    )
+    assert.equal(
+      (await readPrivateJson(path.join(transport.directory, `${INSTANCE_A}.json`))).pid,
+      process.pid
+    )
+    assert.equal(
+      (await readPrivateJson(path.join(transport.directory, `${INSTANCE_B}.json`))).pid,
+      deadPID
+    )
+  } finally {
+    await server.close()
+  }
+})
+
+test("cleanup reports unsafe records and endpoints while continuing eligible records", async () => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const invalidRecordPath = path.join(transport.directory, `${INSTANCE_A}.json`)
+  const unsafeEndpoint = path.join(transport.directory, `${INSTANCE_B}.sock`)
+  const outsideFile = path.join(root, "outside")
+  await writeFile(invalidRecordPath, "{", { mode: 0o600 })
+  await transport.writeRecord({
+    ...makeRecord(SCOPE_A, INSTANCE_B),
+    pid: spawnSync("/usr/bin/true").pid,
+  })
+  await writeFile(outsideFile, "keep this file", { mode: 0o600 })
+  await symlink(outsideFile, unsafeEndpoint)
+  await transport.writeRecord({
+    ...makeRecord(SCOPE_A, INSTANCE_C),
+    pid: spawnSync("/usr/bin/true").pid,
+  })
+
+  const results = await transport.cleanupRecords()
+
+  assert.deepEqual(
+    results.map(({ instanceId, status }) => [instanceId, status]),
+    [
+      [INSTANCE_A, "failed"],
+      [INSTANCE_B, "failed"],
+      [INSTANCE_C, "removed"],
+    ]
+  )
+  assert.equal(await readFile(outsideFile, "utf8"), "keep this file")
+  assert.equal(
+    (await readPrivateJson(path.join(transport.directory, `${INSTANCE_B}.json`))).instanceId,
+    INSTANCE_B
+  )
+  await assert.rejects(readPrivateJson(path.join(transport.directory, `${INSTANCE_C}.json`)), {
+    code: "ENOENT",
+  })
+})
+
+test("cleanup leaves socket-only endpoints without records untouched", async () => {
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const endpoint = path.join(transport.directory, `${INSTANCE_A}.sock`)
+  const server = await transport.serve(INSTANCE_A, async () => ({ data: {} }))
+
+  try {
+    assert.deepEqual(await transport.cleanupRecords(), [])
+    assert.equal((await fsPromises.lstat(endpoint)).isSocket(), true)
   } finally {
     await server.close()
   }

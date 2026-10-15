@@ -19,6 +19,7 @@ var version = "dev"
 const instancesHelp = `Usage:
   ompi instances [list] [--profile NAME] [--json]
   ompi instances restart (--all | --instance ID) [--profile NAME] [--json] [--no-wait]
+  ompi instances cleanup [--profile NAME] [--json]
   ompi instances --help
   ompi instances --version
 
@@ -59,7 +60,7 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 	if code == 0 && len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(os.Stdout, "\nInstance control: ompi instances list|restart")
+		fmt.Fprintln(os.Stdout, "\nInstance control: ompi instances list|restart|cleanup")
 	}
 	return code, nil
 }
@@ -79,8 +80,8 @@ func runInstances(args []string) (int, error) {
 		action = args[0]
 		optionArgs = args[1:]
 	}
-	if action != "list" && action != "restart" {
-		return 0, usageError("use 'ompi instances list' or 'ompi instances restart'")
+	if action != "list" && action != "restart" && action != "cleanup" {
+		return 0, usageError("use 'ompi instances list', 'ompi instances restart', or 'ompi instances cleanup'")
 	}
 	flags := flag.NewFlagSet("ompi instances "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -115,7 +116,7 @@ func runInstances(args []string) (int, error) {
 	if flags.NArg() != 0 {
 		return 0, usageError("unexpected positional argument")
 	}
-	if action == "list" && restartOptionSet {
+	if action != "restart" && restartOptionSet {
 		return 0, usageError("--all, --instance, and --no-wait are only valid with restart")
 	}
 	if action == "restart" && (*all == (*instance != "")) {
@@ -129,6 +130,14 @@ func runInstances(args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if action == "cleanup" {
+		results, err := transport.CleanupRecords()
+		if err != nil {
+			return 1, err
+		}
+		return printCleanupResults(results, *jsonOutput), nil
+	}
+
 	if action == "list" {
 		rows, err := cli.ListInstances(transport)
 		if err != nil {
