@@ -723,6 +723,7 @@ test("when the session switches during take-over confirmation, shutdown is refus
 })
 
 test("when cleanup is requested with JSON, ompi reports and removes a confirmed stale record", async () => {
+  // Arrange
   const fixture = await createFixture()
   try {
     const ctx = createContext(fixture.cwd)
@@ -743,8 +744,10 @@ test("when cleanup is requested with JSON, ompi reports and removes a confirmed 
     })
     const ui = createCommand(ctx)
 
+    // Act
     await ui.command.handler("instances cleanup --json", ctx)
 
+    // Assert
     assert.equal(ui.notifications[0].level, "info")
     assert.deepEqual(
       JSON.parse(ui.notifications[0].message).map(({ instanceId, status }) => ({
@@ -761,11 +764,13 @@ test("when cleanup is requested with JSON, ompi reports and removes a confirmed 
 })
 
 test("when completing cleanup, ompi offers only cleanup options and profile values", async () => {
+  // Arrange
   const fixture = await createFixture()
   try {
     const ctx = createContext(fixture.cwd)
     const ui = createCommand(ctx)
 
+    // Act
     const options = ui.command
       .getArgumentCompletions("instances cleanup ")
       .map(({ value }) => value)
@@ -773,6 +778,7 @@ test("when completing cleanup, ompi offers only cleanup options and profile valu
       .getArgumentCompletions("instances cleanup --profile ")
       .map(({ value }) => value)
 
+    // Assert
     assert.deepEqual(options, [
       "instances cleanup --profile",
       "instances cleanup --json",
@@ -787,6 +793,7 @@ test("when completing cleanup, ompi offers only cleanup options and profile valu
 })
 
 test("when cleanup receives restart-only options, ompi rejects without cleaning records", async () => {
+  // Arrange
   const fixture = await createFixture()
   try {
     const ctx = createContext(fixture.cwd)
@@ -807,8 +814,10 @@ test("when cleanup receives restart-only options, ompi rejects without cleaning 
     })
     const ui = createCommand(ctx)
 
+    // Act
     await ui.command.handler("instances cleanup --all", ctx)
 
+    // Assert
     assert.equal(ui.notifications[0].level, "error")
     assert.equal((await transport.readRecords()).length, 1)
   } finally {
