@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 - 2026-10-15
+
+### Added
+
+- Ship Bash completion in the Ubuntu package at `/usr/share/bash-completion/completions/ompi`, with the standard completion framework as a package dependency.
+- Discover instance-control actions and their supported flags with Tab; preserve ordinary OMP command and launch-option completion by reusing the installed OMP-generated catalog.
+
 ## 0.7.0 - 2026-10-15
 
 ### Added
