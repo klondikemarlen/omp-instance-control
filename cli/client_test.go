@@ -122,6 +122,26 @@ func TestRestartSelectionAndOutcomeClassification(t *testing.T) {
 	}
 }
 
+func TestRestartFailureStillIdentifiesTheProject(t *testing.T) {
+	record := clientRecord(strings.Repeat("a", 32))
+	record.CWD = "/projects/customer/payments"
+	transport := &testTransport{
+		records: []protocol.Record{record},
+		respond: func(protocol.Record, protocol.Request) (protocol.Response, error) {
+			return protocol.Response{}, syscall.ENOENT
+		},
+	}
+
+	rows, err := RestartInstances(transport, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if text := FormatRows(rows); !strings.Contains(text, "customer/payments") || !strings.Contains(text, "unreachable") {
+		t.Fatalf("failed restart lost its identifiable project: %q", text)
+	}
+}
+
 func TestListDistinguishesUnreachableAndCorrelatedRejection(t *testing.T) {
 	first := clientRecord(strings.Repeat("a", 32))
 	second := clientRecord(strings.Repeat("b", 32))
