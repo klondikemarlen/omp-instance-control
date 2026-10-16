@@ -169,7 +169,7 @@ func printRows(rows []cli.Row, jsonOutput bool) int {
 			}
 		}
 		if unreachable > 0 {
-			fmt.Fprintf(os.Stderr, "%d unreachable registration(s), %d reachable; unreachable entries may be stale. Use --json for full diagnostics.\n", unreachable, reachable)
+			fmt.Fprintf(os.Stderr, "%d unreachable registration(s), %d reachable; entries may be stale. Run ompi instances cleanup for safe cleanup; --json retains full diagnostics.\n", unreachable, reachable)
 		}
 	}
 	return restartExitCode(rows, false)

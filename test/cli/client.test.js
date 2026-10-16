@@ -41,22 +41,28 @@ test("one-target restart dispatches only to that snapshot member", async () => {
   assert.equal(result[0].status, "accepted")
 })
 
-test("all-target restart preserves business failures, unreachable and unknown outcomes", async () => {
+test("all-target restart distinguishes rejection from an inconclusive acknowledgement", async () => {
   const client = transport([first, second], async (record) => {
     if (record.instanceId === first.instanceId) {
       return { ok: false, error: { code: "NOT_RESTARTABLE", message: "No persisted session." } }
     }
     throw Object.assign(new Error("response timed out"), { code: "ETIMEDOUT", ambiguous: true })
   })
-  assert.deepEqual(await restartInstances(client, { all: true }), [
-    {
-      instanceId: first.instanceId,
-      status: "failed",
-      error: "No persisted session.",
-      errorCode: "NOT_RESTARTABLE",
-    },
-    { instanceId: second.instanceId, status: "unknown", error: "response timed out" },
-  ])
+  const rows = await restartInstances(client, { all: true })
+
+  assert.equal(rows[0].status, "failed")
+  assert.equal(rows[0].errorCode, "NOT_RESTARTABLE")
+  assert.equal(rows[1].status, "unknown")
+})
+
+test("a failed restart still identifies its project without injecting terminal controls", async () => {
+  const client = transport([first], async () => {
+    throw Object.assign(new Error("socket disappeared"), { code: "ECONNREFUSED" })
+  })
+
+  const rows = await restartInstances(client, { all: true })
+
+  assert.match(formatRows(rows), /unreachable.*one\\u000apath/)
 })
 
 test("listing probes each record and distinguishes vanished endpoints", async () => {

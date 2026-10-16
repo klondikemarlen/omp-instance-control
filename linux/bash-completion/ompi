@@ -5,7 +5,15 @@ _ompi_omp_completion()
     # Reuse the installed OMP catalog, including its dynamic value completions.
     if ! declare -F _omp >/dev/null; then
         command -v omp >/dev/null 2>&1 || return 0
+        local omp_registration
+        omp_registration=$(complete -p omp 2>/dev/null) || omp_registration=""
         source <(command omp completions bash 2>/dev/null)
+        # The delegated catalog registers omp too; only ompi belongs to us.
+        if [[ -n $omp_registration ]]; then
+            eval "$omp_registration"
+        else
+            complete -r omp 2>/dev/null || :
+        fi
     fi
 
     if declare -F _omp >/dev/null; then

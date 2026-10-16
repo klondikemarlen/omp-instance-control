@@ -399,7 +399,9 @@ function notifyRows(ctx, rows, json) {
 
   const lines = [outcomeSummary(rows), formatRows(rows)]
   if (rows.some((row) => row.status === "unreachable")) {
-    lines.push("Unreachable registrations may be stale; reachable instances remain usable.")
+    lines.push(
+      "Unreachable registrations may be stale. Run /ompi instances cleanup for safe cleanup."
+    )
   }
 
   ctx.ui.notify(lines.filter(Boolean).join("\n"), hasFailure ? "warning" : "info")
@@ -458,6 +460,12 @@ function renderPeerProgress(ctx, rows, started, frame) {
   }
 
   lines.push("OMP owns settlement. Ctrl-C stops watching, not accepted restarts.")
+  if (rows.some((row) => row.status === "waiting")) {
+    lines.push("Waiting: OMP has not shut down yet; turns, queued work or jobs may defer it.")
+  }
+  if (rows.some((row) => row.status === "unreachable")) {
+    lines.push("Possibly stale: run /ompi instances cleanup (safe, explicit cleanup).")
+  }
   ctx.ui.setWidget(PROGRESS_WIDGET, lines, { placement: "aboveEditor" })
 }
 
@@ -587,7 +595,10 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           const acceptedRows = rows.filter((row) => row.status === "accepted")
           if (acceptedRows.length > 0) {
             const controller = new AbortController()
-            let lastProgress = acceptedRows.map((row) => ({ ...row, status: "waiting" }))
+            let lastProgress = rows.map((row) => ({
+              ...row,
+              status: row.status === "accepted" ? "waiting" : row.status,
+            }))
             const started = Date.now()
             let frame = 0
             const renderProgress = () => renderPeerProgress(ctx, lastProgress, started, frame++)
@@ -603,7 +614,10 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               const watchedRows = await waitForRestarts(transport, acceptedRows, {
                 signal: controller.signal,
                 onProgress(progressRows) {
-                  lastProgress = progressRows.map((row) => ({ ...row }))
+                  lastProgress = rowsFromProgress(
+                    rows,
+                    progressRows.map((row) => ({ ...row }))
+                  )
                   renderProgress()
                 },
               })

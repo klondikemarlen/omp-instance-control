@@ -53,6 +53,7 @@ export async function restartInstances(transport, { all = false, instanceId } = 
         )
         if (!response.ok) {
           return {
+            record,
             instanceId: record.instanceId,
             status: "failed",
             error: response.error.message,
@@ -71,7 +72,7 @@ export async function restartInstances(transport, { all = false, instanceId } = 
           : error instanceof ProtocolError
             ? "failed"
             : "unknown"
-        return { instanceId: record.instanceId, status, error: error.message }
+        return { record, instanceId: record.instanceId, status, error: error.message }
       }
     })
   )

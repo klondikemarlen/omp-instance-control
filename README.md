@@ -27,6 +27,8 @@ The package installs `/usr/bin/ompi` and the plugin under `/usr/share/omp-instan
 
 The apt package includes Bash completion at `/usr/share/bash-completion/completions/ompi` and depends on `bash-completion`. Open a fresh interactive Bash shell after installation; no completion setup command or shell-configuration edit is required when the standard Ubuntu Bash completion startup is enabled. Tab completes `ompi instances r` to `ompi instances restart`, lists `list`, `restart`, and `cleanup` after `ompi instances `, and offers action-specific flags. Profile names and instance IDs remain free-form values. Ordinary OMP commands and launch options reuse the installed OMP's generated completion, loaded on first use.
 
+Completion owns only the `ompi` registration. Lazy OMP delegation preserves an existing `omp` completion handler, and the package does not edit shared Bash startup or completion files. If an already-open shell cached a fallback before installation, run `source /usr/share/bash-completion/bash_completion` followed by `complete -r ompi 2>/dev/null`, or open a fresh shell.
+
 The old npm launcher and `omp-instance-control launch` interface are replaced, not aliased. If previously installed globally through npm, remove that old package with `npm uninstall --global omp-instance-control`. Installing only the adapter cannot add instance control to ordinary unwrapped sessions.
 
 To use `/ompi instances` from ordinary `omp`, install the controller through OMP's public plugin manager:
@@ -67,6 +69,8 @@ ompi instances --help
 ```
 
 External restart waits until every accepted target has a verified live replacement. Each pending target has an animated loader; the header shows elapsed time, restarted/pending counts, and issues. Rows update in place with semantic colors, safely shortened paths, and a pending-first viewport when the terminal is too small. Resizing and Unicode paths do not disable live progress. `NO_COLOR` disables colors, not animation; redirected output and `TERM=dumb` log plain state transitions without cursor controls.
+
+Long project paths shorten from the left to retain the project-name ending; duplicate working directories show a short session suffix. Failed restart rows retain the original project/session record, including in JSON. Pending guidance means OMP has not yet shut down; active turns, queued submissions, and background work can defer settlement. The helper cannot identify the exact host-side blocker from the public lifecycle API and does not impose a deadline or force shutdown. Unreachable records get an explicit cleanup command, not automatic removal.
 
 Human-facing lists show short display IDs, current state, the final two project-path components, concise connection failures, and a small annotation for a previous completed restart. These display IDs are not abbreviated selectors: use `--json` or in-OMP Tab completion for full IDs. JSON retains full paths, restart correlation, and raw diagnostics. Partial-failure warnings distinguish unreachable registrations from reachable instances.
 
