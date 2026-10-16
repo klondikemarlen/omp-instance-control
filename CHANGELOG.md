@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 - 2026-10-16
+
+### Fixed
+
+- Preserve existing `omp` Bash completion registrations when lazy-loading its command catalog; keep the package-owned `ompi` completion in the standard autoload directory.
+- Retain project/session context on failed restart requests in both clients.
+- Keep long project-name endings and repeated-directory session identities visible in native restart progress; explain safe settlement waits and explicit stale-record cleanup without changing lifecycle ownership.
+
 ## 0.8.0 - 2026-10-15
 
 ### Added
