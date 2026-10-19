@@ -39,6 +39,16 @@ The installed controller can run in ordinary OMP without publishing an endpoint.
 
 `/ompi take-over` prepares a manually invoked resume command for an ordinary-OMP session. It resolves configuration paths against the host process directory, shell-quotes the current persisted session and cwd, displays a copy-and-confirm dialog, and revalidates the snapshot before public shutdown. The command is stored through public `appendEntry` without injecting a model message. OMP still owns settlement; the user waits for the shell and pastes the prepared command. This is not automatic executable or terminal handoff, and the prepared snapshot is not rewritten if the user switches sessions during a pending exit.
 
+## Named Restore Slots
+
+A restore name identifies a persistent wrapper slot, independently of its ephemeral control instance ID. The slot keeps the latest public session ID/file and cwd through lifecycle changes. Session switches and branches update the slot; they do not create immutable transcript bookmarks. Name-to-slot bindings are created once and cannot be overwritten.
+
+`linux/restore.js` atomically captures private snapshots beneath the effective agent directory, outside runtime discovery state. The launcher supplies a stable slot ID and normalized resume arguments; the adapter adds the current OMP process identity. Names point to these snapshots without moving or copying transcripts, including explicitly selected transcript paths outside the default session directory. An uncapturable current session invalidates the predecessor snapshot without deleting the immutable name; it becomes recoverable again when that slot has a valid current snapshot.
+
+Native restore validates the selected scope and paths, holds a per-slot kernel lock for the foreground launch, and refuses live or uncertain ownership. Ordinary recoverable launches acquire the same lock. OMP inherits its descriptor before startup; closing the launcher's descriptor does not unlock a surviving child, even before the child records its identity. Both launcher and OMP child identities include Linux boot ID, PID, and process start time. Neither a missing PID alone nor a vanished control socket authorizes restore. An ordinary launch that cannot secure the recovery store continues without named recovery instead of blocking standard OMP.
+
+The shell offers an explicit numbered menu or name selection with confirmation. The OMP command uses public selection/confirmation APIs, prepares a quoted shell command, revalidates the selected snapshot, and requests public graceful shutdown only after confirmation. Ptyxis and shell startup are not managed; the operator chooses a saved slot in each restored Bash tab. OMP still owns transcript persistence and settlement.
+
 ## Scope and Trust
 
 Scope includes OMP config root, normalized profile, and effective agent directory. Default-profile `PI_CODING_AGENT_DIR` overrides remain distinct; named profiles ignore that override, as OMP does. The Linux transport chooses its own private runtime path. Shared client code receives a transport object and never constructs Linux socket paths.
@@ -75,7 +85,7 @@ The map contains values, not every registration: unused flags without defaults a
 
 This is a private metadata dependency, not a supported host API. Lifecycle actions still use public `ctx.shutdown()`. Remove the guard when OMP supplies public parsed-flag metadata or owns restart argument selection; do not extend the exception to other internals.
 
-`ompi` is an additive native wrapper, not a replacement OMP runtime. Standard commands and arguments pass to the installed `omp`; only `instances` is a new command group. The JavaScript adapter remains host-loaded package data. Temporary relaunch/argv, adapter, and discovery responsibilities have separate [upstream removal criteria](README.md#temporary-ownership-and-upstream-removal). Remove each when the corresponding supported OMP contract preserves its invariants; remove the wrapper entirely when standard OMP covers the complete outcome.
+`ompi` is an additive native wrapper, not a replacement OMP runtime. Standard commands and arguments pass to the installed `omp`; `instances` and `restore` provide the additional control and recovery interfaces. The JavaScript adapter remains host-loaded package data. Temporary relaunch/argv, adapter, and discovery responsibilities have separate [upstream removal criteria](README.md#temporary-ownership-and-upstream-removal). Remove each when the corresponding supported OMP contract preserves its invariants; remove the wrapper entirely when standard OMP covers the complete outcome.
 
 ## Platform Scope
 

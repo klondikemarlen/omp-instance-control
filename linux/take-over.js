@@ -1,8 +1,10 @@
 import { constants } from "node:fs"
-import { access, stat } from "node:fs/promises"
+import { access, lstat, stat } from "node:fs/promises"
 import path from "node:path"
 
 import { getScope } from "../protocol/index.js"
+
+import { assertRestoreOwnersNotLive, validateRestoreName } from "./restore.js"
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u
 
@@ -18,9 +20,12 @@ function shellQuote(value, label) {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
-async function requireRegularFile(file, { nonempty = false, readable = false } = {}) {
-  const info = await stat(file)
-  if (!info.isFile() || (nonempty && info.size === 0)) {
+async function requireRegularFile(
+  file,
+  { nonempty = false, readable = false, rejectSymlink = false } = {}
+) {
+  const info = rejectSymlink ? await lstat(file) : await stat(file)
+  if (info.isSymbolicLink() || !info.isFile() || (nonempty && info.size === 0)) {
     throw new Error(`Required file is missing, empty, or not a regular file: ${file}`)
   }
   if (readable) {
@@ -28,9 +33,9 @@ async function requireRegularFile(file, { nonempty = false, readable = false } =
   }
 }
 
-async function requireDirectory(directory) {
-  const info = await stat(directory)
-  if (!info.isDirectory()) {
+async function requireDirectory(directory, { rejectSymlink = false } = {}) {
+  const info = rejectSymlink ? await lstat(directory) : await stat(directory)
+  if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new Error(`Current session directory is not a directory: ${directory}`)
   }
   await access(directory, constants.R_OK | constants.X_OK)
@@ -129,4 +134,42 @@ export async function prepareResumeCommand(
   const environment = environmentArguments(env, scope)
 
   return `cd ${shellQuote(cwd, "Current session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} --profile=${shellQuote(scope.profile, "Profile")} -r ${shellQuote(sessionFile, "Persisted session file")}`
+}
+
+export async function prepareNamedRestoreCommand(
+  scope,
+  name,
+  session,
+  { env = process.env, executable } = {}
+) {
+  if (process.platform !== "linux") {
+    throw new Error("Named restore is only supported on Linux.")
+  }
+  validateRestoreName(name)
+  await assertRestoreOwnersNotLive(session.owner, session.agentOwner)
+  if (
+    session.scope?.id !== scope.id ||
+    session.scope?.configRoot !== scope.configRoot ||
+    session.scope?.profile !== scope.profile ||
+    session.scope?.agentDir !== scope.agentDir
+  ) {
+    throw new Error("Saved session belongs to a different OMP scope.")
+  }
+
+  requireSafeString(session.sessionFile, "Persisted session file")
+  requireSafeString(session.cwd, "Saved session directory")
+  if (!path.isAbsolute(session.sessionFile) || !path.isAbsolute(session.cwd)) {
+    throw new Error("Saved session paths must be absolute.")
+  }
+  await requireRegularFile(session.sessionFile, {
+    nonempty: true,
+    readable: true,
+    rejectSymlink: true,
+  })
+  await requireDirectory(session.cwd, { rejectSymlink: true })
+
+  const absoluteExecutable = await resolveExecutable(env, executable)
+  const environment = environmentArguments(env, scope)
+
+  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} restore ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
 }

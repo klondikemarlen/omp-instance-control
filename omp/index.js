@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto"
 import { realpath, stat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
+import { captureRestoreSnapshot } from "../linux/restore.js"
 import { createTransport } from "../linux/transport.js"
 import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
 import {
@@ -64,6 +65,19 @@ export default async function instanceControl(pi) {
       state: runtime.pending ? "restart-requested" : "running",
       operationId: runtime.pending ?? null,
       lastRestart: runtime.launch.lastRestart ?? null,
+      ...(runtime.launch.restoreId ? { restoreId: runtime.launch.restoreId } : {}),
+    }
+  }
+
+  async function writeRestoreSnapshot(state, ctx) {
+    try {
+      await captureRestoreSnapshot(state.launch.scope, state.launch, ctx)
+    } catch (error) {
+      const safeMessage = error.message.replace(
+        /[\u0000-\u001f\u007f-\u009f]/g,
+        (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+      )
+      ctx.ui.notify(`Named restore snapshot unavailable: ${safeMessage}`, "error")
     }
   }
 
@@ -71,9 +85,16 @@ export default async function instanceControl(pi) {
     if (!runtime || runtime.closing || !isMainTerminal(ctx)) return
     runtime.ctx = ctx
     const state = runtime
-    const value = record(ctx)
     const pendingWrite = state.recordWrite ?? Promise.resolve()
-    state.recordWrite = pendingWrite.catch(() => {}).then(() => state.transport.writeRecord(value))
+    state.recordWrite = pendingWrite
+      .catch(() => {})
+      .then(async () => {
+        try {
+          await state.transport.writeRecord(record(ctx))
+        } finally {
+          await writeRestoreSnapshot(state, ctx)
+        }
+      })
     await state.recordWrite
   }
 
@@ -209,7 +230,11 @@ export default async function instanceControl(pi) {
             writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx)
           }
         } finally {
-          await state.recordWrite?.catch(() => {})
+          const previousWrite = state.recordWrite ?? Promise.resolve()
+          state.recordWrite = previousWrite
+            .catch(() => {})
+            .then(() => writeRestoreSnapshot(state, ctx))
+          await state.recordWrite.catch(() => {})
           await state.server.close()
           await state.transport.removeRecord(state.instanceId)
           runtime = undefined

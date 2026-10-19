@@ -117,6 +117,36 @@ The command is a snapshot of the session you selected; do not switch sessions wh
 
 OMP owns settlement, transcript persistence, teardown, and terminal release. There is no automatic takeover, process killing, terminal-input injection, or replay of original startup arguments. The manual paste is required because plain OMP has no wrapper parent to relaunch it.
 
+### Restoring Named Sessions After Reboot
+
+Give each participating tab a distinct restore name from inside its OMP session:
+
+```text
+/ompi restore save payments-main
+```
+
+Save after the session has a persisted transcript. From another terminal, the equivalent is `ompi restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved.
+
+After Ptyxis restores your Bash tabs, run this in each tab:
+
+```bash
+ompi restore
+```
+
+Select the named slot and confirm its session ID and working directory. To select directly, use `ompi restore payments-main`. `ompi restore --list` shows saved names; add `--json` for structured output. Use `--profile work` explicitly for another OMP profile.
+
+A name stays bound to its wrapper slot, not to the original project directory or a frozen transcript bookmark. The slot follows its current session and cwd through session switches, branches, completed work, and controlled restarts. Saving an existing name again is refused rather than replacing its binding.
+
+Private snapshots live under the selected agent directory at `instance-control/restore/`, outside `XDG_RUNTIME_DIR`. They retain exact transcript paths and safe launch options without copying transcripts or replaying startup prompts. A missing session/worktree, unsafe state, a still-live launcher or OMP child, or another restore holding the slot lock refuses launch. If the current session cannot be captured, its previous snapshot is invalidated: the name remains visibly unavailable rather than reopening its predecessor, and other healthy names remain selectable.
+
+Recovery state requires trusted ancestors that are not group- or world-writable. If an ordinary launch cannot prepare that store safely, it reports named restore as unavailable and continues without a recoverable slot; standard OMP invocation and existing restart eligibility are unchanged. Correct only the reported owned directory's permissions, then start a fresh launcher. For example, `chmod go-w ~/.omp` removes group/other write access from an owned, group-writable OMP config root; the wrapper never changes those permissions for you.
+
+`/ompi restore` provides the same selection inside OMP. It displays a quoted shell command and asks for confirmation before graceful exit; copy it, wait for your shell, then paste it. It never starts a nested OMP terminal. Both command surfaces complete saved names.
+
+Ptyxis restores layout, profile, and cwd, but does not supply a durable per-tab identity or save custom command argv in its [50.1 session format](https://sources.debian.org/data/main/p/ptyxis/50.1-1/src/ptyxis-session.c). This explicit menu does not change Ptyxis profiles or Bash startup. Verification covers real Ptyxis close/reopen on an isolated headless display and loss of the isolated runtime directory, not an OS reboot of the workstation.
+
+Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 cannot supply restore metadata merely by restarting their OMP child. Resume the existing session under the new launcher before naming its slot.
+
 ## Outcomes and Safety
 
 - `accepted` means OMP's graceful shutdown was requested, not that restart completed. Active turns, queued submissions, and background jobs remain OMP's responsibility. A stuck instance stays pending; the helper never kills it.
@@ -182,7 +212,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.6.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.9.0~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.
