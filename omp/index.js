@@ -18,13 +18,15 @@ function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
 }
 
-async function hasPersistedSession(ctx) {
+async function sessionPersistence(ctx) {
   const file = ctx.sessionManager.getSessionFile()
-  if (!file) return false
+  if (!file) return "unavailable"
+
   try {
-    return (await stat(file)).isFile()
+    return (await stat(file)).isFile() ? "persisted" : "unavailable"
   } catch (error) {
-    if (error.code === "ENOENT") return false
+    if (error.code === "ENOENT") return "unmaterialized"
+
     throw error
   }
 }
@@ -96,17 +98,49 @@ export default async function instanceControl(pi) {
         }
       })
     await state.recordWrite
+    await requestRestartWhenPersisted(state)
+  }
+
+  async function requestRestartWhenPersisted(state) {
+    if (
+      runtime !== state ||
+      state.closing ||
+      !state.pending ||
+      !state.restartAcknowledged ||
+      state.shutdownRequested
+    ) {
+      return
+    }
+
+    const ctx = state.ctx
+    const file = ctx.sessionManager.getSessionFile()
+    if ((await sessionPersistence(ctx)) !== "persisted") return
+
+    if (
+      runtime !== state ||
+      state.closing ||
+      state.ctx !== ctx ||
+      ctx.sessionManager.getSessionFile() !== file ||
+      state.shutdownRequested
+    ) {
+      return
+    }
+
+    state.shutdownRequested = true
+    ctx.shutdown()
   }
 
   async function handleRequest(request) {
     if (runtime.closing)
       throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")
-    const ctx = runtime.ctx
+    const state = runtime
+    const ctx = state.ctx
     if (request.action === "status") {
       return {
         data: {
           ...record(ctx),
-          canRestart: !runtime.launch.restartError && (await hasPersistedSession(ctx)),
+          canRestart:
+            !runtime.launch.restartError && (await sessionPersistence(ctx)) === "persisted",
         },
       }
     }
@@ -116,15 +150,16 @@ export default async function instanceControl(pi) {
     if (runtime.launch.restartError) {
       throw new ProtocolError("RESTART_ARGUMENTS_UNAVAILABLE", runtime.launch.restartError)
     }
-    if (!(await hasPersistedSession(ctx))) {
+    if ((await sessionPersistence(ctx)) === "unavailable") {
       throw new ProtocolError(
         "SESSION_UNAVAILABLE",
-        "Restart requires a persisted session; ephemeral and never-materialized sessions cannot be resumed."
+        "Restart requires a persistent transcript path to a regular file; ephemeral sessions cannot be resumed."
       )
     }
 
     const firstRequest = !runtime.pending
     if (firstRequest) {
+      runtime.restartAcknowledged = false
       runtime.pending = request.requestId
       runtime.admission = refresh(ctx)
     }
@@ -144,10 +179,9 @@ export default async function instanceControl(pi) {
         operationId: runtime.pending,
         message: "Restart requested; OMP will shut down at its settled boundary.",
       },
-      afterReply: () => {
-        if (!runtime || runtime.shutdownRequested) return
-        runtime.shutdownRequested = true
-        runtime.ctx.shutdown()
+      afterReply: async () => {
+        state.restartAcknowledged = true
+        await requestRestartWhenPersisted(state)
       },
     }
   }

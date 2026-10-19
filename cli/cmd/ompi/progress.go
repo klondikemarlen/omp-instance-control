@@ -369,7 +369,7 @@ func (renderer *restartRenderer) appendNotes(lines []progressLine, footer string
 		maximum--
 	}
 	if renderer.counts.pending > 0 && maximum > 0 {
-		lines = append(lines, progressLine{text: "Waiting: OMP has not shut down yet; turns, queued work or jobs may defer it."})
+		lines = append(lines, progressLine{text: "Waiting: a first saved response, active turns, queued work or jobs may defer restart."})
 	}
 	return lines
 }

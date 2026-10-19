@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 - 2026-10-19
+
+### Fixed
+
+- Retain a fresh persistent session's restart request while its first response has not yet materialized a transcript, then request OMP-owned settled shutdown without replaying the request or startup prompt.
+- Explain first-response persistence waits in external and in-OMP restart progress; continue refusing ephemeral sessions and invalid transcript paths.
+
 ## 0.9.0 - 2026-10-19
 
 ### Added

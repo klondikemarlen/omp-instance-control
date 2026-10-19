@@ -1,3 +1,11 @@
+omp-instance-control (0.9.1~ppa1) resolute; urgency=medium
+
+  * Keep new-session restarts pending until the first response is persisted.
+  * Preserve settled shutdown, request coalescing, and exact-session resume.
+  * Clarify persistence waits while continuing to refuse ephemeral sessions.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Mon, 19 Oct 2026 11:40:00 -0700
+
 omp-instance-control (0.9.0~ppa1) resolute; urgency=medium
 
   * Recover named wrapper slots through explicit shell and OMP menus.

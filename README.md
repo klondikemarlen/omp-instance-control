@@ -149,10 +149,10 @@ Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 ca
 
 ## Outcomes and Safety
 
-- `accepted` means OMP's graceful shutdown was requested, not that restart completed. Active turns, queued submissions, and background jobs remain OMP's responsibility. A stuck instance stays pending; the helper never kills it.
+- `accepted` means one restart operation is retained, not that restart completed. A fresh persistent session waits for its first saved response before graceful shutdown is requested; an allocated transcript path is not yet a resumable file. Truly ephemeral sessions are refused. Active turns, queued submissions, and background jobs remain OMP's responsibility. A stuck or never-materialized session stays pending; the helper never kills it or fabricates a transcript.
 - A replacement's `lastRestart` identifies the completed operation and previous instance. Every boot has a fresh instance identity, independent of PID or transcript ID.
-- External CLI and in-OMP peer progress distinguish `waiting` for OMP settlement, `restarting` through endpoint transitions, and `restarted` after a live replacement confirms both the operation ID and previous instance ID. Disappearance or a PID change alone never proves completion; closing status connections are transient, not failures.
-- `failed` reports explicit rejection, including a missing persisted session or no matching target. `unreachable` means a missing/refused endpoint; `unknown` means acknowledgement was inconclusive. Requests are never automatically replayed.
+- External CLI and in-OMP peer progress distinguish `waiting` for the first saved response or OMP settlement, `restarting` through endpoint transitions, and `restarted` after a live replacement confirms both the operation ID and previous instance ID. Disappearance or a PID change alone never proves completion; closing status connections are transient, not failures.
+- `failed` reports explicit rejection, including an ephemeral session, invalid transcript path, or no matching target. `unreachable` means a missing/refused endpoint; `unknown` means acknowledgement was inconclusive. Requests are never automatically replayed.
 - Normal `/exit`, unsuccessful child exit, and termination signals do not relaunch. Handoffs are validated and consumed once after successful child exit.
 - Relaunch resumes the actual current session file and cwd, not the original selector. Original configuration paths and relative default-profile agent-directory overrides remain anchored across directory changes.
 - Restart admission checks OMP's private parsed extension-flag map read-only at `session_start`. Missing metadata or a parsed built-in collision refuses restart before shutdown. This map is not a registry: unused no-default flags may be absent. Generated restart uses the unshadowable `-r` alias and the child's process cwd, not injectable long options. The explicit compatibility dependency was verified on OMP 18.8.7 and audited on 18.12.2; it does not mutate flags or replace public lifecycle APIs.
@@ -212,7 +212,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.9.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.9.1~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.
