@@ -14,6 +14,8 @@ Use private same-user local IPC rather than a public TCP listener. Do not use pr
 
 `profiles.js` enumerates valid named-profile directories within one configuration root for cached OMP autocomplete. It includes `default` and the selected profile without creating directories or probing other profiles' control endpoints.
 
+Persistent named-recovery state belongs here, separately from ephemeral transport discovery. Private snapshots preserve exact session paths, cwd, scope, launch arguments, and boot/process ownership; immutable names identify evolving wrapper slots. Native restore validates that state and owns the inherited per-slot lock and foreground relaunch. OMP lifecycle capture and selection UI remain in `omp/`; see [Named Restore Slots](../CONCEPTS.md#named-restore-slots).
+
 `bash-completion/ompi` owns Linux Bash command/option completion and is installed at `/usr/share/bash-completion/completions/ompi` by the Ubuntu package. It keeps instance-control candidates local and delegates ordinary OMP completion to the installed executable's public `completions bash` command without launching an interactive session or dispatching instance actions. Loading that catalog restores the prior `omp` completion registration (including its absence); shared startup files and unrelated registrations are not managed.
 
 Keep shared request semantics in [`../protocol/`](../protocol/README.md) and OMP host integration in [`../omp/`](../omp/README.md). Future macOS or Windows implementations belong in separate platform directories; none is supported or implemented now.

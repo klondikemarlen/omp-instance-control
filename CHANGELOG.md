@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-10-19
+
+### Added
+
+- Save named wrapper slots and restore their current exact session and working directory from an explicit shell menu after terminal recreation.
+- Mirror named save/list/restore preparation inside OMP, with profile-scoped saved-name completion on both command surfaces.
+- Keep private recovery snapshots outside runtime discovery state; refuse live launcher/OMP ownership and concurrent restores without moving transcripts or replaying startup prompts.
 
 ### Documentation
 
