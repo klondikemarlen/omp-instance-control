@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- Audit OMP 18.12.2 public lifecycle and extension-flag contracts; retain the wrapper responsibilities whose supported upstream replacements remain unavailable.
+
 ## 0.8.1 - 2026-10-16
 
 ### Fixed

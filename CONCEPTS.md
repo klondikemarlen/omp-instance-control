@@ -53,13 +53,15 @@ This helper implements restart only. It loads code/configuration present on disk
 
 ## Host API Dependency
 
-Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). OMP 18.8.7 exposes graceful extension shutdown, but not public restart/plugin-refresh request methods. The user selected a Linux launcher workaround instead of patching OMP.
+Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). The OMP 18.12.2 compatibility audit retains the Linux launcher workaround: the public extension context exposes graceful `shutdown()` and read-only session access, but no supported restart/resume request or same-user instance discovery/control contract. None of the [wrapper removal criteria](README.md#temporary-ownership-and-upstream-removal) is fully met.
 
-Public source contracts:
+Versioned source contracts:
 
-- [Extension context](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/extensibility/extensions/types.ts): `shutdown()` and read-only session access; command-context `reload()` is a session operation.
-- [Interactive lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/modes/interactive-mode.ts): settled shutdown-request path, native restart, and terminal teardown.
-- [Plugin refresh](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/slash-commands/builtin-marketplace.ts): discovery/MCP refresh, not loaded-module re-evaluation.
+- [Extension context](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/extensibility/extensions/types.ts): public `shutdown()`, current `cwd`, read-only session access, and session lifecycle events. Built-in `/restart` does not imply a public extension restart method.
+- [Interactive lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/modes/interactive-mode.ts): OMP owns the settled shutdown-request path, native restart, and terminal teardown. The internal `restart()` implementation is not a supported extension request API.
+- [Extension flag binding](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/extensibility/extensions/loader.ts): public `getFlag()` remains scoped to the calling extension; parsed cross-extension flags remain runtime metadata rather than a supported public contract.
+
+An isolated OMP 18.12.2 launch with the installed 0.8.1 wrapper verified graceful shutdown, correlated replacement, preserved session ID/file/cwd, and normal-exit endpoint cleanup. A separate extension's flag remained unavailable through public `getFlag()`. This audit does not replace the historical 18.8.7 module-reload experiment above with an unobserved claim about current `/reload-plugins` behavior.
 
 The launcher does not duplicate OMP's settlement predicate, abort tools, kill sibling instances, inject lifecycle keystrokes, or import private OMP internals.
 
@@ -67,7 +69,7 @@ The launcher does not duplicate OMP's settlement predicate, abort tools, kill si
 
 Preserve normal spaced OMP arguments and keep the wrapper additive. The wrapper does not register built-in flags. OMP permits extensions to override their names; for example, a boolean extension flag named `plan` makes `--plan "startup prompt"` submit that text instead of consuming it as the built-in value.
 
-OMP 18.8.7's public `getFlag()` only sees flags registered by the calling extension, not other plugins. The explicit compatibility decision is to read the private `pi.runtime.flagValues` map at `session_start`, without modifying it or registering observer flags. The [host implementation](https://github.com/can1357/oh-my-pi/blob/v18.8.7/packages/coding-agent/src/extensibility/extensions/loader.ts) owns this parsed map. If its shape is unavailable, or it contains an extension value for a built-in name used by the launch, refuse controlled restart before shutdown. Same-type collisions are rejected too: value type alone does not prove identical parsing or path semantics.
+Public `getFlag()` only sees flags registered by the calling extension, not other plugins; this was originally verified on 18.8.7 and rechecked on 18.12.2. The explicit compatibility decision is to read the private `pi.runtime.flagValues` map at `session_start`, without modifying it or registering observer flags. The [host implementation](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/extensibility/extensions/loader.ts) owns this parsed map. If its shape is unavailable, or it contains an extension value for a built-in name used by the launch, refuse controlled restart before shutdown. Same-type collisions are rejected too: value type alone does not prove identical parsing or path semantics.
 
 The map contains values, not every registration: unused flags without defaults are absent. Do not treat absence as proof that a flag name is unregistered. The wrapper loads its adapter with `-e` (or an inline trusted-extension option), resumes through OMP's `-r` alias, and sets the child's actual process cwd after removing the original cwd selector. Short options are not extension-shadowable in the verified host parser. Reject incomplete or flag-looking spaced string values; inline values keep consumption explicit without changing normal spaced options such as `--model MODEL`.
 
