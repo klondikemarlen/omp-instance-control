@@ -793,7 +793,9 @@ function renderPeerProgress(ctx, rows, started, frame) {
 
   lines.push("OMP owns settlement. Ctrl-C stops watching, not accepted restarts.")
   if (rows.some((row) => row.status === "waiting")) {
-    lines.push("Waiting: OMP has not shut down yet; turns, queued work or jobs may defer it.")
+    lines.push(
+      "Waiting: a first saved response, active turns, queued work or jobs may defer restart."
+    )
   }
   if (rows.some((row) => row.status === "unreachable")) {
     lines.push("Possibly stale: run /ompi instances cleanup (safe, explicit cleanup).")
