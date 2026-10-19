@@ -19,8 +19,8 @@ A control endpoint belongs to a main interactive launch, not a subagent or persi
 ## Settled Restart Handoff
 
 1. The client reads a profile/config-root-scoped snapshot and sends one request per selected instance.
-2. The extension requires a live launcher and an existing persisted session. Concurrent requests coalesce into one operation.
-3. After acknowledgement flush, the extension calls public `ctx.shutdown()` once. It does not poll `ctx.isIdle()` or equate `agent_end` with settlement.
+2. The extension requires a live launcher and a persistent transcript path. Concurrent requests coalesce into one operation. A fresh session may not have materialized its allocated file yet; its request remains pending instead of being confused with an ephemeral session.
+3. After acknowledgement flush and once the current transcript exists, the extension calls public `ctx.shutdown()` once. Public lifecycle updates observe persistence readiness only: they do not prove settlement. The extension neither polls `ctx.isIdle()` nor equates `agent_end` with settlement, forces private persistence, or fabricates an empty transcript.
 4. OMP waits for its settled boundary, including queued submissions and background deliveries. During `session_shutdown`, the extension synchronously captures the current session file and cwd in a private atomic handoff, then removes its endpoint.
 5. After successful child exit, the launcher validates and consumes the handoff once. It relaunches with inherited terminal streams, retained configuration, and the current absolute session file; it strips the original messages and old selector.
 6. A fresh mounted endpoint exposes `lastRestart.operationId` and `lastRestart.previousInstanceId`. External CLI and in-OMP peer observation wait until a live status probe confirms both values against the accepted operation and original instance. Acceptance, disappearance, or PID changes alone are not completion.
