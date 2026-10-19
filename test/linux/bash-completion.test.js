@@ -114,3 +114,33 @@ test(
     assert.deepEqual(candidates, [])
   }
 )
+
+test(
+  "when completing restore options before list, Bash does not offer JSON",
+  { skip: !bashAvailable },
+  () => {
+    // Arrange
+    const words = ["ompi", "restore", "--"]
+
+    // Act
+    const candidates = complete(words)
+
+    // Assert
+    assert.equal(candidates.includes("--json"), false)
+  }
+)
+
+test(
+  "when completing restore options after list, Bash offers JSON",
+  { skip: !bashAvailable },
+  () => {
+    // Arrange
+    const words = ["ompi", "restore", "--list", "--"]
+
+    // Act
+    const candidates = complete(words)
+
+    // Assert
+    assert.equal(candidates.includes("--json"), true)
+  }
+)

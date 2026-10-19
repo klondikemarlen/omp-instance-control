@@ -46,6 +46,9 @@ func run(args []string) (int, error) {
 	if len(args) > 0 && args[0] == "instances" {
 		return runInstances(args[1:])
 	}
+	if len(args) > 0 && args[0] == "restore" {
+		return runRestore(args[1:])
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return 1, err
@@ -60,7 +63,7 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 	if code == 0 && len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(os.Stdout, "\nInstance control: ompi instances list|restart|cleanup")
+		fmt.Fprintln(os.Stdout, "\nInstance control: ompi instances list|restart|cleanup\nSaved sessions: ompi restore")
 	}
 	return code, nil
 }

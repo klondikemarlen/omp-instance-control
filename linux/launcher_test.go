@@ -388,6 +388,32 @@ func TestLaunchRejectsInvalidHandoffWithoutSecondChild(t *testing.T) {
 	}
 }
 
+func TestUnsafeRecoveryStoreDoesNotBlockOrdinaryLaunch(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "invocations.jsonl")
+	prepareFakeOMP(t, root, logPath, "", "", "")
+	configRoot := filepath.Join(root, "config")
+	if err := os.Mkdir(configRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(configRoot, 0770); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMPI_TEST_EXIT_CODE", "23")
+
+	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"))
+	if err != nil || code != 23 {
+		t.Fatalf("unsafe recovery storage blocked standard OMP execution: code=%d err=%v", code, err)
+	}
+	calls := readInvocations(t, logPath)
+	if len(calls) != 1 {
+		t.Fatalf("standard launch invoked %d children, want one", len(calls))
+	}
+	if restoreID := calls[0].Launch["restoreId"]; restoreID != "" {
+		t.Fatalf("launch without a protected recovery store exposed a restorable slot: %v", restoreID)
+	}
+}
+
 func TestLaunchCleansOwnedRegistrationAfterNonzeroChildExit(t *testing.T) {
 	root, err := os.MkdirTemp("", "l-")
 	if err != nil {
@@ -523,6 +549,10 @@ func prepareFakeOMP(t *testing.T, root, logPath, session, cwd, handoff string) {
 	stdinIsTerminal, stdoutIsTerminal = func() bool { return true }, func() bool { return true }
 	t.Cleanup(func() { stdinIsTerminal, stdoutIsTerminal = originalInput, originalOutput })
 	t.Setenv("XDG_RUNTIME_DIR", root)
+	t.Setenv("PI_CONFIG_DIR", filepath.Join(root, "config"))
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	t.Setenv("OMP_PROFILE", "")
+	t.Setenv("PI_PROFILE", "")
 	t.Setenv("OMP_INSTANCE_CONTROL_OMP", filepath.Join(root, "fake-omp"))
 	t.Setenv("OMPI_TEST_CHILD", "1")
 	t.Setenv("OMPI_TEST_REGISTER", "0")

@@ -21,6 +21,82 @@ _ompi_omp_completion()
     fi
 }
 
+_ompi_restore_completion()
+{
+    local cur prev words cword
+    _comp_initialize -n = || return
+
+    case "$prev" in
+        --profile|--instance) return 0 ;;
+    esac
+
+    local action=""
+    local have_name=false
+    local listing=false
+    local options
+    local index
+    local -a profile_arguments=()
+    for (( index=2; index<cword; index++ )); do
+        case ${words[index]} in
+            --profile)
+                profile_arguments=(--profile "${words[index+1]}")
+                (( index++ ))
+                ;;
+            --profile=*)
+                profile_arguments=(--profile "${words[index]#--profile=}")
+                ;;
+            --instance)
+                (( index++ ))
+                ;;
+            save)
+                action=save
+                ;;
+            --list)
+                listing=true
+                ;;
+            --json|--help|-h)
+                ;;
+            -*)
+                ;;
+            *)
+                if [[ $action != save ]]; then
+                    have_name=true
+                elif [[ $have_name == false ]]; then
+                    have_name=true
+                fi
+                ;;
+        esac
+    done
+
+    if [[ $action == save && $have_name == false ]]; then
+        return 0
+    fi
+
+    if [[ $action == save ]]; then
+        options='--instance --profile --help -h --version'
+    elif [[ $listing == true ]]; then
+        options='--json --profile --help -h --version'
+    elif [[ $have_name == true ]]; then
+        options='--profile --help -h --version'
+    else
+        options='save --profile --list --help -h --version'
+    fi
+    COMPREPLY=( $(compgen -W "$options" -- "$cur") )
+
+    if [[ $action != save && $have_name == false && $listing == false && $cur != -* ]]; then
+        local IFS=$' \t'
+        local list_position
+        local saved_name
+        local remainder
+        local -a saved_names=()
+        while read -r list_position saved_name remainder; do
+            [[ $list_position =~ ^[0-9]+\)$ ]] || continue
+            saved_names+=("$saved_name")
+        done < <(command ompi restore "${profile_arguments[@]}" --list 2>/dev/null)
+        COMPREPLY+=( $(compgen -W "${saved_names[*]}" -- "$cur") )
+    fi
+}
+
 _ompi()
 {
     local cur prev words cword
@@ -31,6 +107,14 @@ _ompi()
         if [[ instances == "$cur"* ]]; then
             COMPREPLY+=(instances)
         fi
+        if [[ restore == "$cur"* ]]; then
+            COMPREPLY+=(restore)
+        fi
+        return 0
+    fi
+
+    if [[ ${words[1]} == restore ]]; then
+        _ompi_restore_completion "$@"
         return 0
     fi
 
@@ -72,5 +156,6 @@ _ompi()
     COMPREPLY=( $(compgen -W "$options" -- "$cur") )
     return 0
 }
+
 
 complete -F _ompi ompi

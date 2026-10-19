@@ -179,6 +179,7 @@ type Record struct {
 	State           string   `json:"state"`
 	OperationID     *string  `json:"operationId"`
 	LastRestart     *Restart `json:"lastRestart"`
+	RestoreID       string   `json:"restoreId,omitempty"`
 }
 
 // Request is one versioned operation addressed to a specific OMP process.

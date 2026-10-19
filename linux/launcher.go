@@ -25,14 +25,17 @@ const (
 )
 
 type launchRecord struct {
-	Version       int            `json:"version"`
-	Token         string         `json:"token"`
-	PID           int            `json:"pid"`
-	Scope         protocol.Scope `json:"scope"`
-	ExtensionPath string         `json:"extensionPath"`
-	LastRestart   *restartRecord `json:"lastRestart"`
-	RestartError  string         `json:"restartError,omitempty"`
-	BuiltinFlags  []string       `json:"builtinFlags"`
+	Version       int                   `json:"version"`
+	Token         string                `json:"token"`
+	PID           int                   `json:"pid"`
+	Scope         protocol.Scope        `json:"scope"`
+	ExtensionPath string                `json:"extensionPath"`
+	LastRestart   *restartRecord        `json:"lastRestart"`
+	RestartError  string                `json:"restartError,omitempty"`
+	BuiltinFlags  []string              `json:"builtinFlags"`
+	RestoreID     string                `json:"restoreId"`
+	ResumeArgs    []string              `json:"resumeArgs"`
+	Owner         protocol.RestoreOwner `json:"owner"`
 }
 
 type restartRecord struct {
@@ -52,6 +55,10 @@ type handoffRecord struct {
 // Launch runs upstream OMP as a foreground child, loading the public control
 // extension. OMP performs settlement and writes a one-shot restart handoff.
 func Launch(args []string, extensionPath string) (int, error) {
+	return launch(args, extensionPath, "", nil)
+}
+
+func launch(args []string, extensionPath, restoreID string, restoreLock *os.File) (int, error) {
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		return runPassthrough(args)
 	}
@@ -75,9 +82,41 @@ func Launch(args []string, extensionPath string) (int, error) {
 	if err := ensureWorkingDirectory(cwd); err != nil {
 		return 0, err
 	}
+	if restoreID == "" {
+		restoreID, err = randomToken()
+		if err != nil {
+			return 0, err
+		}
+	}
+	owner, err := NewRestoreOwner(os.Getpid())
+	if err != nil {
+		return 0, err
+	}
+	if restartArgs == nil {
+		restartArgs = []string{}
+	}
 	scope, err := protocol.GetScope(profile, cwd)
 	if err != nil {
 		return 0, err
+	}
+	if restoreLock == nil {
+		directories, err := ensureRestoreDirectories(scope)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Named restore unavailable: %v\n", err)
+			restoreID = ""
+		} else {
+			restoreLock, err = lockRestoreSnapshot(directories, restoreID)
+			if err != nil {
+				return 0, err
+			}
+			// The child inherits this open-file description. Closing our reference
+			// must not explicitly unlock a surviving child after launcher failure.
+			defer restoreLock.Close()
+		}
+	}
+	var inheritedFiles []*os.File
+	if restoreLock != nil {
+		inheritedFiles = []*os.File{restoreLock}
 	}
 	root, err := RuntimeRoot()
 	if err != nil {
@@ -130,6 +169,7 @@ func Launch(args []string, extensionPath string) (int, error) {
 		launch := launchRecord{
 			Version: 1, Token: token, PID: os.Getpid(), Scope: scope,
 			ExtensionPath: extensionPath, LastRestart: restart, BuiltinFlags: builtinFlags,
+			RestoreID: restoreID, ResumeArgs: restartArgs, Owner: owner,
 		}
 		if restartArgsErr != nil && restart == nil {
 			launch.RestartError = restartArgsErr.Error()
@@ -163,7 +203,7 @@ func Launch(args []string, extensionPath string) (int, error) {
 		if resumeFile != "" {
 			childCWD = cwd
 		}
-		child, err := runChild(executable, childArgs, childCWD, childEnv, signals)
+		child, err := runChild(executable, childArgs, childCWD, childEnv, signals, inheritedFiles)
 		if err != nil {
 			return 1, err
 		}
@@ -210,7 +250,7 @@ func runPassthrough(args []string) (int, error) {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
-	result, err := runChild(executable, args, "", os.Environ(), signals)
+	result, err := runChild(executable, args, "", os.Environ(), signals, nil)
 	return result.code, err
 }
 
@@ -313,10 +353,11 @@ type childResult struct {
 	reaped   bool // True only after cmd.Wait completed; early runner errors leave it false.
 }
 
-func runChild(executable string, args []string, cwd string, env []string, signals <-chan os.Signal) (childResult, error) {
+func runChild(executable string, args []string, cwd string, env []string, signals <-chan os.Signal, inheritedFiles []*os.File) (childResult, error) {
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = cwd
 	cmd.Env = env
+	cmd.ExtraFiles = inheritedFiles
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
 		return childResult{code: 1}, err
