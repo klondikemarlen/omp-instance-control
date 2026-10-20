@@ -1,3 +1,10 @@
+omp-instance-control (0.9.2~ppa1) resolute; urgency=medium
+
+  * Let an explicit matching OMP exit intent override pending controlled restarts.
+  * Preserve OMP-owned settlement and never report a superseded restart as successful.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 20 Oct 2026 08:46:28 -0700
+
 omp-instance-control (0.9.1~ppa1) resolute; urgency=medium
 
   * Keep new-session restarts pending until the first response is persisted.
