@@ -58,8 +58,8 @@ export default async function instanceControl(pi) {
     if (
       !runtime ||
       !isMainTerminal(runtime.ctx) ||
-      !request ||
       typeof request.sessionId !== "string" ||
+      request.sessionId.length === 0 ||
       request.sessionId !== runtime.ctx.sessionManager.getSessionId()
     ) {
       return
@@ -73,6 +73,12 @@ export default async function instanceControl(pi) {
       typeof state.exitRequestedSessionId === "string" &&
       state.exitRequestedSessionId === ctx.sessionManager.getSessionId()
     )
+  }
+
+  function rejectRestartAfterExitRequest(state, ctx) {
+    if (hasMatchingExitRequest(state, ctx)) {
+      throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
+    }
   }
 
   function record(ctx) {
@@ -169,21 +175,21 @@ export default async function instanceControl(pi) {
         },
       }
     }
-    if (hasMatchingExitRequest(state, ctx)) {
-      throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
-    }
+    rejectRestartAfterExitRequest(state, ctx)
     if (process.ppid !== runtime.launch.pid) {
       throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
     }
     if (runtime.launch.restartError) {
       throw new ProtocolError("RESTART_ARGUMENTS_UNAVAILABLE", runtime.launch.restartError)
     }
-    if ((await sessionPersistence(ctx)) === "unavailable") {
+    const persistence = await sessionPersistence(ctx)
+    if (persistence === "unavailable") {
       throw new ProtocolError(
         "SESSION_UNAVAILABLE",
         "Restart requires a persistent transcript path to a regular file; ephemeral sessions cannot be resumed."
       )
     }
+    rejectRestartAfterExitRequest(state, ctx)
 
     const firstRequest = !runtime.pending
     if (firstRequest) {
@@ -200,6 +206,13 @@ export default async function instanceControl(pi) {
         runtime.admission = undefined
       }
       throw error
+    }
+    if (hasMatchingExitRequest(state, ctx)) {
+      if (firstRequest && state.admission === admission && state.pending === request.requestId) {
+        state.pending = null
+        state.admission = undefined
+      }
+      rejectRestartAfterExitRequest(state, ctx)
     }
     return {
       data: {

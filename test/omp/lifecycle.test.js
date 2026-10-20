@@ -181,6 +181,7 @@ test("when restart arrives before the first saved response, it waits for persist
     const accepted = await transport.request(record, request)
     const duplicate = await transport.request(record, createRequest(record.instanceId, "restart"))
     const pending = await transport.request(record, createRequest(record.instanceId, "status"))
+    events.emit("omp-exit-command:exit-requested", { sessionId: "" })
     events.emit("omp-exit-command:exit-requested", { sessionId: "other-session" })
     const shutdownsBeforePersistence = shutdowns
     await writeFile(sessionFile, '{"type":"session","id":"first-session"}\n', { mode: 0o600 })
