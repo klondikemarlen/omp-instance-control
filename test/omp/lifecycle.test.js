@@ -288,6 +288,8 @@ test(
       assert.equal(shutdowns, 1)
 
       events.emit("omp-exit-command:exit-requested", { sessionId: "exit-session" })
+      const status = await transport.request(record, createRequest(record.instanceId, "status"))
+      assert.equal(status.data.canRestart, false)
       const rejected = await transport.request(record, createRequest(record.instanceId, "restart"))
       assert.equal(rejected.ok, false)
       assert.equal(rejected.error.code, "EXPLICIT_EXIT_REQUESTED")

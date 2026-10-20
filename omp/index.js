@@ -163,7 +163,9 @@ export default async function instanceControl(pi) {
         data: {
           ...record(ctx),
           canRestart:
-            !runtime.launch.restartError && (await sessionPersistence(ctx)) === "persisted",
+            !hasMatchingExitRequest(state, ctx) &&
+            !runtime.launch.restartError &&
+            (await sessionPersistence(ctx)) === "persisted",
         },
       }
     }
