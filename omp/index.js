@@ -13,6 +13,7 @@ import {
 import { registerOmpiCommand } from "./command.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
+const EXIT_REQUESTED_EVENT = "omp-exit-command:exit-requested"
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
@@ -53,6 +54,26 @@ export default async function instanceControl(pi) {
 
   let runtime
   const refreshCompletions = registerOmpiCommand(pi, { getRuntime: () => runtime })
+  const releaseExitRequestListener = pi.events.on(EXIT_REQUESTED_EVENT, (request) => {
+    if (
+      !runtime ||
+      !isMainTerminal(runtime.ctx) ||
+      !request ||
+      typeof request.sessionId !== "string" ||
+      request.sessionId !== runtime.ctx.sessionManager.getSessionId()
+    ) {
+      return
+    }
+
+    runtime.exitRequestedSessionId = request.sessionId
+  })
+
+  function hasMatchingExitRequest(state, ctx) {
+    return (
+      typeof state.exitRequestedSessionId === "string" &&
+      state.exitRequestedSessionId === ctx.sessionManager.getSessionId()
+    )
+  }
 
   function record(ctx) {
     return {
@@ -107,7 +128,8 @@ export default async function instanceControl(pi) {
       state.closing ||
       !state.pending ||
       !state.restartAcknowledged ||
-      state.shutdownRequested
+      state.shutdownRequested ||
+      hasMatchingExitRequest(state, state.ctx)
     ) {
       return
     }
@@ -121,7 +143,8 @@ export default async function instanceControl(pi) {
       state.closing ||
       state.ctx !== ctx ||
       ctx.sessionManager.getSessionFile() !== file ||
-      state.shutdownRequested
+      state.shutdownRequested ||
+      hasMatchingExitRequest(state, ctx)
     ) {
       return
     }
@@ -143,6 +166,9 @@ export default async function instanceControl(pi) {
             !runtime.launch.restartError && (await sessionPersistence(ctx)) === "persisted",
         },
       }
+    }
+    if (hasMatchingExitRequest(state, ctx)) {
+      throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
     }
     if (process.ppid !== runtime.launch.pid) {
       throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
@@ -260,7 +286,7 @@ export default async function instanceControl(pi) {
         const state = runtime
         state.closing = true
         try {
-          if (runtime.pending) {
+          if (runtime.pending && !hasMatchingExitRequest(runtime, ctx)) {
             writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx)
           }
         } finally {
@@ -276,6 +302,7 @@ export default async function instanceControl(pi) {
       }
     } finally {
       releaseClaim()
+      releaseExitRequestListener()
     }
   })
 }
