@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2 - 2026-10-20
+
+### Changed
+
+- Let a matching explicit OMP exit intent suppress a pending controlled-restart handoff; OMP still owns graceful settlement and teardown.
+
 ## 0.9.1 - 2026-10-19
 
 ### Fixed

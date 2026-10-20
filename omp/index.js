@@ -13,6 +13,7 @@ import {
 import { registerOmpiCommand } from "./command.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
+const EXIT_REQUESTED_EVENT = "omp-exit-command:exit-requested"
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
@@ -53,6 +54,32 @@ export default async function instanceControl(pi) {
 
   let runtime
   const refreshCompletions = registerOmpiCommand(pi, { getRuntime: () => runtime })
+  const releaseExitRequestListener = pi.events.on(EXIT_REQUESTED_EVENT, (request) => {
+    if (
+      !runtime ||
+      !isMainTerminal(runtime.ctx) ||
+      typeof request.sessionId !== "string" ||
+      request.sessionId.length === 0 ||
+      request.sessionId !== runtime.ctx.sessionManager.getSessionId()
+    ) {
+      return
+    }
+
+    runtime.exitRequestedSessionId = request.sessionId
+  })
+
+  function hasMatchingExitRequest(state, ctx) {
+    return (
+      typeof state.exitRequestedSessionId === "string" &&
+      state.exitRequestedSessionId === ctx.sessionManager.getSessionId()
+    )
+  }
+
+  function rejectRestartAfterExitRequest(state, ctx) {
+    if (hasMatchingExitRequest(state, ctx)) {
+      throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
+    }
+  }
 
   function record(ctx) {
     return {
@@ -107,7 +134,8 @@ export default async function instanceControl(pi) {
       state.closing ||
       !state.pending ||
       !state.restartAcknowledged ||
-      state.shutdownRequested
+      state.shutdownRequested ||
+      hasMatchingExitRequest(state, state.ctx)
     ) {
       return
     }
@@ -121,7 +149,8 @@ export default async function instanceControl(pi) {
       state.closing ||
       state.ctx !== ctx ||
       ctx.sessionManager.getSessionFile() !== file ||
-      state.shutdownRequested
+      state.shutdownRequested ||
+      hasMatchingExitRequest(state, ctx)
     ) {
       return
     }
@@ -140,22 +169,27 @@ export default async function instanceControl(pi) {
         data: {
           ...record(ctx),
           canRestart:
-            !runtime.launch.restartError && (await sessionPersistence(ctx)) === "persisted",
+            !hasMatchingExitRequest(state, ctx) &&
+            !runtime.launch.restartError &&
+            (await sessionPersistence(ctx)) === "persisted",
         },
       }
     }
+    rejectRestartAfterExitRequest(state, ctx)
     if (process.ppid !== runtime.launch.pid) {
       throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
     }
     if (runtime.launch.restartError) {
       throw new ProtocolError("RESTART_ARGUMENTS_UNAVAILABLE", runtime.launch.restartError)
     }
-    if ((await sessionPersistence(ctx)) === "unavailable") {
+    const persistence = await sessionPersistence(ctx)
+    if (persistence === "unavailable") {
       throw new ProtocolError(
         "SESSION_UNAVAILABLE",
         "Restart requires a persistent transcript path to a regular file; ephemeral sessions cannot be resumed."
       )
     }
+    rejectRestartAfterExitRequest(state, ctx)
 
     const firstRequest = !runtime.pending
     if (firstRequest) {
@@ -172,6 +206,13 @@ export default async function instanceControl(pi) {
         runtime.admission = undefined
       }
       throw error
+    }
+    if (hasMatchingExitRequest(state, ctx)) {
+      if (firstRequest && state.admission === admission && state.pending === request.requestId) {
+        state.pending = null
+        state.admission = undefined
+      }
+      rejectRestartAfterExitRequest(state, ctx)
     }
     return {
       data: {
@@ -260,7 +301,7 @@ export default async function instanceControl(pi) {
         const state = runtime
         state.closing = true
         try {
-          if (runtime.pending) {
+          if (runtime.pending && !hasMatchingExitRequest(runtime, ctx)) {
             writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx)
           }
         } finally {
@@ -276,6 +317,7 @@ export default async function instanceControl(pi) {
       }
     } finally {
       releaseClaim()
+      releaseExitRequestListener()
     }
   })
 }
