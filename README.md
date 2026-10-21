@@ -145,6 +145,10 @@ Recovery requires trusted ancestors that are not group- or world-writable. If an
 
 `/ompi restore` provides the same recovery operations inside OMP. Selection displays a quoted shell command before confirmation and graceful exit: copy it, wait for your shell, then paste it. No nested OMP terminal is started. Both command surfaces complete optional saved names and recovery options.
 
+Ptyxis restores layout, profile, and cwd, but does not supply a durable per-tab identity or save custom command argv in its [50.1 session format](https://sources.debian.org/data/main/p/ptyxis/50.1-1/src/ptyxis-session.c). This explicit menu does not change Ptyxis profiles or Bash startup. Verification covers real Ptyxis close/reopen on an isolated headless display and loss of the isolated runtime directory, not an OS reboot of the workstation.
+
+Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 cannot supply restore metadata merely by restarting their OMP child. Resume the existing session under the new launcher before naming its slot.
+
 ### Migrating Legacy Recovery Snapshots
 
 `ompi restore --import-legacy` imports the old helper's `~/.local/state/omp-session-resume-helper/snapshots/*.txt` and `active-sessions.txt`, leaving the originals untouched. Supply a path to import one snapshot. Only the helper's strictly quoted command format is parsed; shell text is never evaluated. Transcript IDs must resolve uniquely to an owned file within the selected profile's session tree. Unsupported, missing, or ambiguous entries are reported.
@@ -155,11 +159,7 @@ Imports appear in `ompi restore --history` as legacy checkpoints, not default au
 ompi restore --export --from CHECKPOINT_ID
 ```
 
-Managed exports use `ompi restore --slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory. Re-importing unchanged source data is idempotent.
-
-Ptyxis restores layout, profile, and cwd, but does not supply a durable per-tab identity or save custom command argv in its [50.1 session format](https://sources.debian.org/data/main/p/ptyxis/50.1-1/src/ptyxis-session.c). This explicit menu does not change Ptyxis profiles or Bash startup. Verification covers real Ptyxis close/reopen on an isolated headless display and loss of the isolated runtime directory, not an OS reboot of the workstation.
-
-Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 cannot supply restore metadata merely by restarting their OMP child. Resume the existing session under the new launcher before naming its slot.
+Managed exports use `ompi restore --slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot. Re-importing unchanged source data is idempotent.
 
 ## Outcomes and Safety
 

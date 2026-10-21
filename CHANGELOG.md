@@ -13,6 +13,8 @@
 
 - Recheck the confirmed session snapshot under the restore lock so recovery cannot silently launch a changed conversation.
 - Preserve quiet pending capture for not-yet-written transcripts while retaining explicit unsafe-path and ownership failures.
+- Keep concurrent checkpoint publication and pruning readable instead of reporting transient missing-file failures.
+- Anchor cross-profile selection and portable recovery commands to the selected scope while using the current terminal runtime directory.
 
 ## 0.9.3 - 2026-10-20
 
