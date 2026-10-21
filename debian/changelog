@@ -1,7 +1,8 @@
-omp-instance-control (0.9.3~ppa1) resolute; urgency=medium
+omp-instance-control (0.9.3~ppa2) resolute; urgency=medium
 
   * Wait quietly for new-session transcripts before capturing restore snapshots.
   * Invalidate missing-transcript snapshots without weakening restore safety.
+  * Report the matching native wrapper version from the packaged executable.
 
  -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 20 Oct 2026 17:57:04 -0700
 
