@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1 - 2026-10-21
+
+### Fixed
+
+- Resolve legacy recovery IDs from OMP transcripts whose session header follows a fixed-width title slot, without scanning conversation contents or weakening filesystem checks.
+- Re-import snapshots previously read by 0.10.0 to repair false missing-transcript results while preserving older immutable checkpoints.
+
 ## 0.10.0 - 2026-10-21
 
 ### Added

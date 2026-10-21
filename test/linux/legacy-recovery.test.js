@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 
-import { importLegacyRecovery } from "../../linux/recovery.js"
+import { importLegacyRecovery, writeRecoveryCheckpoint } from "../../linux/recovery.js"
 import { getScope } from "../../protocol/index.js"
 
 async function createFixture(t) {
@@ -92,4 +93,99 @@ test("when an imported transcript is large, its bounded session header remains r
   // Assert
   assert.equal(imported.length, 1)
   assert.deepEqual(imported[0].legacy, [{ cwd, sessionId, sessionFile }])
+})
+
+test("when an old import missed a title-prefixed transcript, reimport resolves its exact path", async (t) => {
+  // Arrange
+  const { root, scope } = await createFixture(t)
+  const cwd = path.join(root, "work")
+  await mkdir(cwd)
+  const sessionId = "title-session"
+  const sessionDirectory = path.join(scope.agentDir, "sessions")
+  await mkdir(sessionDirectory)
+  const sessionFile = path.join(sessionDirectory, "title.jsonl")
+  const title = JSON.stringify({ type: "title", v: 1, title: "Example" }).padEnd(255)
+  await writeFile(
+    sessionFile,
+    `${title}\n${JSON.stringify({ type: "session", version: 3, id: sessionId })}\n`,
+    { mode: 0o600 }
+  )
+  const source = path.join(root, "snapshot.txt")
+  const commands = `cd '${cwd}' && omp --resume '${sessionId}'\n`
+  await writeFile(source, commands, { mode: 0o600 })
+  const oldIdentity = createHash("sha256")
+    .update(source)
+    .update("\0")
+    .update(commands)
+    .digest("hex")
+    .slice(0, 32)
+  await writeRecoveryCheckpoint(scope, {
+    version: 1,
+    checkpointId: oldIdentity,
+    scope,
+    bootId: "legacy",
+    createdAt: new Date().toISOString(),
+    reason: "legacy",
+    entries: [],
+    legacy: [
+      {
+        cwd,
+        sessionId,
+        unavailable: "No transcript with this session ID exists in the selected OMP scope.",
+      },
+    ],
+    sourcePath: source,
+    sourceSha256: createHash("sha256").update(commands).digest("hex"),
+  })
+
+  // Act
+  const imported = await importLegacyRecovery(scope, source)
+
+  // Assert
+  assert.deepEqual(imported[0].legacy, [{ cwd, sessionId, sessionFile }])
+})
+
+test("when unrelated records precede a session header, import does not guess its identity", async (t) => {
+  // Arrange
+  const { root, scope } = await createFixture(t)
+  const cwd = path.join(root, "work")
+  await mkdir(cwd)
+  const sessionDirectory = path.join(scope.agentDir, "sessions")
+  await mkdir(sessionDirectory)
+  await writeFile(
+    path.join(sessionDirectory, "unrelated.jsonl"),
+    '{"type":"message"}\n{"type":"session","id":"hidden-session"}\n',
+    { mode: 0o600 }
+  )
+  const source = path.join(root, "snapshot.txt")
+  await writeFile(source, `cd '${cwd}' && omp --resume 'hidden-session'\n`, { mode: 0o600 })
+
+  // Act
+  const imported = await importLegacyRecovery(scope, source)
+
+  // Assert
+  assert.equal(imported[0].legacy[0].sessionFile, undefined)
+})
+
+test("when the title and session header exceed the prefix bound, import leaves the entry unavailable", async (t) => {
+  // Arrange
+  const { root, scope } = await createFixture(t)
+  const cwd = path.join(root, "work")
+  await mkdir(cwd)
+  const sessionDirectory = path.join(scope.agentDir, "sessions")
+  await mkdir(sessionDirectory)
+  const title = JSON.stringify({ type: "title", v: 1, title: "Example" }).padEnd(255)
+  await writeFile(
+    path.join(sessionDirectory, "large-prefix.jsonl"),
+    `${title}\n${JSON.stringify({ type: "session", id: "bounded-session", padding: "x".repeat(64 * 1024 - 256) })}\n`,
+    { mode: 0o600 }
+  )
+  const source = path.join(root, "snapshot.txt")
+  await writeFile(source, `cd '${cwd}' && omp --resume 'bounded-session'\n`, { mode: 0o600 })
+
+  // Act
+  const imported = await importLegacyRecovery(scope, source)
+
+  // Assert
+  assert.equal(imported[0].legacy[0].sessionFile, undefined)
 })

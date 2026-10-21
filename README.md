@@ -159,7 +159,9 @@ Imports appear in `ompi restore --history` as legacy checkpoints, not default au
 ompi restore --export --from CHECKPOINT_ID
 ```
 
-Managed exports use `ompi restore --slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot. Re-importing unchanged source data is idempotent.
+Managed exports use `ompi restore --slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot.
+
+Version 0.10.1 also recognizes OMP's [256-byte title slot](https://github.com/can1357/oh-my-pi/blob/main/docs/session.md#file-format) before the session header. If 0.10.0 reported existing transcripts as missing, re-import their legacy source after upgrading; the corrected import does not overwrite older immutable checkpoints. Re-importing a source already retained by the same reader revision reuses its checkpoint. Pruned imports can be recreated and remain subject to the bounded history policy.
 
 ## Outcomes and Safety
 
@@ -226,7 +228,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.10.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.10.1~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.

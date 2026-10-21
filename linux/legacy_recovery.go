@@ -99,6 +99,8 @@ func ImportLegacyRecovery(scope protocol.Scope, source string) ([]protocol.Recov
 		}
 		contentHash := sha256.Sum256(contents)
 		identity := sha256.New()
+		// A reader revision lets reimport repair cached missing-transcript results.
+		_, _ = identity.Write([]byte("legacy-import-v2\x00"))
 		_, _ = identity.Write([]byte(absolute))
 		_, _ = identity.Write([]byte{0})
 		_, _ = identity.Write(contents)
@@ -423,19 +425,30 @@ func readLegacySessionID(file string) (string, bool, error) {
 		return "", false, fmt.Errorf("scoped OMP transcript is unsafe: %s", file)
 	}
 	reader := bufio.NewReader(io.LimitReader(handle, maxLegacySessionHeaderBytes+1))
-	line, err := reader.ReadString('\n')
-	if len(line) > maxLegacySessionHeaderBytes {
-		return "", false, nil
+	bytesRead := 0
+	for recordIndex := range 2 {
+		line, err := reader.ReadBytes('\n')
+		bytesRead += len(line)
+		if bytesRead > maxLegacySessionHeaderBytes {
+			return "", false, nil
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", false, err
+		}
+		var header struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+			V    int    `json:"v"`
+		}
+		if err := json.Unmarshal(line, &header); err != nil {
+			return "", false, nil
+		}
+		if header.Type == "session" && validRecoveryText(header.ID, 512) {
+			return header.ID, true, nil
+		}
+		if recordIndex != 0 || header.Type != "title" || header.V != 1 || len(line) != 256 {
+			return "", false, nil
+		}
 	}
-	if err != nil && !errors.Is(err, io.EOF) {
-		return "", false, err
-	}
-	var header struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &header); err != nil || header.Type != "session" || !validRecoveryText(header.ID, 512) {
-		return "", false, nil
-	}
-	return header.ID, true, nil
+	return "", false, nil
 }
