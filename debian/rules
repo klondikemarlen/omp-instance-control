@@ -17,6 +17,7 @@ override_dh_auto_install:
 	install -D -m 0644 omp/index.js debian/omp-instance-control/usr/share/omp-instance-control/omp/index.js
 	install -D -m 0644 omp/launcher-context.js debian/omp-instance-control/usr/share/omp-instance-control/omp/launcher-context.js
 	install -D -m 0644 omp/command.js debian/omp-instance-control/usr/share/omp-instance-control/omp/command.js
+	install -D -m 0644 omp/recovery-command.js debian/omp-instance-control/usr/share/omp-instance-control/omp/recovery-command.js
 	install -D -m 0644 omp/take-over.js debian/omp-instance-control/usr/share/omp-instance-control/omp/take-over.js
 	install -D -m 0644 cli/client.js debian/omp-instance-control/usr/share/omp-instance-control/cli/client.js
 	install -D -m 0644 cli/restart-wait.js debian/omp-instance-control/usr/share/omp-instance-control/cli/restart-wait.js
