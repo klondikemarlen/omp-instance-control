@@ -631,7 +631,3 @@ func containsPair(values []string, name, value string) bool {
 	}
 	return false
 }
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}

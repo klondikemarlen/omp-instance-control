@@ -200,7 +200,9 @@ async function assertUsableSessionPaths(snapshot) {
   try {
     cwdInfo = await lstat(snapshot.cwd)
   } catch (error) {
-    throw new Error(`Saved session working directory is unavailable: ${error.message}`)
+    throw new Error(`Saved session working directory is unavailable: ${error.message}`, {
+      cause: error,
+    })
   }
   if (cwdInfo.isSymbolicLink() || !cwdInfo.isDirectory()) {
     throw new Error("Saved session working directory is not a real directory.")
@@ -423,13 +425,15 @@ export async function listSavedSessions(scope) {
     try {
       session = await readRestoreSnapshot(scope, payload.restoreId)
     } catch (error) {
+      if (error.cause?.code !== "ENOENT") throw error
       unavailable = `Current session snapshot is unavailable: ${error.message}`
     }
     if (session) {
-      saved.push({ name, session })
+      saved.push({ name, restoreId: payload.restoreId, session })
     } else {
       saved.push({
         name,
+        restoreId: payload.restoreId,
         unavailable:
           unavailable ??
           "No current persisted session snapshot exists; persist this session and wait for its next lifecycle update.",

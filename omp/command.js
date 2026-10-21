@@ -6,14 +6,10 @@ import { createTransport } from "../linux/transport.js"
 import { listInstances, formatRows, restartInstances } from "../cli/client.js"
 import { waitForRestarts } from "../cli/restart-wait.js"
 import { listProfileNames } from "../linux/profiles.js"
-import {
-  listSavedSessions,
-  readRestoreSnapshot,
-  saveRestoreName,
-  validateRestoreName,
-} from "../linux/restore.js"
-import { prepareNamedRestoreCommand } from "../linux/take-over.js"
+import { listSavedSessions, validateRestoreName } from "../linux/restore.js"
 import { prepareTakeover } from "./take-over.js"
+import { listRecoveryCheckpoints, listRecoverySlotIds } from "../linux/recovery.js"
+import { createRestoreCommand, getRestoreScope } from "./recovery-command.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
@@ -22,9 +18,23 @@ const ROOT_COMPLETIONS = ["instances", "restore", "take-over", "--help", "-h", "
 const ACTION_COMPLETIONS = ["list", "restart", "cleanup", "--help", "-h", "--version"]
 const LIST_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
 const CLEANUP_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
-const RESTORE_COMPLETIONS = ["save", "--list", "--profile", "--help", "-h", "--version"]
-const RESTORE_LIST_COMPLETIONS = ["--json", "--profile", "--help", "-h", "--version"]
+const RESTORE_COMPLETIONS = [
+  "save",
+  "--list",
+  "--checkpoint",
+  "--history",
+  "--from",
+  "--slot",
+  "--export",
+  "--import-legacy",
+  "--profile",
+  "--help",
+  "-h",
+  "--version",
+]
+const RESTORE_LIST_COMPLETIONS = ["--json", "--from", "--profile", "--help", "-h", "--version"]
 const RESTORE_SAVE_COMPLETIONS = ["--instance", "--profile", "--help", "-h", "--version"]
+const RESTORE_HISTORY_COMPLETIONS = ["--json", "--profile", "--help", "-h", "--version"]
 
 const RESTART_COMPLETIONS = [
   "--all",
@@ -46,13 +56,29 @@ const COMPLETABLE_OPTIONS = new Set([
   "--help",
   "-h",
   "--version",
+  "--checkpoint",
+  "--history",
+  "--from",
+  "--slot",
+  "--export",
+  "--import-legacy",
 ])
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
 }
 
-const BOOLEAN_OPTIONS = new Set(["all", "list", "json", "no-wait", "help", "version"])
+const BOOLEAN_OPTIONS = new Set([
+  "all",
+  "list",
+  "json",
+  "no-wait",
+  "checkpoint",
+  "history",
+  "export",
+  "help",
+  "version",
+])
 const TRUE_VALUES = new Set(["1", "t", "T", "TRUE", "true", "True"])
 const FALSE_VALUES = new Set(["0", "f", "F", "FALSE", "false", "False"])
 
@@ -73,12 +99,12 @@ function normalizeBooleanArguments(args) {
       normalizedArgs.push(token)
       continue
     }
-    if (token === "--instance" || token === "--profile") {
+    if (["--instance", "--profile", "--from", "--slot", "--import-legacy"].includes(token)) {
       normalizedArgs.push(token)
-      if (tokens[index + 1] !== undefined) {
+      if (tokens[index + 1] !== undefined && !tokens[index + 1].startsWith("--")) {
         normalizedArgs.push(tokens[index + 1])
         index += 1
-      }
+      } else if (token === "--import-legacy") normalizedArgs.push("")
       continue
     }
 
@@ -115,7 +141,13 @@ function parseOmpiArguments(args) {
     options: {
       all: { type: "boolean" },
       instance: { type: "string" },
+      slot: { type: "string" },
+      from: { type: "string" },
+      "import-legacy": { type: "string" },
       list: { type: "boolean" },
+      checkpoint: { type: "boolean" },
+      history: { type: "boolean" },
+      export: { type: "boolean" },
       profile: { type: "string" },
       json: { type: "boolean" },
       "no-wait": { type: "boolean" },
@@ -171,6 +203,51 @@ function parseOmpiArguments(args) {
     }
 
     const restoreArguments = positionals.slice(1)
+    const recoveryFlags = ["checkpoint", "history", "export", "import-legacy", "slot"]
+    const selectedRecoveryFlags = recoveryFlags.filter((flag) => present.has(flag))
+    if (selectedRecoveryFlags.length > 1) throw new Error("Choose exactly one recovery operation.")
+    if (present.has("from") && !selectedRecoveryFlags.length && !present.has("list")) {
+      if (!/^[a-f0-9]{32}$/.test(parsed.values.from ?? ""))
+        throw new Error("--from requires a full 32-character checkpoint ID.")
+      if (
+        restoreArguments.length ||
+        [...present].some((flag) => !["from", "profile", "help", "version"].includes(flag))
+      ) {
+        throw new Error(
+          "--from selection cannot be combined with a saved name or another recovery operation."
+        )
+      }
+      return { action: "restore", operation: "recovery-from", values: parsed.values, present }
+    }
+    if (selectedRecoveryFlags.length) {
+      const operation = selectedRecoveryFlags[0]
+      const allowed = new Set(["profile", "from", "json", "help", "version", operation])
+      if (
+        [...present].some((flag) => !allowed.has(flag)) ||
+        restoreArguments.length ||
+        parsed.values.instance !== undefined
+      ) {
+        throw new Error(`Invalid options for /ompi restore --${operation}.`)
+      }
+      if (present.has("json") && operation !== "history") {
+        throw new Error("--json applies only to recovery history or list.")
+      }
+      if (present.has("from") && operation !== "export") {
+        throw new Error("--from applies only to recovery selection, list, or export.")
+      }
+      if (operation === "slot" && !/^[a-f0-9]{32}$/.test(parsed.values.slot ?? ""))
+        throw new Error("--slot requires a full 32-character restore ID.")
+      if (operation === "from" && !/^[a-f0-9]{32}$/.test(parsed.values.from ?? ""))
+        throw new Error("--from requires a full 32-character checkpoint ID.")
+      return {
+        action: "restore",
+        operation: `recovery-${operation}`,
+        values: parsed.values,
+        present,
+      }
+    }
+    if ((present.has("from") || present.has("json")) && !present.has("list"))
+      throw new Error("--from and --json require --list, --history, or --export.")
     if (restoreArguments[0] === "save") {
       if (
         restoreArguments.length !== 2 ||
@@ -191,6 +268,18 @@ function parseOmpiArguments(args) {
       }
     }
 
+    if (present.has("list") && present.has("from")) {
+      if (!/^[a-f0-9]{32}$/.test(parsed.values.from ?? ""))
+        throw new Error("--from requires a full 32-character checkpoint ID.")
+      if (
+        restoreArguments.length ||
+        [...present].some(
+          (flag) => !["list", "from", "json", "profile", "help", "version"].includes(flag)
+        )
+      )
+        throw new Error("Invalid options for recovery list.")
+      return { action: "restore", operation: "recovery-list", values: parsed.values, present }
+    }
     if (present.has("list")) {
       if (
         parsed.values.list !== true ||
@@ -329,10 +418,7 @@ function scopeInstanceIds(completionIds, cwd, tokens) {
 
 function scopeRestoreInstanceIds(completionIds, tokens, defaultScope) {
   try {
-    let scope = getScope({ cwd: process.cwd(), profile: selectedProfile(tokens) })
-    if (defaultScope?.profile === scope.profile) {
-      scope = defaultScope
-    }
+    const scope = getRestoreScope(selectedProfile(tokens), defaultScope)
     return completionIds.get(scope.id) ?? new Set()
   } catch {
     return new Set()
@@ -341,13 +427,19 @@ function scopeRestoreInstanceIds(completionIds, tokens, defaultScope) {
 
 function scopeSavedNames(completionNames, tokens, defaultScope) {
   try {
-    let scope = getScope({ cwd: process.cwd(), profile: selectedProfile(tokens) })
-    if (defaultScope?.profile === scope.profile) {
-      scope = defaultScope
-    }
+    const scope = getRestoreScope(selectedProfile(tokens), defaultScope)
     return completionNames.get(scope.id) ?? []
   } catch {
     return []
+  }
+}
+
+function scopeRecoveryIds(recoveryIds, tokens, defaultScope) {
+  try {
+    const scope = getRestoreScope(selectedProfile(tokens), defaultScope)
+    return recoveryIds.get(scope.id) ?? { checkpoints: [], slots: [] }
+  } catch {
+    return { checkpoints: [], slots: [] }
   }
 }
 
@@ -372,9 +464,46 @@ function getRestoreCompletions(
   completionNames,
   profileNames,
   cwd,
-  defaultScope
+  defaultScope,
+  recoveryIds
 ) {
   const tokens = completedTokens.slice(1)
+  if (tokens.at(-1) === "--from") {
+    return completionValues(
+      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).checkpoints.map((id) =>
+        completionItem(id)
+      ),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (tokens.at(-1) === "--slot") {
+    return completionValues(
+      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).slots.map((id) =>
+        completionItem(id)
+      ),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (tokenPrefix.startsWith("--from=")) {
+    return completionValues(
+      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).checkpoints.map((id) =>
+        completionItem(`--from=${id}`)
+      ),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (tokenPrefix.startsWith("--slot=")) {
+    return completionValues(
+      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).slots.map((id) =>
+        completionItem(`--slot=${id}`)
+      ),
+      completedTokens,
+      tokenPrefix
+    )
+  }
   const saveAction = tokens[0] === "save"
   if (tokens.at(-1) === "--profile") {
     return completionValues(
@@ -455,19 +584,27 @@ function getRestoreCompletions(
       .filter((token) => token.startsWith("--") || token === "-h")
       .map((token) => (token === "-h" ? "help" : token.slice(2).split("=")[0]))
   )
-  const optionCompletions = usedOptions.has("list") ? RESTORE_LIST_COMPLETIONS : RESTORE_COMPLETIONS
+  let optionCompletions = RESTORE_COMPLETIONS
+  if (usedOptions.has("list")) {
+    optionCompletions = RESTORE_LIST_COMPLETIONS
+  } else if (usedOptions.has("history")) {
+    optionCompletions = RESTORE_HISTORY_COMPLETIONS
+  }
   const options = optionCompletions.filter((option) => {
     const name = option === "-h" ? "help" : option.replace(/^--/, "")
     return !usedOptions.has(name)
   })
-  const names = usedOptions.has("list")
-    ? []
-    : scopeSavedNames(completionNames, completedTokens, defaultScope).map(({ name, unavailable }) =>
+  const recoveryOperations = ["checkpoint", "history", "export", "import-legacy", "slot", "from"]
+  let names = []
+  if (!recoveryOperations.some((name) => usedOptions.has(name))) {
+    names = scopeSavedNames(completionNames, completedTokens, defaultScope).map(
+      ({ name, unavailable }) =>
         completionItem(
           name,
           unavailable ? `${name} (unavailable: ${safeTerminalText(unavailable)})` : name
         )
-      )
+    )
+  }
   return completionValues(
     [...names, ...options.map((value) => completionItem(value))],
     completedTokens,
@@ -481,7 +618,8 @@ function getArgumentCompletions(
   completionNames,
   profileNames,
   cwd,
-  defaultScope
+  defaultScope,
+  recoveryIds
 ) {
   const trailingSpace = /\s$/.test(argumentText)
   const tokens = argumentText.trim() ? argumentText.trim().split(/\s+/) : []
@@ -522,7 +660,8 @@ function getArgumentCompletions(
       completionNames,
       profileNames,
       cwd,
-      defaultScope
+      defaultScope,
+      recoveryIds
     )
   }
   if (completedTokens[0] !== "instances") {
@@ -673,72 +812,6 @@ function safeTerminalText(value) {
   )
 }
 
-function safeJsonValue(value) {
-  if (typeof value === "string") return safeTerminalText(value)
-  if (Array.isArray(value)) return value.map(safeJsonValue)
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, nested]) => [safeTerminalText(key), safeJsonValue(nested)])
-    )
-  }
-  return value
-}
-
-function notifySavedSessions(ctx, saved, json) {
-  if (json) {
-    ctx.ui.notify(JSON.stringify(safeJsonValue(saved)), "info")
-    return
-  }
-  if (saved.length === 0) {
-    ctx.ui.notify("No named sessions are saved in this scope.", "info")
-    return
-  }
-
-  const lines = saved.map(({ name, session, unavailable }) => {
-    if (!session) {
-      return `${safeTerminalText(name)}  unavailable: ${safeTerminalText(unavailable)}`
-    }
-    return `${safeTerminalText(name)}  ${safeTerminalText(session.sessionId)}  ${safeTerminalText(session.cwd)}`
-  })
-  ctx.ui.notify(lines.join("\n"), "info")
-}
-
-function getRestoreScope(profile, runtime) {
-  const selectedProfile = normalizeProfile(profile)
-  if (
-    runtime?.launch.scope &&
-    (selectedProfile === undefined || selectedProfile === runtime.launch.scope.profile)
-  ) {
-    return runtime.launch.scope
-  }
-  return getScope({ cwd: process.cwd(), profile: selectedProfile })
-}
-
-function snapshotMatchesRecord(snapshot, record) {
-  return (
-    record?.restoreId === snapshot.restoreId &&
-    record?.sessionId === snapshot.sessionId &&
-    record?.sessionFile === snapshot.sessionFile &&
-    record?.cwd === snapshot.cwd
-  )
-}
-function recordMatchesStatus(record, status) {
-  return (
-    record?.instanceId === status?.instanceId &&
-    record?.scope === status?.scope &&
-    record?.pid === status?.pid &&
-    record?.restoreId === status?.restoreId &&
-    record?.cwd === status?.cwd &&
-    record?.sessionId === status?.sessionId &&
-    record?.sessionFile === status?.sessionFile &&
-    record?.launcherManaged === status?.launcherManaged
-  )
-}
-
-function sameSnapshot(first, second) {
-  return JSON.stringify(first) === JSON.stringify(second)
-}
-
 function cleanupSummary(results) {
   if (results.length === 0) {
     return "No stale instance records or sockets found."
@@ -807,6 +880,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   const keybindings = pi.pi.KeybindingsManager.inMemory({ "app.clear": "ctrl+c" })
   const completionIds = new Map()
   const completionNames = new Map()
+  const recoveryIds = new Map()
   let completionCwd
   let profileNames = ["default"]
 
@@ -824,15 +898,20 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
     for (const profile of profiles) {
       let selectedScope
       try {
-        if (managedScope?.profile === profile) {
-          selectedScope = managedScope
-        } else {
-          selectedScope = getScope({ cwd: process.cwd(), profile })
-        }
+        selectedScope = getRestoreScope(profile, managedScope)
         const saved = await listSavedSessions(selectedScope)
+        const checkpoints = await listRecoveryCheckpoints(selectedScope)
         completionNames.set(selectedScope.id, saved)
+        const slots = await listRecoverySlotIds(selectedScope)
+        recoveryIds.set(selectedScope.id, {
+          checkpoints: checkpoints.map((checkpoint) => checkpoint.checkpointId),
+          slots,
+        })
       } catch {
-        if (selectedScope) completionNames.set(selectedScope.id, [])
+        if (selectedScope) {
+          completionNames.set(selectedScope.id, [])
+          recoveryIds.set(selectedScope.id, { checkpoints: [], slots: [] })
+        }
       }
     }
   }
@@ -843,7 +922,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
     let restoreScope
     try {
       scope = getScope({ cwd: ctx.cwd, profile: normalizeProfile(profile) })
-      restoreScope = getRestoreScope(profile, getRuntime())
+      restoreScope = getRestoreScope(profile, getRuntime()?.launch.scope)
       const profiles = await refreshProfileNames(scope)
       await refreshSavedNameCompletions(profiles)
       const transport = await createTransport(scope)
@@ -864,120 +943,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
     }
   }
 
-  async function saveRestoreBinding(ctx, name, values) {
-    const runtime = getRuntime()
-    const scope = getRestoreScope(values.profile, runtime)
-    let instanceId = values.instance
-    if (!instanceId) {
-      if (!runtime || runtime.launch.scope.id !== scope.id) {
-        throw new Error("Saving without --instance requires the current managed instance.")
-      }
-      instanceId = runtime.instanceId
-    }
-
-    const transport = await createTransport(scope)
-    const rows = await listInstances(transport)
-    const row = rows.find((candidate) => candidate.record.instanceId === instanceId)
-    if (!row) {
-      throw new Error(`Managed instance ${instanceId} was not found in this scope.`)
-    }
-    if (row.status !== "online") {
-      throw new Error(
-        `Managed instance ${instanceId} could not be verified: ${row.error ?? row.status}`
-      )
-    }
-    if (
-      row.data.instanceId !== instanceId ||
-      row.data.scope !== scope.id ||
-      !recordMatchesStatus(row.record, row.data)
-    ) {
-      throw new Error("The live instance identity changed while it was being verified.")
-    }
-    if (runtime?.instanceId === instanceId && runtime.launch.restartError) {
-      throw new Error(runtime.launch.restartError)
-    }
-    if (row.data.launcherManaged !== true) {
-      throw new Error("Only launcher-managed instances can be named.")
-    }
-    if (row.data.canRestart !== true) {
-      throw new Error("This managed instance has no safely resumable persisted session.")
-    }
-    const restoreId = row.data.restoreId
-    if (!/^[a-f0-9]{32}$/.test(restoreId ?? "")) {
-      throw new Error("This managed instance has no named-restore identity.")
-    }
-
-    const snapshot = await readRestoreSnapshot(scope, restoreId)
-    if (!snapshot) {
-      throw new Error("This managed instance has no persisted restore snapshot.")
-    }
-    if (!snapshotMatchesRecord(snapshot, row.data)) {
-      throw new Error("The managed session changed while its restore state was being checked.")
-    }
-
-    await saveRestoreName(scope, name, restoreId, { expectedSnapshot: snapshot })
-    await refreshCompletionIds(ctx, values.profile)
-    ctx.ui.notify(`Saved restore name '${name}' for instance ${instanceId.slice(0, 12)}.`, "info")
-  }
-
-  async function restoreSavedSession(ctx, name, operation, scope) {
-    const saved = await listSavedSessions(scope)
-    if (saved.length === 0) {
-      ctx.ui.notify("No named sessions are saved in this scope.", "info")
-      return
-    }
-
-    let selected = saved.find((entry) => entry.name === name)
-    if (operation === "menu") {
-      const choices = saved.map(({ name: savedName, session, unavailable }, index) => {
-        const description = session
-          ? safeTerminalText(session.cwd)
-          : `unavailable: ${safeTerminalText(unavailable)}`
-        return `${index + 1}. ${safeTerminalText(savedName)} — ${description}`
-      })
-      const choice = await ctx.ui.select("Restore a named session", choices)
-      if (!choice) return
-      const selectedIndex = choices.indexOf(choice)
-      if (selectedIndex < 0) {
-        throw new Error("The selected named session is no longer available.")
-      }
-      selected = saved[selectedIndex]
-    }
-    if (!selected) {
-      throw new Error(`No saved session is named '${safeTerminalText(name)}'.`)
-    }
-    if (!selected.session) {
-      throw new Error(
-        `Named session '${safeTerminalText(selected.name)}' is unavailable: ${safeTerminalText(selected.unavailable)}`
-      )
-    }
-    const session = await readRestoreSnapshot(scope, selected.session.restoreId)
-    if (!session || !sameSnapshot(session, selected.session)) {
-      throw new Error("The named session changed while it was being selected; run restore again.")
-    }
-    const command = await prepareNamedRestoreCommand(scope, selected.name, session)
-    const confirmed = await ctx.ui.confirm(
-      "Restore Named Session",
-      `After OMP exits, paste this command in your shell to restore the exact saved session:\n\n${command}\n\nExit gracefully? No restore process starts from inside OMP.`
-    )
-    if (!confirmed) return
-
-    const latestSaved = await listSavedSessions(scope)
-    const latest = latestSaved.find((entry) => entry.name === selected.name)
-    if (!latest || !sameSnapshot(latest.session, selected.session)) {
-      throw new Error("The named session changed while confirmation was open; run restore again.")
-    }
-    const latestSession = await readRestoreSnapshot(scope, latest.session.restoreId)
-    if (!latestSession || !sameSnapshot(latestSession, latest.session)) {
-      throw new Error("The named session is no longer safely restorable.")
-    }
-    if ((await prepareNamedRestoreCommand(scope, latest.name, latestSession)) !== command) {
-      throw new Error("The restore command changed while confirmation was open; run restore again.")
-    }
-
-    pi.appendEntry("ompi-restore", { name: selected.name, command })
-    ctx.shutdown()
-  }
+  const restoreCommand = createRestoreCommand(pi, { getRuntime, refreshCompletionIds })
 
   pi.registerCommand(COMMAND, {
     description: "Control participating instances, named restores, or manual takeover",
@@ -988,7 +954,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         completionNames,
         profileNames,
         completionCwd,
-        getRuntime()?.launch.scope
+        getRuntime()?.launch.scope,
+        recoveryIds
       )
     },
     async handler(args, ctx) {
@@ -1002,7 +969,19 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         const { action, operation, name, values, present } = parseOmpiArguments(args)
         if (action === "help") {
           ctx.ui.notify(
-            "Usage: /ompi instances [list|restart|cleanup] [options]\nRestart requires exactly one explicit --all or --instance selector. Listing is the default action. Cleanup removes only safely confirmed stale records and endpoints; it supports --profile NAME and --json.\n/ompi restore [NAME] prepares a shell restore command and requests graceful exit after confirmation.\n/ompi restore save NAME [--instance FULL_ID] [--profile NAME] binds a live managed session without overwriting an existing name.\n/ompi restore --list [--json] [--profile NAME] lists explicitly saved sessions.\n/ompi take-over prepares a shell command for the current saved session and requests graceful exit. Copy it, then paste it in your shell after OMP exits.",
+            [
+              "Usage: /ompi instances [list|restart|cleanup] [options]",
+              "Restart requires exactly one explicit --all or --instance selector. Listing is the default action.",
+              "Cleanup removes only safely confirmed stale records and endpoints; it supports --profile NAME and --json.",
+              "/ompi restore [NAME] or --slot ID selects a managed recovery slot, prepares a shell command, and confirms graceful exit.",
+              "/ompi restore save NAME [--instance FULL_ID] [--profile NAME] creates an optional immutable name.",
+              "/ompi restore --list [--json] [--from CHECKPOINT] [--profile NAME] lists recovery candidates.",
+              "/ompi restore --checkpoint saves membership; --history [--json] lists retained checkpoints.",
+              "/ompi restore --from CHECKPOINT selects its members; --export prints reviewed commands.",
+              "/ompi restore --import-legacy [PATH] imports review-only legacy data without executing shell text.",
+              "/ompi take-over prepares the current saved session for manual relaunch under ompi.",
+              "Copy a prepared command before graceful exit, wait for your shell, then paste it. No terminal windows open automatically.",
+            ].join("\n"),
             "info"
           )
           return
@@ -1012,18 +991,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           return
         }
         if (action === "restore") {
-          const scope = getRestoreScope(values.profile, getRuntime())
-          if (operation === "save") {
-            await saveRestoreBinding(ctx, name, values)
-            return
-          }
-          if (operation === "list") {
-            const saved = await listSavedSessions(scope)
-            notifySavedSessions(ctx, saved, values.json === true)
-            await refreshCompletionIds(ctx, values.profile)
-            return
-          }
-          await restoreSavedSession(ctx, name, operation, scope)
+          await restoreCommand(ctx, { operation, name, values })
           return
         }
         if (action === "take-over") {

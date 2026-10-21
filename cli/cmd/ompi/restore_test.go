@@ -37,12 +37,13 @@ func TestParseRestoreListJSONOptions(t *testing.T) {
 }
 
 func TestRestoreMenuCancellationDoesNotSelectSession(t *testing.T) {
-	sessions := []protocol.NamedSession{{
-		Name:    "project",
-		Session: protocol.SavedSession{SessionID: "session-1", CWD: "/work/project"},
+	sessions := []protocol.RecoverySession{{
+		RestoreID: strings.Repeat("a", 32),
+		Name:      "project",
+		Session:   &protocol.SavedSession{SessionID: "session-1", CWD: "/work/project"},
 	}}
 	var output bytes.Buffer
-	selected, confirmed, err := chooseNamedRestore(strings.NewReader("q\n"), &output, sessions)
+	selected, confirmed, err := chooseRecoverySession(strings.NewReader("q\n"), &output, sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,12 +53,13 @@ func TestRestoreMenuCancellationDoesNotSelectSession(t *testing.T) {
 }
 
 func TestRestoreMenuRequiresConfirmationAndSanitizesDisplayText(t *testing.T) {
-	session := protocol.NamedSession{
-		Name:    "project",
-		Session: protocol.SavedSession{SessionID: "session-1\x1b[31m", CWD: "/work/project\x1b[2J"},
+	session := protocol.RecoverySession{
+		RestoreID: strings.Repeat("a", 32),
+		Name:      "project",
+		Session:   &protocol.SavedSession{SessionID: "session-1\x1b[31m", CWD: "/work/project\x1b[2J"},
 	}
 	var output bytes.Buffer
-	selected, confirmed, err := chooseNamedRestore(strings.NewReader("1\nn\n"), &output, []protocol.NamedSession{session})
+	selected, confirmed, err := chooseRecoverySession(strings.NewReader("1\nn\n"), &output, []protocol.RecoverySession{session})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,22 +83,17 @@ func TestRestoreConfirmationAcceptsOnlyExplicitYes(t *testing.T) {
 }
 
 func TestRestoreMenuDoesNotConfirmUnavailableSnapshot(t *testing.T) {
-	session := protocol.NamedSession{
+	session := protocol.RecoverySession{
+		RestoreID:   strings.Repeat("a", 32),
 		Name:        "project",
 		Unavailable: "Current wrapper slot has no persisted restore snapshot.",
 	}
 	var output bytes.Buffer
-	selected, confirmed, err := chooseNamedRestore(strings.NewReader("1\ny\n"), &output, []protocol.NamedSession{session})
-	if err != nil {
-		t.Fatal(err)
+	selected, confirmed, err := chooseRecoverySession(strings.NewReader("1\ny\n"), &output, []protocol.RecoverySession{session})
+	if err == nil {
+		t.Fatal("unavailable session was not refused")
 	}
-	if confirmed || selected.Name != "project" || selected.Unavailable == "" {
-		t.Fatalf("unavailable menu result = session %#v, confirmed %v", selected, confirmed)
-	}
-	if strings.Contains(output.String(), "Restore project (session") {
-		t.Fatalf("unavailable session reached confirmation: %q", output.String())
-	}
-	if err := requireRestoreAvailable(selected); err == nil || !strings.Contains(err.Error(), "unavailable") {
-		t.Fatalf("unavailable session was not refused: %v", err)
+	if confirmed || selected.RestoreID != "" {
+		t.Fatalf("unavailable menu selected a runnable slot: %#v, confirmed %v", selected, confirmed)
 	}
 }

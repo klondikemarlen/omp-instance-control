@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process"
 import { constants } from "node:fs"
 import { access, lstat, stat } from "node:fs/promises"
 import path from "node:path"
@@ -87,6 +88,57 @@ async function resolveExecutable(env, executable) {
   return absolutePath
 }
 
+async function requireSlotRestoreVersion(executable, scope, env) {
+  let result
+  try {
+    result = await new Promise((resolve, reject) => {
+      execFile(
+        executable,
+        ["restore", "--version"],
+        {
+          env: {
+            ...env,
+            PI_CONFIG_DIR: scope.configRoot,
+            PI_PROFILE: scope.profile,
+            PI_CODING_AGENT_DIR: scope.agentDir,
+          },
+          timeout: 2_000,
+          maxBuffer: 16 * 1024,
+        },
+        (error, stdout) => {
+          if (error) reject(error)
+          else resolve(stdout)
+        }
+      )
+    })
+  } catch (error) {
+    throw new Error(`Unable to verify native ompi slot-restore support: ${error.message}`, {
+      cause: error,
+    })
+  }
+  const version = /\b(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?\b/.exec(result)
+  if (!version) throw new Error("Native ompi did not report a verifiable version for slot restore.")
+  const [major, minor, patch] = version.slice(1, 4).map(Number)
+  const supported =
+    major > 0 || minor > 10 || (minor === 10 && patch >= 0 && version[4] === undefined)
+  if (!supported)
+    throw new Error(
+      `Native ompi ${version[0]} does not support recovery slots; version 0.10.0 or newer is required.`
+    )
+}
+
+function recoveryEnvironmentArguments(scope) {
+  const args = [
+    "-u PI_CODING_AGENT_DIR",
+    `PI_CONFIG_DIR=${shellQuote(scope.configRoot, "Configuration directory")}`,
+    `OMP_PROFILE=${shellQuote(scope.profile, "Profile")}`,
+  ]
+  if (scope.profile === "default") {
+    args.push(`PI_CODING_AGENT_DIR=${shellQuote(scope.agentDir, "Agent directory")}`)
+  }
+  return args.join(" ")
+}
+
 function environmentArguments(env, scope) {
   const args = ["-u OMP_PROFILE", "-u PI_CODING_AGENT_DIR", "-u XDG_RUNTIME_DIR"]
 
@@ -169,7 +221,66 @@ export async function prepareNamedRestoreCommand(
   await requireDirectory(session.cwd, { rejectSymlink: true })
 
   const absoluteExecutable = await resolveExecutable(env, executable)
-  const environment = environmentArguments(env, scope)
+  const environment = recoveryEnvironmentArguments(scope)
 
   return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} restore ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
+}
+
+export async function prepareSlotRestoreCommand(
+  scope,
+  restoreId,
+  session,
+  { env = process.env, executable, assertOwnersNotLive: checkOwners = true } = {}
+) {
+  if (process.platform !== "linux") {
+    throw new Error("Managed slot restore is only supported on Linux.")
+  }
+  if (!/^[a-f0-9]{32}$/.test(restoreId ?? "")) {
+    throw new Error("Invalid managed restore slot identity.")
+  }
+  if (checkOwners) await assertRestoreOwnersNotLive(session.owner, session.agentOwner)
+  if (
+    session.scope?.id !== scope.id ||
+    session.scope?.configRoot !== scope.configRoot ||
+    session.scope?.profile !== scope.profile ||
+    session.scope?.agentDir !== scope.agentDir
+  ) {
+    throw new Error("Saved session belongs to a different OMP scope.")
+  }
+  requireSafeString(session.sessionFile, "Persisted session file")
+  requireSafeString(session.cwd, "Saved session directory")
+  if (!path.isAbsolute(session.sessionFile) || !path.isAbsolute(session.cwd)) {
+    throw new Error("Saved session paths must be absolute.")
+  }
+  await requireRegularFile(session.sessionFile, {
+    nonempty: true,
+    readable: true,
+    rejectSymlink: true,
+  })
+  await requireDirectory(session.cwd, { rejectSymlink: true })
+  const absoluteExecutable = await resolveExecutable(env, executable)
+  await requireSlotRestoreVersion(absoluteExecutable, scope, env)
+  const environment = recoveryEnvironmentArguments(scope)
+  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} restore --slot ${shellQuote(restoreId, "Restore identity")} --profile=${shellQuote(scope.profile, "Profile")}`
+}
+
+export async function prepareLegacyRecoveryExportCommand(
+  scope,
+  legacy,
+  { env = process.env, executable } = {}
+) {
+  if (!path.isAbsolute(legacy.cwd) || !path.isAbsolute(legacy.sessionFile)) {
+    throw new Error("Legacy session paths must be absolute.")
+  }
+  requireSafeString(legacy.cwd, "Legacy session directory")
+  requireSafeString(legacy.sessionFile, "Legacy session file")
+  await requireDirectory(legacy.cwd, { rejectSymlink: true })
+  await requireRegularFile(legacy.sessionFile, {
+    nonempty: true,
+    readable: true,
+    rejectSymlink: true,
+  })
+  const absoluteExecutable = await resolveExecutable(env, executable)
+  const environment = recoveryEnvironmentArguments(scope)
+  return `cd ${shellQuote(legacy.cwd, "Legacy session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} -r ${shellQuote(legacy.sessionFile, "Legacy session file")}`
 }

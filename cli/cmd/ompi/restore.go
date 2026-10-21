@@ -3,13 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/klondikemarlen/omp-instance-control/linux"
@@ -17,23 +15,38 @@ import (
 )
 
 const restoreHelp = `Usage:
-  ompi restore [--profile NAME] [--list [--json]]
-  ompi restore NAME [--profile NAME]
+  ompi restore [NAME] [--profile NAME]
+  ompi restore --slot ID [--profile NAME]
   ompi restore save NAME --instance ID [--profile NAME]
+  ompi restore --list [--json] [--from CHECKPOINT] [--profile NAME]
+  ompi restore --checkpoint [--profile NAME]
+  ompi restore --history [--json] [--profile NAME]
+  ompi restore --export [--from CHECKPOINT] [--profile NAME]
+  ompi restore --import-legacy [PATH] [--profile NAME]
+  ompi restore --from CHECKPOINT [--profile NAME]
   ompi restore --help | --version
 
-Names identify persistent slots that follow their current session and working directory.
-Name-to-slot bindings cannot be overwritten. Saving requires a live managed instance.
+Recovery automatically captures persisted managed ompi slots. Names are optional.
+Checkpoints retain slot membership, not frozen transcript contents.
+Legacy imports are review/export data and never acquire invented ownership.
+Restore uses this terminal only; no terminal windows are opened automatically.
 `
 
 type restoreOptions struct {
-	profile     string
-	instance    string
-	list        bool
-	json        bool
-	help        bool
-	version     bool
-	positionals []string
+	profile      string
+	instance     string
+	slot         string
+	from         string
+	list         bool
+	json         bool
+	checkpoint   bool
+	history      bool
+	export       bool
+	importLegacy bool
+	importPath   string
+	help         bool
+	version      bool
+	positionals  []string
 }
 
 func runRestore(args []string) (int, error) {
@@ -63,55 +76,34 @@ func runRestore(args []string) (int, error) {
 		return saveNamedSession(scope, options.positionals[1], options.instance)
 	}
 
+	if len(options.positionals) == 0 {
+		return runRecovery(scope, options)
+	}
+
 	sessions, err := linux.ListSavedSessions(scope)
 	if err != nil {
 		return 1, err
 	}
-	if options.list {
-		return printSavedSessions(sessions, options.json), nil
-	}
-	if len(sessions) == 0 {
-		return 1, errors.New("no named saved sessions in this scope; save one with 'ompi restore save NAME --instance ID'")
-	}
-
 	var selected protocol.NamedSession
-	if len(options.positionals) == 1 {
-		for _, session := range sessions {
-			if session.Name == options.positionals[0] {
-				selected = session
-				break
-			}
+	for _, session := range sessions {
+		if session.Name == options.positionals[0] {
+			selected = session
+			break
 		}
-		if selected.Name == "" {
-			return 1, fmt.Errorf("no saved session named %q in this scope", safeTerminalText(options.positionals[0]))
-		}
-		if err := requireRestoreAvailable(selected); err != nil {
-			return 1, err
-		}
-		confirmed, err := confirmNamedRestore(os.Stdin, os.Stdout, selected)
-		if err != nil {
-			return 1, err
-		}
-		if !confirmed {
-			fmt.Println("Restore cancelled.")
-			return 0, nil
-		}
-	} else {
-		if !hasRestoreTerminal(os.Stdin) || !hasRestoreTerminal(os.Stdout) {
-			return 1, errors.New("interactive restore menu requires a terminal; use 'ompi restore NAME' to select a saved session")
-		}
-		var confirmed bool
-		selected, confirmed, err = chooseNamedRestore(bufio.NewReader(os.Stdin), os.Stdout, sessions)
-		if err != nil {
-			return 1, err
-		}
-		if err := requireRestoreAvailable(selected); err != nil {
-			return 1, err
-		}
-		if !confirmed {
-			fmt.Println("Restore cancelled.")
-			return 0, nil
-		}
+	}
+	if selected.Name == "" {
+		return 1, fmt.Errorf("no saved session named %q in this scope", safeTerminalText(options.positionals[0]))
+	}
+	if err := requireRestoreAvailable(selected); err != nil {
+		return 1, err
+	}
+	confirmed, err := confirmNamedRestore(os.Stdin, os.Stdout, selected)
+	if err != nil {
+		return 1, err
+	}
+	if !confirmed {
+		fmt.Println("Restore cancelled.")
+		return 0, nil
 	}
 
 	executable, err := os.Executable()
@@ -122,7 +114,7 @@ func runRestore(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	code, err := linux.RestoreNamedSession(scope, selected.Name, resolveExtension(executable))
+	code, err := linux.RestoreNamedSession(scope, selected.Name, resolveExtension(executable), selected.Session)
 	if err != nil {
 		return 1, err
 	}
@@ -152,6 +144,45 @@ func parseRestoreOptions(args []string) (restoreOptions, error) {
 			index = next
 		case strings.HasPrefix(argument, "--instance="):
 			options.instance = strings.TrimPrefix(argument, "--instance=")
+		case argument == "--slot" || argument == "--from":
+			value, next, err := restoreOptionValue(args, index, argument)
+			if err != nil {
+				return restoreOptions{}, err
+			}
+			if value == "" {
+				return restoreOptions{}, fmt.Errorf("%s requires a value", argument)
+			}
+			if argument == "--slot" {
+				options.slot = value
+			} else {
+				options.from = value
+			}
+			index = next
+		case strings.HasPrefix(argument, "--slot="):
+			options.slot = strings.TrimPrefix(argument, "--slot=")
+			if options.slot == "" {
+				return restoreOptions{}, errors.New("--slot requires a value")
+			}
+		case strings.HasPrefix(argument, "--from="):
+			options.from = strings.TrimPrefix(argument, "--from=")
+			if options.from == "" {
+				return restoreOptions{}, errors.New("--from requires a value")
+			}
+		case argument == "--checkpoint":
+			options.checkpoint = true
+		case argument == "--history":
+			options.history = true
+		case argument == "--export":
+			options.export = true
+		case argument == "--import-legacy":
+			options.importLegacy = true
+			if index+1 < len(args) && !strings.HasPrefix(args[index+1], "-") {
+				index++
+				options.importPath = args[index]
+			}
+		case strings.HasPrefix(argument, "--import-legacy="):
+			options.importLegacy = true
+			options.importPath = strings.TrimPrefix(argument, "--import-legacy=")
 		case argument == "--list":
 			options.list = true
 		case argument == "--json":
@@ -180,14 +211,8 @@ func validateRestoreOptions(options restoreOptions) error {
 	if options.help {
 		return nil
 	}
-	if options.list {
-		if len(options.positionals) != 0 || options.instance != "" {
-			return errors.New("--list cannot be combined with a name or --instance")
-		}
-		return nil
-	}
-	if options.json {
-		return errors.New("--json is only valid with --list")
+	if err := validateRecoveryOptions(options); err != nil {
+		return err
 	}
 	if len(options.positionals) == 0 {
 		if options.instance != "" {
@@ -285,65 +310,6 @@ func currentStatusMatchesRecord(data *protocol.Data, record protocol.Record, sco
 		return false
 	}
 	return *data.SessionFile == *record.SessionFile
-}
-
-func printSavedSessions(sessions []protocol.NamedSession, jsonOutput bool) int {
-	if jsonOutput {
-		if err := json.NewEncoder(os.Stdout).Encode(sessions); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		return 0
-	}
-	if len(sessions) == 0 {
-		fmt.Println("No named saved sessions in this scope.")
-		return 0
-	}
-	for index, session := range sessions {
-		if session.Unavailable != "" {
-			fmt.Printf("%d) %s  unavailable: %s\n", index+1, safeTerminalText(session.Name), safeTerminalText(session.Unavailable))
-			continue
-		}
-		fmt.Printf("%d) %s  %s  %s\n", index+1, safeTerminalText(session.Name), safeTerminalText(session.Session.SessionID), safeTerminalText(session.Session.CWD))
-	}
-	return 0
-}
-
-func chooseNamedRestore(input io.Reader, output io.Writer, sessions []protocol.NamedSession) (protocol.NamedSession, bool, error) {
-	reader := bufio.NewReader(input)
-	for {
-		for index, session := range sessions {
-			if session.Unavailable != "" {
-				fmt.Fprintf(output, "%d) %s  unavailable: %s\n", index+1, safeTerminalText(session.Name), safeTerminalText(session.Unavailable))
-				continue
-			}
-			fmt.Fprintf(output, "%d) %s  %s  %s\n", index+1, safeTerminalText(session.Name), safeTerminalText(session.Session.SessionID), safeTerminalText(session.Session.CWD))
-		}
-		fmt.Fprint(output, "Choose a saved session number, or q to cancel: ")
-		line, err := reader.ReadString('\n')
-		choice := strings.TrimSpace(line)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return protocol.NamedSession{}, false, err
-		}
-		if choice == "" || strings.EqualFold(choice, "q") {
-			return protocol.NamedSession{}, false, nil
-		}
-		index, parseErr := strconv.Atoi(choice)
-		if parseErr != nil || index < 1 || index > len(sessions) {
-			if errors.Is(err, io.EOF) {
-				return protocol.NamedSession{}, false, nil
-			}
-			fmt.Fprintln(output, "Enter a listed number or q to cancel.")
-			continue
-		}
-		selected := sessions[index-1]
-		if selected.Unavailable != "" {
-			fmt.Fprintf(output, "Saved session %s unavailable: %s\n", safeTerminalText(selected.Name), safeTerminalText(selected.Unavailable))
-			return selected, false, nil
-		}
-		confirmed, confirmErr := confirmNamedRestore(reader, output, selected)
-		return selected, confirmed, confirmErr
-	}
 }
 
 func requireRestoreAvailable(session protocol.NamedSession) error {
