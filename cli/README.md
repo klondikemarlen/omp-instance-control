@@ -10,6 +10,6 @@ Own instance selection, explicit profile/config-root scope, request dispatch, an
 
 `cmd/ompi/main.go` composes the native command. Bare `ompi` launches OMP; standard commands pass through, while `ompi instances` owns the additive control interface. See [usage](../README.md#usage) and [shared concepts](../CONCEPTS.md).
 
-Named restore adds an explicit shell menu, immutable name saving for live managed instances, and exact-session foreground recovery. The CLI selects and confirms names; persistent state validation, process identity, and per-slot locking remain in `linux/`. Its options and saved-name completion mirror the host command without introducing automatic shell startup.
+Recovery adds an explicit shell menu for automatically captured managed slots, optional immutable names, checkpoint history, and reviewed imports/exports. The CLI confirms the selected exact session; persistent validation, process identity, and per-slot locking remain in `linux/`. Options and completion mirror the host command without automatic shell startup or terminal launching. Legacy data remains review/export-only because it has no verified managed ownership.
 
 `cmd/ompi/cleanup.go` renders explicit Linux cleanup outcomes with full JSON identities/reasons and nonzero failure exits. The native and OMP commands invoke their platform transport's cleanup operation; shared listing and restart clients remain read-only apart from explicit restart dispatch.

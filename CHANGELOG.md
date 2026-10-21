@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0 - 2026-10-21
+
+### Added
+
+- Automatically capture recovery membership for managed `ompi` sessions without requiring a name for every terminal.
+- Select managed slots in existing terminals, with optional names, bounded checkpoint history, prior-boot preservation, and explicit profile scope.
+- Import legacy Resume Helper snapshots as strictly parsed review-only data, preserving originals and exporting scope-anchored manual commands without evaluating shell text.
+- Mirror recovery history, checkpoint, import, export, and slot selection on the native and in-OMP command surfaces.
+
+### Fixed
+
+- Recheck the confirmed session snapshot under the restore lock so recovery cannot silently launch a changed conversation.
+- Preserve quiet pending capture for not-yet-written transcripts while retaining explicit unsafe-path and ownership failures.
+
 ## 0.9.3 - 2026-10-20
 
 ### Fixed
