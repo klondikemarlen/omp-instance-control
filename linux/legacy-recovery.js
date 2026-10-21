@@ -98,7 +98,14 @@ async function readSessionHeader(file) {
         return null
       }
       if (header?.type === "session" && safeText(header.id, 512)) return header.id
-      if (recordIndex !== 0 || header?.type !== "title" || header.v !== 1) return null
+      if (
+        recordIndex !== 0 ||
+        header?.type !== "title" ||
+        header.v !== 1 ||
+        lineEnd - offset + 1 !== 256
+      ) {
+        return null
+      }
       offset = lineEnd + 1
     }
     return null

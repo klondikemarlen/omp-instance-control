@@ -20,7 +20,7 @@ func TestLegacyRecoveryReimportsTitlePrefixedTranscriptAfterOldMissingResult(t *
 		t.Fatal(err)
 	}
 	transcript := writeLegacyTranscript(t, scope, "title.jsonl", "title-session")
-	contents := "{\"type\":\"title\",\"v\":1,\"title\":\"Example\"}\n{\"type\":\"session\",\"version\":3,\"id\":\"title-session\"}\n"
+	contents := legacyTitlePreamble() + "{\"type\":\"session\",\"version\":3,\"id\":\"title-session\"}\n"
 	if err := os.WriteFile(transcript, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -73,10 +73,11 @@ func TestLegacyTranscriptHeaderRequiresABoundedRecognizedPreamble(t *testing.T) 
 		valid    bool
 	}{
 		{"session header only", "{\"type\":\"session\",\"id\":\"expected\"}\n", true},
-		{"title then session header", "{\"type\":\"title\",\"v\":1}\n{\"type\":\"session\",\"id\":\"expected\"}\n", true},
+		{"title then session header", legacyTitlePreamble() + "{\"type\":\"session\",\"id\":\"expected\"}\n", true},
 		{"unknown preamble", "{\"type\":\"message\"}\n{\"type\":\"session\",\"id\":\"expected\"}\n", false},
-		{"unsupported title version", "{\"type\":\"title\",\"v\":2}\n{\"type\":\"session\",\"id\":\"expected\"}\n", false},
-		{"oversized prefix", "{\"type\":\"title\",\"v\":1,\"title\":\"" + strings.Repeat("x", maxLegacySessionHeaderBytes-64) + "\"}\n{\"type\":\"session\",\"id\":\"expected\"}\n", false},
+		{"short title slot", "{\"type\":\"title\",\"v\":1}\n{\"type\":\"session\",\"id\":\"expected\"}\n", false},
+		{"unsupported title version", strings.Replace(legacyTitlePreamble(), "\"v\":1", "\"v\":2", 1) + "{\"type\":\"session\",\"id\":\"expected\"}\n", false},
+		{"oversized prefix", legacyTitlePreamble() + "{\"type\":\"session\",\"id\":\"expected\",\"padding\":\"" + strings.Repeat("x", maxLegacySessionHeaderBytes-256) + "\"}\n", false},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "session.jsonl")
@@ -93,4 +94,9 @@ func TestLegacyTranscriptHeaderRequiresABoundedRecognizedPreamble(t *testing.T) 
 			}
 		})
 	}
+}
+
+func legacyTitlePreamble() string {
+	title := `{"type":"title","v":1,"title":"Example"}`
+	return title + strings.Repeat(" ", 255-len(title)) + "\n"
 }

@@ -104,9 +104,10 @@ test("when an old import missed a title-prefixed transcript, reimport resolves i
   const sessionDirectory = path.join(scope.agentDir, "sessions")
   await mkdir(sessionDirectory)
   const sessionFile = path.join(sessionDirectory, "title.jsonl")
+  const title = JSON.stringify({ type: "title", v: 1, title: "Example" }).padEnd(255)
   await writeFile(
     sessionFile,
-    `${JSON.stringify({ type: "title", v: 1, title: "Example" })}\n${JSON.stringify({ type: "session", version: 3, id: sessionId })}\n`,
+    `${title}\n${JSON.stringify({ type: "session", version: 3, id: sessionId })}\n`,
     { mode: 0o600 }
   )
   const source = path.join(root, "snapshot.txt")
@@ -173,9 +174,10 @@ test("when the title and session header exceed the prefix bound, import leaves t
   await mkdir(cwd)
   const sessionDirectory = path.join(scope.agentDir, "sessions")
   await mkdir(sessionDirectory)
+  const title = JSON.stringify({ type: "title", v: 1, title: "Example" }).padEnd(255)
   await writeFile(
     path.join(sessionDirectory, "large-prefix.jsonl"),
-    `${JSON.stringify({ type: "title", v: 1, title: "x".repeat(64 * 1024 - 64) })}\n${JSON.stringify({ type: "session", id: "bounded-session" })}\n`,
+    `${title}\n${JSON.stringify({ type: "session", id: "bounded-session", padding: "x".repeat(64 * 1024 - 256) })}\n`,
     { mode: 0o600 }
   )
   const source = path.join(root, "snapshot.txt")

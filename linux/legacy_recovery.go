@@ -427,7 +427,7 @@ func readLegacySessionID(file string) (string, bool, error) {
 	reader := bufio.NewReader(io.LimitReader(handle, maxLegacySessionHeaderBytes+1))
 	bytesRead := 0
 	for recordIndex := range 2 {
-		line, err := reader.ReadString('\n')
+		line, err := reader.ReadBytes('\n')
 		bytesRead += len(line)
 		if bytesRead > maxLegacySessionHeaderBytes {
 			return "", false, nil
@@ -440,13 +440,13 @@ func readLegacySessionID(file string) (string, bool, error) {
 			ID   string `json:"id"`
 			V    int    `json:"v"`
 		}
-		if err := json.Unmarshal([]byte(line), &header); err != nil {
+		if err := json.Unmarshal(line, &header); err != nil {
 			return "", false, nil
 		}
 		if header.Type == "session" && validRecoveryText(header.ID, 512) {
 			return header.ID, true, nil
 		}
-		if recordIndex != 0 || header.Type != "title" || header.V != 1 {
+		if recordIndex != 0 || header.Type != "title" || header.V != 1 || len(line) != 256 {
 			return "", false, nil
 		}
 	}
