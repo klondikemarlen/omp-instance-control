@@ -125,7 +125,7 @@ Give each participating tab a distinct restore name from inside its OMP session:
 /ompi restore save payments-main
 ```
 
-Save after the session has a persisted transcript. From another terminal, the equivalent is `ompi restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved.
+Save after the session has a persisted transcript. Fresh sessions wait quietly for OMP to create that transcript before becoming recoverable. From another terminal, the equivalent is `ompi restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved.
 
 After Ptyxis restores your Bash tabs, run this in each tab:
 
@@ -212,7 +212,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.9.2~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.9.3~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.

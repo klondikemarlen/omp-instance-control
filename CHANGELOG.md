@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3 - 2026-10-20
+
+### Fixed
+
+- Wait quietly for OMP to create a new session's transcript before capturing its restore snapshot, including at startup and graceful exit.
+- Keep missing-transcript slots unavailable and invalidate predecessor snapshots without weakening explicit restore or unsafe-path checks.
+
 ## 0.9.2 - 2026-10-20
 
 ### Changed
