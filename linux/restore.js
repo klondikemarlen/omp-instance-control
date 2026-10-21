@@ -210,7 +210,7 @@ async function assertUsableSessionPaths(snapshot) {
   try {
     sessionInfo = await lstat(snapshot.sessionFile)
   } catch (error) {
-    throw new Error(`Saved session file is unavailable: ${error.message}`)
+    throw new Error(`Saved session file is unavailable: ${error.message}`, { cause: error })
   }
   if (
     sessionInfo.isSymbolicLink() ||
@@ -349,6 +349,11 @@ export async function captureRestoreSnapshot(scope, launch, ctx) {
     await writeRestoreSnapshot(scope, snapshot)
     return true
   } catch (error) {
+    if (error.cause?.code === "ENOENT") {
+      await invalidateRestoreSnapshot(scope, launch.restoreId)
+      return false
+    }
+
     return invalidateFailedCapture(scope, launch.restoreId, error)
   }
 }
