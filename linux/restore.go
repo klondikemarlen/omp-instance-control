@@ -31,9 +31,10 @@ type restoreNameRecord struct {
 }
 
 type restoreDirectories struct {
-	root      string
-	snapshots string
-	names     string
+	root        string
+	snapshots   string
+	names       string
+	checkpoints string
 }
 
 // NewRestoreOwner captures Linux boot and process identity for a PID.
@@ -129,13 +130,17 @@ func ListSavedSessions(scope protocol.Scope) ([]protocol.NamedSession, error) {
 	return sessions, nil
 }
 
-// RestoreNamedSession resumes the exact named transcript in its recorded cwd.
+// RestoreNamedSession resumes the selected named transcript in its recorded cwd.
 // It holds a per-snapshot flock until the foreground launcher has returned.
-func RestoreNamedSession(scope protocol.Scope, name, extensionPath string) (int, error) {
-	return restoreNamedSession(scope, name, extensionPath, stdinIsTerminal() && stdoutIsTerminal(), launch)
+func RestoreNamedSession(scope protocol.Scope, name, extensionPath string, expected protocol.SavedSession) (int, error) {
+	return restoreNamedSessionWithExpected(scope, name, extensionPath, &expected, stdinIsTerminal() && stdoutIsTerminal(), launch)
 }
 
 func restoreNamedSession(scope protocol.Scope, name, extensionPath string, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
+	return restoreNamedSessionWithExpected(scope, name, extensionPath, nil, hasTerminal, launchSession)
+}
+
+func restoreNamedSessionWithExpected(scope protocol.Scope, name, extensionPath string, expected *protocol.SavedSession, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
 	if err := protocol.ValidateRestoreName(name); err != nil {
 		return 0, err
 	}
@@ -147,29 +152,66 @@ func restoreNamedSession(scope protocol.Scope, name, extensionPath string, hasTe
 	if err != nil {
 		return 0, fmt.Errorf("read restore name %q: %w", name, err)
 	}
+	return restoreSessionSlotWithBinding(scope, nameRecord.RestoreID, name, extensionPath, hasTerminal, launchSession, expected)
+}
 
-	lock, err := lockRestoreSnapshot(directories, nameRecord.RestoreID)
+// RestoreSessionSlot resumes the selected snapshot for one managed slot.
+// The expected snapshot prevents confirmation-time changes from changing the
+// session that the operator approved.
+func RestoreSessionSlot(scope protocol.Scope, restoreID, extensionPath string, expected protocol.SavedSession) (int, error) {
+	return restoreSessionSlotExpected(scope, restoreID, extensionPath, expected, stdinIsTerminal() && stdoutIsTerminal(), launch)
+}
+
+func restoreSessionSlot(scope protocol.Scope, restoreID, extensionPath string, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
+	return restoreSessionSlotWithBinding(scope, restoreID, "", extensionPath, hasTerminal, launchSession, nil)
+}
+
+func restoreSessionSlotExpected(scope protocol.Scope, restoreID, extensionPath string, expected protocol.SavedSession, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
+	return restoreSessionSlotWithBinding(scope, restoreID, "", extensionPath, hasTerminal, launchSession, &expected)
+}
+
+func restoreSessionSlotWithBinding(scope protocol.Scope, restoreID, name, extensionPath string, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error), expected *protocol.SavedSession) (int, error) {
+	if !validInstanceID(restoreID) {
+		return 0, errors.New("invalid restore ID")
+	}
+	directories, err := ensureRestoreDirectories(scope)
+	if err != nil {
+		return 0, err
+	}
+	lock, err := lockRestoreSnapshot(directories, restoreID)
 	if err != nil {
 		return 0, err
 	}
 	defer lock.Close()
 
-	currentName, err := readRestoreName(directories, name)
-	if err != nil {
-		return 0, fmt.Errorf("recheck restore name %q: %w", name, err)
+	if name != "" {
+		currentName, err := readRestoreName(directories, name)
+		if err != nil {
+			return 0, fmt.Errorf("recheck restore name %q: %w", name, err)
+		}
+		if currentName.RestoreID != restoreID {
+			return 0, errors.New("restore name changed while acquiring its snapshot lock")
+		}
 	}
-	if currentName.RestoreID != nameRecord.RestoreID {
-		return 0, errors.New("restore name changed while acquiring its snapshot lock")
-	}
-	session, err := readSavedSession(directories, scope, currentName.RestoreID, true)
+	session, err := readSavedSession(directories, scope, restoreID, true)
 	if err != nil {
-		return 0, fmt.Errorf("restore snapshot for %q: %w", name, err)
+		if name != "" {
+			return 0, fmt.Errorf("restore snapshot for %q: %w", name, err)
+		}
+		return 0, fmt.Errorf("restore snapshot for slot %s: %w", restoreID, err)
+	}
+	if expected != nil && !sameSelectedRestoreSession(*expected, session, scope, restoreID) {
+		return 0, errors.New("selected restore slot changed after confirmation; select it again")
+	}
+	label := fmt.Sprintf("slot %s", restoreID)
+	if name != "" {
+		label = fmt.Sprintf("%q", name)
 	}
 	if err := requireRestoreOwnerStopped(session.Owner); err != nil {
-		return 0, fmt.Errorf("cannot restore %q while its original launcher may still be active: %w", name, err)
+		return 0, fmt.Errorf("cannot restore %s while its original launcher may still be active: %w", label, err)
 	}
 	if err := requireRestoreOwnerStopped(session.AgentOwner); err != nil {
-		return 0, fmt.Errorf("cannot restore %q while its original OMP process may still be active: %w", name, err)
+		return 0, fmt.Errorf("cannot restore %s while its original OMP process may still be active: %w", label, err)
 	}
 	if !filepath.IsAbs(extensionPath) {
 		return 0, errors.New("OMP extension path must be absolute")
@@ -180,7 +222,10 @@ func restoreNamedSession(scope protocol.Scope, name, extensionPath string, hasTe
 		return 0, errors.New("saved launch options do not describe an interactive OMP session")
 	}
 	if !hasTerminal {
-		return 0, errors.New("named restore requires an interactive terminal")
+		if name != "" {
+			return 0, errors.New("named restore requires an interactive terminal")
+		}
+		return 0, errors.New("slot restore requires an interactive terminal")
 	}
 
 	previousCWD, err := os.Getwd()
@@ -201,6 +246,13 @@ func restoreNamedSession(scope protocol.Scope, name, extensionPath string, hasTe
 	return launchSession(args, extensionPath, session.RestoreID, lock)
 }
 
+func sameSelectedRestoreSession(expected, current protocol.SavedSession, scope protocol.Scope, restoreID string) bool {
+	return expected.Version == 1 && expected.RestoreID == restoreID && expected.Scope == scope &&
+		expected.SessionID == current.SessionID && expected.SessionFile == current.SessionFile &&
+		expected.CWD == current.CWD && expected.Scope == current.Scope &&
+		slices.Equal(expected.ResumeArgs, current.ResumeArgs)
+}
+
 func ensureRestoreDirectories(scope protocol.Scope) (restoreDirectories, error) {
 	if !validScopeID(scope.ID) || !restoreProfilePattern.MatchString(scope.Profile) ||
 		!filepath.IsAbs(scope.ConfigRoot) || filepath.Clean(scope.ConfigRoot) != scope.ConfigRoot ||
@@ -208,11 +260,12 @@ func ensureRestoreDirectories(scope protocol.Scope) (restoreDirectories, error) 
 		return restoreDirectories{}, errors.New("invalid restore scope")
 	}
 	directories := restoreDirectories{
-		root:      filepath.Join(scope.AgentDir, "instance-control", "restore"),
-		snapshots: filepath.Join(scope.AgentDir, "instance-control", "restore", "snapshots"),
-		names:     filepath.Join(scope.AgentDir, "instance-control", "restore", "names"),
+		root:        filepath.Join(scope.AgentDir, "instance-control", "restore"),
+		snapshots:   filepath.Join(scope.AgentDir, "instance-control", "restore", "snapshots"),
+		names:       filepath.Join(scope.AgentDir, "instance-control", "restore", "names"),
+		checkpoints: filepath.Join(scope.AgentDir, "instance-control", "restore", "checkpoints"),
 	}
-	for _, directory := range []string{directories.root, directories.snapshots, directories.names} {
+	for _, directory := range []string{directories.root, directories.snapshots, directories.names, directories.checkpoints} {
 		if err := EnsurePrivateDirectory(directory); err != nil {
 			return restoreDirectories{}, fmt.Errorf("prepare private restore directory %q: %w", directory, err)
 		}

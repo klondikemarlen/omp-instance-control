@@ -6,8 +6,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 
-import { prepareNamedRestoreCommand, prepareResumeCommand } from "../../linux/take-over.js"
-import { getScope } from "../../protocol/index.js"
+import { prepareResumeCommand } from "../../linux/take-over.js"
 
 const scopeEnvironmentKeys = [
   "PI_CONFIG_DIR",
@@ -155,57 +154,6 @@ test("when the default profile overrides its agent directory, resume preserves r
     XDG_RUNTIME_DIR: null,
   })
   await assert.rejects(readFile(markerForPaths), { code: "ENOENT" })
-})
-
-test("when restoring a named session, preparation preserves scope and accepts readable 0644 transcripts", async (t) => {
-  const sandbox = await createSandbox(t)
-  const configRoot = path.join(sandbox.root, "config")
-  const agentDir = path.join(sandbox.root, "agent")
-  const env = {
-    HOME: sandbox.root,
-    PI_CONFIG_DIR: configRoot,
-    PI_CODING_AGENT_DIR: agentDir,
-    PI_PROFILE: "default",
-    PATH: "/usr/bin:/bin",
-  }
-  const scope = getScope({ env, cwd: sandbox.cwd })
-  await chmod(sandbox.sessionFile, 0o644)
-  const session = {
-    scope: {
-      id: scope.id,
-      configRoot: scope.configRoot,
-      profile: scope.profile,
-      agentDir: scope.agentDir,
-    },
-    sessionFile: sandbox.sessionFile,
-    cwd: sandbox.cwd,
-    owner: {
-      bootId: "00000000-0000-0000-0000-000000000000",
-      pid: 999999,
-      startTime: "1",
-    },
-    agentOwner: {
-      bootId: "00000000-0000-0000-0000-000000000000",
-      pid: 999998,
-      startTime: "1",
-    },
-  }
-
-  const command = await prepareNamedRestoreCommand(scope, "work", session, {
-    env,
-    executable: sandbox.executable,
-  })
-
-  const invocation = await runCommand(command, sandbox.resultFile)
-  assert.deepEqual(invocation.argv, ["restore", "work", "--profile=default"])
-  assert.equal(invocation.cwd, sandbox.cwd)
-  assert.deepEqual(invocation.environment, {
-    PI_CONFIG_DIR: scope.configRoot,
-    PI_CODING_AGENT_DIR: scope.agentDir,
-    OMP_PROFILE: null,
-    PI_PROFILE: "default",
-    XDG_RUNTIME_DIR: null,
-  })
 })
 
 test("when transcript paths are unavailable or unsafe, preparation rejects without execution", async (t) => {

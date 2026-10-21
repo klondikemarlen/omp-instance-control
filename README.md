@@ -117,35 +117,49 @@ The command is a snapshot of the session you selected; do not switch sessions wh
 
 OMP owns settlement, transcript persistence, teardown, and terminal release. There is no automatic takeover, process killing, terminal-input injection, or replay of original startup arguments. The manual paste is required because plain OMP has no wrapper parent to relaunch it.
 
-### Restoring Named Sessions After Reboot
+### Recovering Sessions After Reboot
 
-Give each participating tab a distinct restore name from inside its OMP session:
+Managed `ompi` sessions are captured automatically once their transcript exists. No restore name is required. Recovery checkpoints retain the active managed slots outside the runtime directory; the default menu prefers the latest checkpoint from a previous boot, otherwise the latest current-boot checkpoint.
 
-```text
-/ompi restore save payments-main
-```
-
-Save after the session has a persisted transcript. Fresh sessions wait quietly for OMP to create that transcript before becoming recoverable. From another terminal, the equivalent is `ompi restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved.
-
-After Ptyxis restores your Bash tabs, run this in each tab:
+After your terminal restores its Bash tabs, run this in each tab:
 
 ```bash
 ompi restore
 ```
 
-Select the named slot and confirm its session ID and working directory. To select directly, use `ompi restore payments-main`. `ompi restore --list` shows saved names; add `--json` for structured output. Use `--profile work` explicitly for another OMP profile.
+Select a slot and confirm its exact session ID and working directory. `ompi restore --list` lists candidates; add `--json` for structured output. Use `--slot FULL_SLOT_ID` to select directly and `--profile work` explicitly for another OMP profile. Recovery runs only in the terminal where you invoke it; it does not open terminal windows or modify shell startup.
 
-A name stays bound to its wrapper slot, not to the original project directory or a frozen transcript bookmark. The slot follows its current session and cwd through session switches, branches, completed work, and controlled restarts. Saving an existing name again is refused rather than replacing its binding.
+Optional names remain available:
 
-Private snapshots live under the selected agent directory at `instance-control/restore/`, outside `XDG_RUNTIME_DIR`. They retain exact transcript paths and safe launch options without copying transcripts or replaying startup prompts. A missing session/worktree, unsafe state, a still-live launcher or OMP child, or another restore holding the slot lock refuses launch. If the current session cannot be captured, its previous snapshot is invalidated: the name remains visibly unavailable rather than reopening its predecessor, and other healthy names remain selectable.
+```text
+/ompi restore save payments-main
+```
 
-Recovery state requires trusted ancestors that are not group- or world-writable. If an ordinary launch cannot prepare that store safely, it reports named restore as unavailable and continues without a recoverable slot; standard OMP invocation and existing restart eligibility are unchanged. Correct only the reported owned directory's permissions, then start a fresh launcher. For example, `chmod go-w ~/.omp` removes group/other write access from an owned, group-writable OMP config root; the wrapper never changes those permissions for you.
+From another terminal, use `ompi restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved. `ompi restore payments-main` selects that slot directly. A name stays bound to its evolving wrapper slot, not to its original project directory or a frozen transcript bookmark. Saving an existing name again is refused.
 
-`/ompi restore` provides the same selection inside OMP. It displays a quoted shell command and asks for confirmation before graceful exit; copy it, wait for your shell, then paste it. It never starts a nested OMP terminal. Both command surfaces complete saved names.
+`ompi restore --checkpoint` saves a manual membership checkpoint. `--history` lists retained checkpoints; `--from CHECKPOINT_ID` restricts selection to that checkpoint. A checkpoint freezes membership, not transcript contents: each slot follows its latest safely captured session and cwd through switches, branches, and controlled restarts. A normal exit removes the closing slot from active membership, including when the resulting checkpoint is empty. The newest ten checkpoints are retained, plus the newest previous-boot checkpoint when it falls outside that set, for at most eleven.
+
+Private state lives under the selected agent directory at `instance-control/restore/`, outside `XDG_RUNTIME_DIR`. Exact transcript paths and safe launch options are retained without copying transcripts or replaying startup prompts. Missing or not-yet-written transcripts stay quietly unavailable and invalidate predecessor snapshots; recovery never silently opens an older conversation. Unsafe paths, a live launcher or OMP child, uncertain ownership, or a concurrent restore holding the slot lock refuse launch.
+
+Recovery requires trusted ancestors that are not group- or world-writable. If an ordinary launch cannot prepare that store safely, it reports recovery as unavailable and continues without a recoverable slot; standard OMP invocation and existing restart eligibility are unchanged. Correct only the reported owned directory's permissions, then start a fresh launcher. For example, `chmod go-w ~/.omp` removes group/other write access from an owned, group-writable OMP config root; the wrapper never changes those permissions for you.
+
+`/ompi restore` provides the same recovery operations inside OMP. Selection displays a quoted shell command before confirmation and graceful exit: copy it, wait for your shell, then paste it. No nested OMP terminal is started. Both command surfaces complete optional saved names and recovery options.
 
 Ptyxis restores layout, profile, and cwd, but does not supply a durable per-tab identity or save custom command argv in its [50.1 session format](https://sources.debian.org/data/main/p/ptyxis/50.1-1/src/ptyxis-session.c). This explicit menu does not change Ptyxis profiles or Bash startup. Verification covers real Ptyxis close/reopen on an isolated headless display and loss of the isolated runtime directory, not an OS reboot of the workstation.
 
 Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 cannot supply restore metadata merely by restarting their OMP child. Resume the existing session under the new launcher before naming its slot.
+
+### Migrating Legacy Recovery Snapshots
+
+`ompi restore --import-legacy` imports the old helper's `~/.local/state/omp-session-resume-helper/snapshots/*.txt` and `active-sessions.txt`, leaving the originals untouched. Supply a path to import one snapshot. Only the helper's strictly quoted command format is parsed; shell text is never evaluated. Transcript IDs must resolve uniquely to an owned file within the selected profile's session tree. Unsupported, missing, or ambiguous entries are reported.
+
+Imports appear in `ompi restore --history` as legacy checkpoints, not default automatic recovery. They cannot acquire invented managed-slot ownership or launch automatically. Inspect one with `ompi restore --list --from CHECKPOINT_ID` and export manual commands with:
+
+```bash
+ompi restore --export --from CHECKPOINT_ID
+```
+
+Managed exports use `ompi restore --slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot. Re-importing unchanged source data is idempotent.
 
 ## Outcomes and Safety
 
@@ -212,7 +226,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.9.3~ppa2_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.10.0~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.

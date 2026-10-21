@@ -1,3 +1,12 @@
+omp-instance-control (0.10.0~ppa1) resolute; urgency=medium
+
+  * Capture managed recovery membership without mandatory per-terminal names.
+  * Preserve previous-boot recovery and expose bounded checkpoint history.
+  * Import legacy snapshots as review-only data with safe manual exports.
+  * Revalidate confirmed snapshots and preserve quiet pending transcript capture.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 21 Oct 2026 14:16:16 -0700
+
 omp-instance-control (0.9.3~ppa2) resolute; urgency=medium
 
   * Wait quietly for new-session transcripts before capturing restore snapshots.

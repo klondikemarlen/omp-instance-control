@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto"
 import { realpath, stat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
+import { captureRecoveryCheckpoint } from "../linux/recovery.js"
 import { captureRestoreSnapshot } from "../linux/restore.js"
 import { createTransport } from "../linux/transport.js"
 import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
@@ -98,15 +99,21 @@ export default async function instanceControl(pi) {
     }
   }
 
-  async function writeRestoreSnapshot(state, ctx) {
+  async function writeRestoreSnapshot(state, ctx, { excludeRestoreId } = {}) {
+    if (!state.launch.restoreId) return
+
     try {
       await captureRestoreSnapshot(state.launch.scope, state.launch, ctx)
+      await captureRecoveryCheckpoint(state.launch.scope, {
+        reason: "automatic",
+        excludeRestoreId,
+      })
     } catch (error) {
       const safeMessage = error.message.replace(
         /[\u0000-\u001f\u007f-\u009f]/g,
         (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
       )
-      ctx.ui.notify(`Named restore snapshot unavailable: ${safeMessage}`, "error")
+      ctx.ui.notify(`Recovery checkpoint unavailable: ${safeMessage}`, "error")
     }
   }
 
@@ -308,8 +315,10 @@ export default async function instanceControl(pi) {
           const previousWrite = state.recordWrite ?? Promise.resolve()
           state.recordWrite = previousWrite
             .catch(() => {})
-            .then(() => writeRestoreSnapshot(state, ctx))
-          await state.recordWrite.catch(() => {})
+            .then(() =>
+              writeRestoreSnapshot(state, ctx, { excludeRestoreId: state.launch.restoreId })
+            )
+          await state.recordWrite
           await state.server.close()
           await state.transport.removeRecord(state.instanceId)
           runtime = undefined

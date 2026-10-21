@@ -144,3 +144,44 @@ test(
     assert.equal(candidates.includes("--json"), true)
   }
 )
+
+test("when browsing checkpoint history, Bash offers JSON output", { skip: !bashAvailable }, () => {
+  // Arrange
+  const words = ["ompi", "restore", "--history", "--j"]
+
+  // Act
+  const candidates = complete(words)
+
+  // Assert
+  assert.deepEqual(candidates, ["--json"])
+})
+
+test(
+  "when selecting a checkpoint, Bash does not suggest creating another checkpoint",
+  { skip: !bashAvailable },
+  () => {
+    // Arrange
+    const words = ["ompi", "restore", "--from", "a".repeat(32), "--c"]
+
+    // Act
+    const candidates = complete(words)
+
+    // Assert
+    assert.deepEqual(candidates, [])
+  }
+)
+
+test(
+  "when importing legacy data, Bash does not suggest managed-slot execution",
+  { skip: !bashAvailable },
+  () => {
+    // Arrange
+    const words = ["ompi", "restore", "--import-legacy", "/private/snapshot.txt", "--s"]
+
+    // Act
+    const candidates = complete(words)
+
+    // Assert
+    assert.deepEqual(candidates, [])
+  }
+)

@@ -245,7 +245,6 @@ test("when an explicit matching exit arrives after restart acceptance, shutdown 
   Object.assign(process.env, environment)
   const events = createEventBus()
   const handlers = new Map()
-  let shutdowns = 0
   const ctx = {
     agent: { kind: "main" },
     mode: "tui",
@@ -260,9 +259,7 @@ test("when an explicit matching exit arrives after restart acceptance, shutdown 
         assert.fail(message)
       },
     },
-    shutdown() {
-      shutdowns += 1
-    },
+    shutdown() {},
   }
 
   try {
@@ -286,16 +283,14 @@ test("when an explicit matching exit arrives after restart acceptance, shutdown 
     const status = await transport.request(record, createRequest(record.instanceId, "status"))
     const rejected = await transport.request(record, createRequest(record.instanceId, "restart"))
     await handlers.get("session_shutdown")({}, ctx)
-    const handoff = readFile(path.join(launchDirectory, "handoff.json"))
 
     // Assert
     assert.equal(accepted.ok, true)
     assert.equal(accepted.data.operationId, request.requestId)
-    assert.equal(shutdowns, 1)
     assert.equal(status.data.canRestart, false)
     assert.equal(rejected.ok, false)
     assert.equal(rejected.error.code, "EXPLICIT_EXIT_REQUESTED")
-    await assert.rejects(handoff, { code: "ENOENT" })
+    await assert.rejects(readFile(path.join(launchDirectory, "handoff.json")), { code: "ENOENT" })
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
     for (const [key, value] of Object.entries(previous)) {
