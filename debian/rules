@@ -5,7 +5,7 @@
 
 override_dh_auto_build:
 	mkdir -p debian/build
-	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.9.3" -o debian/build/ompi ./cli/cmd/ompi
+	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.10.0" -o debian/build/ompi ./cli/cmd/ompi
 
 override_dh_auto_test:
 	GOCACHE=$(CURDIR)/debian/build/cache go test ./...
@@ -24,6 +24,8 @@ override_dh_auto_install:
 	install -D -m 0644 linux/profiles.js debian/omp-instance-control/usr/share/omp-instance-control/linux/profiles.js
 	install -D -m 0644 linux/take-over.js debian/omp-instance-control/usr/share/omp-instance-control/linux/take-over.js
 	install -D -m 0644 linux/restore.js debian/omp-instance-control/usr/share/omp-instance-control/linux/restore.js
+	install -D -m 0644 linux/recovery.js debian/omp-instance-control/usr/share/omp-instance-control/linux/recovery.js
+	install -D -m 0644 linux/legacy-recovery.js debian/omp-instance-control/usr/share/omp-instance-control/linux/legacy-recovery.js
 	install -D -m 0644 protocol/index.js debian/omp-instance-control/usr/share/omp-instance-control/protocol/index.js
 
 override_dh_auto_clean:
