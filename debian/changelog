@@ -1,3 +1,10 @@
+omp-instance-control (0.9.3~ppa1) resolute; urgency=medium
+
+  * Wait quietly for new-session transcripts before capturing restore snapshots.
+  * Invalidate missing-transcript snapshots without weakening restore safety.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 20 Oct 2026 17:57:04 -0700
+
 omp-instance-control (0.9.2~ppa1) resolute; urgency=medium
 
   * Let an explicit matching OMP exit intent override pending controlled restarts.
