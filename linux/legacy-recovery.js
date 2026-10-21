@@ -85,17 +85,23 @@ async function readSessionHeader(file) {
     }
     const bytes = Buffer.alloc(MAX_SESSION_HEADER_BYTES + 1)
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
-    let lineEnd = bytes.indexOf(0x0a, 0)
-    if (lineEnd < 0) lineEnd = bytesRead
-    if (lineEnd > MAX_SESSION_HEADER_BYTES) return null
-    const line = bytes.subarray(0, lineEnd).toString("utf8")
-    let header
-    try {
-      header = JSON.parse(line)
-    } catch {
-      return null
+    let offset = 0
+    for (let recordIndex = 0; recordIndex < 2; recordIndex++) {
+      let lineEnd = bytes.indexOf(0x0a, offset)
+      if (lineEnd < 0) lineEnd = bytesRead
+      if (lineEnd > MAX_SESSION_HEADER_BYTES) return null
+      const line = bytes.subarray(offset, lineEnd).toString("utf8")
+      let header
+      try {
+        header = JSON.parse(line)
+      } catch {
+        return null
+      }
+      if (header?.type === "session" && safeText(header.id, 512)) return header.id
+      if (recordIndex !== 0 || header?.type !== "title" || header.v !== 1) return null
+      offset = lineEnd + 1
     }
-    return header?.type === "session" && safeText(header.id, 512) ? header.id : null
+    return null
   } finally {
     await handle.close()
   }
@@ -321,6 +327,8 @@ export async function importLegacyRecovery(scope, source) {
     const sourcePath = path.resolve(file)
     const sourceSha256 = createHash("sha256").update(bytes).digest("hex")
     const identity = createHash("sha256")
+      // A reader revision lets reimport repair cached missing-transcript results.
+      .update("legacy-import-v2\0")
       .update(sourcePath)
       .update("\0")
       .update(bytes)
