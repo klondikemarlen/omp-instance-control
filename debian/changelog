@@ -1,3 +1,11 @@
+omp-instance-control (0.11.0~ppa1) resolute; urgency=medium
+
+  * Restart the current native wrapper and OMP through /ompi restart.
+  * Preserve exact session, configuration, recovery lock and restart correlation.
+  * Explain one-time fresh-launch requirements and offer direct restart completion.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Thu, 22 Oct 2026 09:20:52 -0700
+
 omp-instance-control (0.10.1~ppa1) resolute; urgency=medium
 
   * Resolve legacy recovery from OMP title-prefixed session transcripts.

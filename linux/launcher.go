@@ -25,17 +25,18 @@ const (
 )
 
 type launchRecord struct {
-	Version       int                   `json:"version"`
-	Token         string                `json:"token"`
-	PID           int                   `json:"pid"`
-	Scope         protocol.Scope        `json:"scope"`
-	ExtensionPath string                `json:"extensionPath"`
-	LastRestart   *restartRecord        `json:"lastRestart"`
-	RestartError  string                `json:"restartError,omitempty"`
-	BuiltinFlags  []string              `json:"builtinFlags"`
-	RestoreID     string                `json:"restoreId"`
-	ResumeArgs    []string              `json:"resumeArgs"`
-	Owner         protocol.RestoreOwner `json:"owner"`
+	Version           int                   `json:"version"`
+	Token             string                `json:"token"`
+	PID               int                   `json:"pid"`
+	Scope             protocol.Scope        `json:"scope"`
+	ExtensionPath     string                `json:"extensionPath"`
+	LastRestart       *restartRecord        `json:"lastRestart"`
+	RestartError      string                `json:"restartError,omitempty"`
+	BuiltinFlags      []string              `json:"builtinFlags"`
+	RestoreID         string                `json:"restoreId"`
+	ResumeArgs        []string              `json:"resumeArgs"`
+	Owner             protocol.RestoreOwner `json:"owner"`
+	CanRestartWrapper bool                  `json:"canRestartWrapper"`
 }
 
 type restartRecord struct {
@@ -44,21 +45,29 @@ type restartRecord struct {
 }
 
 type handoffRecord struct {
-	Version     int    `json:"version"`
-	Token       string `json:"token"`
-	OperationID string `json:"operationId"`
-	InstanceID  string `json:"instanceId"`
-	SessionFile string `json:"sessionFile"`
-	CWD         string `json:"cwd"`
+	Version        int    `json:"version"`
+	Token          string `json:"token"`
+	OperationID    string `json:"operationId"`
+	InstanceID     string `json:"instanceId"`
+	SessionFile    string `json:"sessionFile"`
+	CWD            string `json:"cwd"`
+	RestartWrapper bool   `json:"restartWrapper,omitempty"`
 }
 
 // Launch runs upstream OMP as a foreground child, loading the public control
 // extension. OMP performs settlement and writes a one-shot restart handoff.
 func Launch(args []string, extensionPath string) (int, error) {
+	if os.Getenv(execStatePathEnv) != "" || os.Getenv(execStateTokenEnv) != "" || os.Getenv(execStateLockEnv) != "" {
+		return resumeWrapper(args, extensionPath)
+	}
 	return launch(args, extensionPath, "", nil)
 }
 
 func launch(args []string, extensionPath, restoreID string, restoreLock *os.File) (int, error) {
+	return launchWithResume(args, extensionPath, restoreID, restoreLock, nil)
+}
+
+func launchWithResume(args []string, extensionPath, restoreID string, restoreLock *os.File, resume *resumeState) (int, error) {
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		return runPassthrough(args)
 	}
@@ -76,6 +85,9 @@ func launch(args []string, extensionPath, restoreID string, restoreLock *os.File
 	initialCwd, err := os.Getwd()
 	if err != nil {
 		return 0, err
+	}
+	if resume != nil {
+		initialCwd = resume.cwd
 	}
 	builtinFlags := make([]string, 0, len(args))
 	restartArgs, profile, cwd, restartArgsErr := restartArguments(args, initialCwd, &builtinFlags)
@@ -144,7 +156,14 @@ func launch(args []string, extensionPath, restoreID string, restoreLock *os.File
 	if executable == "" {
 		executable = "omp"
 	}
+	wrapperExecutable, wrapperPathErr := currentWrapperExecutable()
+	canRestartWrapper := wrapperPathErr == nil && usableExecutable(wrapperExecutable) == nil
 	var restart *restartRecord
+	var resumeFile string
+	if resume != nil {
+		restart = &resume.restart
+		resumeFile = resume.sessionFile
+	}
 	baseEnv := os.Environ()
 	if scope.Profile == "default" && os.Getenv("PI_CODING_AGENT_DIR") != "" {
 		baseEnv = replaceEnvironment(baseEnv, map[string]string{
@@ -155,7 +174,6 @@ func launch(args []string, extensionPath, restoreID string, restoreLock *os.File
 	if slices.Contains(builtinFlags, "trusted-extension") {
 		extensionFlag = "--trusted-extension"
 	}
-	var resumeFile string
 	for {
 		select {
 		case received := <-signals:
@@ -170,6 +188,7 @@ func launch(args []string, extensionPath, restoreID string, restoreLock *os.File
 			Version: 1, Token: token, PID: os.Getpid(), Scope: scope,
 			ExtensionPath: extensionPath, LastRestart: restart, BuiltinFlags: builtinFlags,
 			RestoreID: restoreID, ResumeArgs: restartArgs, Owner: owner,
+			CanRestartWrapper: canRestartWrapper,
 		}
 		if restartArgsErr != nil && restart == nil {
 			launch.RestartError = restartArgsErr.Error()
@@ -239,6 +258,20 @@ func launch(args []string, extensionPath, restoreID string, restoreLock *os.File
 		cwd = handoff.CWD
 		restart = &restartRecord{OperationID: handoff.OperationID, PreviousInstanceID: handoff.InstanceID}
 		resumeFile = handoff.SessionFile
+		if handoff.RestartWrapper {
+			select {
+			case received := <-signals:
+				return 128 + int(received.(syscall.Signal)), nil
+			default:
+			}
+			if !canRestartWrapper {
+				return 1, fmt.Errorf("cannot restart the native wrapper: installed executable is unavailable or unusable: %s", wrapperExecutable)
+			}
+			if err := execWrapperReplacement(launchDir, wrapperExecutable, scope, restartArgs, cwd, resumeFile, restart, restoreID, restoreLock); err != nil {
+				return 1, err
+			}
+			return 1, errors.New("native wrapper replacement returned without executing")
+		}
 	}
 }
 
@@ -406,9 +439,13 @@ func runChild(executable string, args []string, cwd string, env []string, signal
 }
 
 func validateHandoff(handoff handoffRecord) error {
+	action := "restart"
+	if handoff.RestartWrapper {
+		action = "restart-wrapper"
+	}
 	request := protocol.Request{
 		Version: handoff.Version, InstanceID: handoff.InstanceID,
-		RequestID: handoff.OperationID, Action: "restart",
+		RequestID: handoff.OperationID, Action: action,
 	}
 	if protocol.ValidateRequest(request) != nil || !filepath.IsAbs(handoff.SessionFile) || !filepath.IsAbs(handoff.CWD) {
 		return errors.New("invalid restart handoff; refusing to resume")

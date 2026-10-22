@@ -5,7 +5,7 @@
 
 override_dh_auto_build:
 	mkdir -p debian/build
-	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.10.1" -o debian/build/ompi ./cli/cmd/ompi
+	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.11.0" -o debian/build/ompi ./cli/cmd/ompi
 
 override_dh_auto_test:
 	GOCACHE=$(CURDIR)/debian/build/cache go test ./...
@@ -18,6 +18,7 @@ override_dh_auto_install:
 	install -D -m 0644 omp/launcher-context.js debian/omp-instance-control/usr/share/omp-instance-control/omp/launcher-context.js
 	install -D -m 0644 omp/command.js debian/omp-instance-control/usr/share/omp-instance-control/omp/command.js
 	install -D -m 0644 omp/recovery-command.js debian/omp-instance-control/usr/share/omp-instance-control/omp/recovery-command.js
+	install -D -m 0644 omp/restart.js debian/omp-instance-control/usr/share/omp-instance-control/omp/restart.js
 	install -D -m 0644 omp/take-over.js debian/omp-instance-control/usr/share/omp-instance-control/omp/take-over.js
 	install -D -m 0644 cli/client.js debian/omp-instance-control/usr/share/omp-instance-control/cli/client.js
 	install -D -m 0644 cli/restart-wait.js debian/omp-instance-control/usr/share/omp-instance-control/cli/restart-wait.js

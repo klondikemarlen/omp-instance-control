@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0 - 2026-10-22
+
+### Added
+
+- Restart the current managed terminal with `/ompi restart`, replacing the installed native wrapper and reloading OMP while preserving its exact conversation, working directory, configuration, and recovery slot.
+- Offer `restart` directly in `/ompi` completion and explain when an older launcher needs a fresh launch before native replacement is available.
+
 ## 0.10.1 - 2026-10-21
 
 ### Fixed

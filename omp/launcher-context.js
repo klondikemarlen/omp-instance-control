@@ -29,6 +29,9 @@ export async function readLauncherContext(env = process.env) {
   if (typeof launch.extensionPath !== "string" || !path.isAbsolute(launch.extensionPath)) {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher extension path is invalid.")
   }
+  if (launch.canRestartWrapper !== undefined && typeof launch.canRestartWrapper !== "boolean") {
+    throw new ProtocolError("INVALID_LAUNCHER", "Launcher wrapper-restart capability is invalid.")
+  }
   if (launch.restartError !== undefined && typeof launch.restartError !== "string") {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher restart limitation is invalid.")
   }
@@ -88,9 +91,15 @@ export async function recordLaunchRegistration(launch, scope, instanceId) {
   })
 }
 
-export function writeRestartHandoff(launch, operationId, instanceId, ctx) {
+export function writeRestartHandoff(launch, operationId, instanceId, ctx, restartWrapper = false) {
   if (process.ppid !== launch.pid) {
     throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
+  }
+  if (restartWrapper && launch.canRestartWrapper !== true) {
+    throw new ProtocolError(
+      "WRAPPER_RESTART_UNAVAILABLE",
+      "This launcher does not support wrapper restart."
+    )
   }
   const sessionFile = ctx.sessionManager.getSessionFile()
   if (!sessionFile || !path.isAbsolute(sessionFile)) {
@@ -103,6 +112,7 @@ export function writeRestartHandoff(launch, operationId, instanceId, ctx) {
     instanceId,
     sessionFile,
     cwd: ctx.cwd,
+    ...(restartWrapper ? { restartWrapper: true } : {}),
   }
   const temporary = `${launch.handoffPath}.${randomBytes(8).toString("hex")}.tmp`
   writeFileSync(temporary, `${JSON.stringify(handoff)}\n`, { mode: 0o600, flag: "wx" })

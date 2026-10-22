@@ -207,6 +207,7 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
       ui.command.getArgumentCompletions("instances rest").map((item) => item.value),
       ["instances restart"]
     )
+    assert.ok(ui.command.getArgumentCompletions("res").some((item) => item.value === "restart"))
     assert.ok(
       ui.command
         .getArgumentCompletions("instances --p")
@@ -459,6 +460,68 @@ test("when a broadcast selects this session, restart returns pending without obs
   } finally {
     await fixture.close()
   }
+})
+
+test("when /ompi restart runs in a managed session, it targets only that instance without waiting", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const defaultScope = getScope({ cwd: ctx.cwd })
+    const managedScope = getScope({ cwd: ctx.cwd, profile: "work" })
+    const selfId = "a".repeat(32)
+    const peerId = "b".repeat(32)
+    const self = await fixture.addPeer(managedScope, selfId)
+    const peer = await fixture.addPeer(defaultScope, peerId)
+    const runtime = {
+      instanceId: selfId,
+      launch: { scope: managedScope, canRestartWrapper: true },
+      transport: await createTransport(managedScope),
+    }
+    const { command, notifications } = createCommand(ctx, { runtime })
+
+    // Act
+    await command.handler("restart", ctx)
+
+    // Assert
+    assert.equal(self.requests.length, 1)
+    assert.equal(self.requests[0].action, "restart-wrapper")
+    assert.equal(self.requests[0].instanceId, selfId)
+    assert.deepEqual(peer.requests, [])
+    assert.equal(notifications[0].level, "info")
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when /ompi restart is unwrapped or uses an old launcher, it refuses without shutdown", async () => {
+  // Arrange
+  const ctx = createContext(process.cwd())
+  let shutdowns = 0
+  ctx.shutdown = () => {
+    shutdowns += 1
+  }
+  const unwrapped = createCommand(ctx)
+  // Act
+  await unwrapped.command.handler("restart", ctx)
+
+  const oldLauncher = createCommand(ctx, {
+    runtime: {
+      instanceId: "c".repeat(32),
+      launch: {},
+      transport: {
+        readRecords() {
+          assert.fail("must refuse before resolving or requesting a target")
+        },
+      },
+    },
+  })
+  await oldLauncher.command.handler("restart", ctx)
+
+  // Assert
+  assert.equal(shutdowns, 0)
+  assert.equal(unwrapped.notifications[0].level, "error")
+  assert.equal(oldLauncher.notifications[0].level, "error")
 })
 
 test("when Ctrl-C cancels peer observation, accepted restart remains pending", async () => {
