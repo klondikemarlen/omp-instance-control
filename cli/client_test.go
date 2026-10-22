@@ -115,7 +115,7 @@ func TestRestartSelectionAndOutcomeClassification(t *testing.T) {
 		t.Fatalf("missing selection should return a failed result: rows=%#v err=%v", missing, err)
 	}
 	if _, err := RestartInstances(transport, true, first.InstanceID); err == nil {
-		t.Fatal("ambiguous --all and --instance selection must fail")
+		t.Fatal("ambiguous all and single-instance selection must fail")
 	}
 	if _, err := RestartInstances(transport, false, ""); err == nil {
 		t.Fatal("restart without an explicit target must fail")

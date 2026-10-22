@@ -71,7 +71,7 @@ func listRecord(ctx context.Context, transport Transport, record protocol.Record
 // RestartInstances restarts one selected record or broadcasts to the snapshot when all is true.
 func RestartInstances(transport Transport, all bool, instanceID string) ([]Row, error) {
 	if all == (instanceID != "") {
-		return nil, errors.New("Choose exactly one of --all or --instance <id>.")
+		return nil, errors.New("Choose one restart target: an instance ID or all.")
 	}
 	records, err := transport.ReadRecords()
 	if err != nil {

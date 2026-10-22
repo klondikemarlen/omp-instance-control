@@ -88,13 +88,13 @@ async function resolveExecutable(env, executable) {
   return absolutePath
 }
 
-async function requireSlotRestoreVersion(executable, scope, env) {
+async function requireControlRestoreVersion(executable, scope, env) {
   let result
   try {
     result = await new Promise((resolve, reject) => {
       execFile(
         executable,
-        ["restore", "--version"],
+        ["control", "--version"],
         {
           env: {
             ...env,
@@ -112,18 +112,26 @@ async function requireSlotRestoreVersion(executable, scope, env) {
       )
     })
   } catch (error) {
-    throw new Error(`Unable to verify native ompi slot-restore support: ${error.message}`, {
+    throw new Error(`Unable to verify native ompi managed-restore support: ${error.message}`, {
       cause: error,
     })
   }
-  const version = /\b(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?\b/.exec(result)
-  if (!version) throw new Error("Native ompi did not report a verifiable version for slot restore.")
+  const version = /^ompi (\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+    result.trim()
+  )
+  if (!version) {
+    throw new Error(
+      "Native ompi 0.12.0 or newer is required; no verifiable controller version was reported."
+    )
+  }
   const [major, minor, patch] = version.slice(1, 4).map(Number)
   const supported =
-    major > 0 || minor > 10 || (minor === 10 && patch >= 0 && version[4] === undefined)
+    major > 0 ||
+    (major === 0 && minor > 12) ||
+    (major === 0 && minor === 12 && patch >= 0 && version[4] === undefined)
   if (!supported)
     throw new Error(
-      `Native ompi ${version[0]} does not support recovery slots; version 0.10.0 or newer is required.`
+      `Native ${version[0]} does not support control restore; version 0.12.0 or newer is required.`
     )
 }
 
@@ -219,11 +227,12 @@ export async function prepareNamedRestoreCommand(
     rejectSymlink: true,
   })
   await requireDirectory(session.cwd, { rejectSymlink: true })
-
   const absoluteExecutable = await resolveExecutable(env, executable)
+
+  await requireControlRestoreVersion(absoluteExecutable, scope, env)
   const environment = recoveryEnvironmentArguments(scope)
 
-  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} restore ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
+  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
 }
 
 export async function prepareSlotRestoreCommand(
@@ -259,9 +268,9 @@ export async function prepareSlotRestoreCommand(
   })
   await requireDirectory(session.cwd, { rejectSymlink: true })
   const absoluteExecutable = await resolveExecutable(env, executable)
-  await requireSlotRestoreVersion(absoluteExecutable, scope, env)
+  await requireControlRestoreVersion(absoluteExecutable, scope, env)
   const environment = recoveryEnvironmentArguments(scope)
-  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} restore --slot ${shellQuote(restoreId, "Restore identity")} --profile=${shellQuote(scope.profile, "Profile")}`
+  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore --slot ${shellQuote(restoreId, "Restore identity")} --profile=${shellQuote(scope.profile, "Profile")}`
 }
 
 export async function prepareLegacyRecoveryExportCommand(

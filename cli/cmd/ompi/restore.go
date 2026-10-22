@@ -15,16 +15,16 @@ import (
 )
 
 const restoreHelp = `Usage:
-  ompi restore [NAME] [--profile NAME]
-  ompi restore --slot ID [--profile NAME]
-  ompi restore save NAME --instance ID [--profile NAME]
-  ompi restore --list [--json] [--from CHECKPOINT] [--profile NAME]
-  ompi restore --checkpoint [--profile NAME]
-  ompi restore --history [--json] [--profile NAME]
-  ompi restore --export [--from CHECKPOINT] [--profile NAME]
-  ompi restore --import-legacy [PATH] [--profile NAME]
-  ompi restore --from CHECKPOINT [--profile NAME]
-  ompi restore --help | --version
+  ompi control restore [NAME] [--profile NAME]
+  ompi control restore --slot ID [--profile NAME]
+  ompi control restore save NAME --instance ID [--profile NAME]
+  ompi control restore --list [--json] [--from CHECKPOINT] [--profile NAME]
+  ompi control restore --checkpoint [--profile NAME]
+  ompi control restore --history [--json] [--profile NAME]
+  ompi control restore --export [--from CHECKPOINT] [--profile NAME]
+  ompi control restore --import-legacy [PATH] [--profile NAME]
+  ompi control restore --from CHECKPOINT [--profile NAME]
+  ompi control restore --help | --version
 
 Recovery automatically captures persisted managed ompi slots. Names are optional.
 Checkpoints retain slot membership, not frozen transcript contents.
@@ -222,7 +222,7 @@ func validateRestoreOptions(options restoreOptions) error {
 	}
 	if options.positionals[0] == "save" {
 		if len(options.positionals) != 2 || options.instance == "" {
-			return errors.New("use 'ompi restore save NAME --instance ID'")
+			return errors.New("use 'ompi control restore save NAME --instance ID'")
 		}
 		if err := protocol.ValidateRestoreName(options.positionals[1]); err != nil {
 			return err

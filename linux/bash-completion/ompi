@@ -21,188 +21,192 @@ _ompi_omp_completion()
     fi
 }
 
-_ompi_restore_completion()
+_ompi_control_completion()
 {
     local cur prev words cword
     _comp_initialize -n = || return
+    COMPREPLY=()
 
-    case "$prev" in
-        --profile|--instance) return 0 ;;
-        --import-legacy) _comp_compgen_filedir; return 0 ;;
-    esac
+    local commands='list restart restore cleanup help version'
+    if (( cword == 2 )); then
+        COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+        return 0
+    fi
 
-    local action=""
-    local have_name=false
-    local selected_checkpoint=false
-    local selected_slot=false
-    local operation=""
-    local options
-    local index
+    local action=${words[2]}
+    if [[ $action == help ]]; then
+        if (( cword == 3 )); then
+            COMPREPLY=( $(compgen -W 'list restart restore cleanup version' -- "$cur") )
+        fi
+        return 0
+    fi
+    [[ $action == list || $action == restart || $action == cleanup || $action == restore ]] || return 0
+
+    local index token name next operation='' pending='' selector='' selector_prefix=''
+    local positionals=0 save=false operation_count=0
+    local -A used=()
     local -a profile_arguments=()
-    for (( index=2; index<cword; index++ )); do
-        case ${words[index]} in
-            --profile)
-                if [[ ${words[index+1]} == = ]]; then
-                    profile_arguments=(--profile "${words[index+2]}")
-                    (( index+=2 ))
-                else
-                    profile_arguments=(--profile "${words[index+1]}")
-                    (( index++ ))
-                fi
+    for (( index=3; index<cword; index++ )); do
+        token=${words[index]}
+        [[ $token == -- ]] && return 0
+        if [[ $token != -* ]]; then
+            if [[ $action == restore && $positionals == 0 && $token == save ]]; then
+                save=true
+            fi
+            (( positionals++ ))
+            continue
+        fi
+
+        name=${token%%=*}
+        [[ $name == -h ]] && name=--help
+        used[$name]=1
+        case $name in
+            --help|--version) return 0 ;;
+            --list|--checkpoint|--history|--export|--import-legacy|--slot)
+                operation=$name
+                (( operation_count++ ))
                 ;;
-            --profile=*) profile_arguments=(--profile "${words[index]#--profile=}") ;;
-            --instance) (( index++ )) ;;
-            --instance=*) ;;
-            --from) selected_checkpoint=true; (( index++ )) ;;
-            --from=*) selected_checkpoint=true ;;
-            --slot) selected_slot=true; (( index++ )) ;;
-            --slot=*) selected_slot=true ;;
-            --import-legacy)
-                operation=import
-                if (( index+1 < cword )) && [[ ${words[index+1]} != -* ]]; then
-                    (( index++ ))
+        esac
+        case $name in
+            --profile|--instance|--from|--slot|--import-legacy)
+                if [[ $token == *=* ]]; then
+                    [[ $name == --profile ]] && profile_arguments=(--profile "${token#*=}")
+                    continue
                 fi
+                if (( index+1 >= cword )); then
+                    pending=$name
+                    continue
+                fi
+                next=${words[index+1]}
+                if [[ $name == --import-legacy && $next == -* ]]; then
+                    continue
+                fi
+                if [[ $next == = ]]; then
+                    if (( index+2 >= cword )); then
+                        pending=$name
+                        continue
+                    fi
+                    (( index++ ))
+                    next=${words[index+1]}
+                fi
+                [[ $name == --profile ]] && profile_arguments=(--profile "$next")
+                (( index++ ))
                 ;;
-            --import-legacy=*) operation=import ;;
-            --checkpoint) operation=checkpoint ;;
-            --history) operation=history ;;
-            --export) operation=export ;;
-            --list) operation=list ;;
-            save) action=save ;;
-            --json|--help|-h|--version) ;;
-            -*) ;;
-            *) have_name=true ;;
         esac
     done
 
-    local selector=""
-    local selector_prefix=""
-    local selector_value=$cur
-    case "$prev" in
-        --from) selector=checkpoint ;;
-        --slot) selector=slot ;;
+    (( operation_count > 1 )) && return 0
+    if [[ -n ${used[--from]} && -n $operation && $operation != --list && $operation != --export ]]; then
+        return 0
+    fi
+    if [[ $action == restore && $positionals -gt 0 && ( -n $operation || -n ${used[--from]} ) ]]; then
+        return 0
+    fi
+    case $pending in
+        --profile|--instance) return 0 ;;
+        --from|--slot) selector=$pending ;;
+        --import-legacy)
+            if [[ $cur != -* ]]; then
+                _comp_compgen_filedir
+                return 0
+            fi
+            ;;
     esac
-    case "$cur" in
-        --from=*) selector=checkpoint; selector_prefix=--from=; selector_value=${cur#--from=} ;;
-        --slot=*) selector=slot; selector_prefix=--slot=; selector_value=${cur#--slot=} ;;
+    case $cur in
+        --profile=*|--instance=*) return 0 ;;
+        --from=*|--slot=*) selector=${cur%%=*}; selector_prefix="$selector=" ;;
+        --import-legacy=*) return 0 ;;
     esac
     if [[ -n $selector ]]; then
-        local position name identity remainder
+        [[ $action == restore && $positionals == 0 ]] || return 0
+        if [[ $selector == --from ]]; then
+            [[ -z $operation || $operation == --list || $operation == --export ]] || return 0
+        else
+            [[ -z ${used[--from]} && ( -z $operation || $operation == --slot ) ]] || return 0
+        fi
+        local position saved_name identity remainder
         local -a identities=()
-        if [[ $selector == checkpoint ]]; then
+        if [[ $selector == --from ]]; then
             while read -r position identity remainder; do
                 [[ $position =~ ^[0-9]+\)$ && $identity =~ ^[a-f0-9]{32}$ ]] || continue
-                identities+=("$identity")
-            done < <(command ompi restore "${profile_arguments[@]}" --history 2>/dev/null)
+                identities+=("$selector_prefix$identity")
+            done < <(command ompi control restore "${profile_arguments[@]}" --history 2>/dev/null)
         else
-            while read -r position name identity remainder; do
+            while read -r position saved_name identity remainder; do
                 [[ $position =~ ^[0-9]+\)$ && $identity =~ ^[a-f0-9]{32}$ ]] || continue
-                identities+=("$identity")
-            done < <(command ompi restore "${profile_arguments[@]}" --list 2>/dev/null)
+                identities+=("$selector_prefix$identity")
+            done < <(command ompi control restore "${profile_arguments[@]}" --list 2>/dev/null)
         fi
-        COMPREPLY=( $(compgen -W "${identities[*]}" -- "$selector_value") )
-        if [[ -n $selector_prefix ]]; then
-            for index in "${!COMPREPLY[@]}"; do
-                COMPREPLY[index]="$selector_prefix${COMPREPLY[index]}"
-            done
-        fi
+        COMPREPLY=( $(compgen -W "${identities[*]}" -- "$cur") )
         return 0
     fi
 
-    if [[ $action == save && $have_name == false ]]; then
+    local options='--profile --json'
+    if [[ $action == restart ]]; then
+        options+=' --no-wait'
+        (( positionals > 1 )) && return 0
+        if [[ $cur != -* && $positionals == 0 ]]; then
+            COMPREPLY=( $(compgen -W 'all' -- "$cur") )
+            return 0
+        fi
+    elif [[ $action == restore ]]; then
+        if [[ $save == true ]]; then
+            (( positionals > 2 )) && return 0
+            options='--instance --profile'
+        elif (( positionals > 0 )) || [[ $operation == --checkpoint || $operation == --import-legacy || $operation == --slot ]]; then
+            options='--profile'
+        elif [[ $operation == --list ]]; then
+            options='--json --from --profile'
+        elif [[ $operation == --history ]]; then
+            options='--json --profile'
+        elif [[ $operation == --export ]]; then
+            options='--from --profile'
+        elif [[ -n ${used[--from]} ]]; then
+            options='--list --export --profile'
+        elif [[ -n ${used[--json]} ]]; then
+            options='--list --history --profile'
+        else
+            options='--list --checkpoint --history --from --slot --export --import-legacy --profile'
+        fi
+        if [[ $cur != -* && $positionals == 0 && -z $operation && -z ${used[--from]} && -z ${used[--json]} ]]; then
+            local list_position saved_name remainder
+            local -a names=(save)
+            while read -r list_position saved_name remainder; do
+                [[ $list_position =~ ^[0-9]+\)$ ]] || continue
+                [[ $saved_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || continue
+                names+=("$saved_name")
+            done < <(command ompi control restore "${profile_arguments[@]}" --list 2>/dev/null)
+            COMPREPLY=( $(compgen -W "${names[*]}" -- "$cur") )
+            return 0
+        fi
+    elif (( positionals > 0 )); then
         return 0
     fi
-    if [[ $action == save ]]; then
-        options='--instance --profile --help -h --version'
-    elif [[ $selected_slot == true || $have_name == true ]]; then
-        options='--profile --help -h --version'
-    elif [[ $operation == list ]]; then
-        options='--json --from --profile --help -h --version'
-    elif [[ $operation == history ]]; then
-        options='--json --profile --help -h --version'
-    elif [[ $operation == export ]]; then
-        options='--from --profile --help -h --version'
-    elif [[ $operation == checkpoint || $operation == import ]]; then
-        options='--profile --help -h --version'
-    elif [[ $selected_checkpoint == true ]]; then
-        options='--list --export --profile --help -h --version'
-    else
-        options='save --list --checkpoint --history --from --slot --export --import-legacy --profile --help -h --version'
-    fi
-    COMPREPLY=( $(compgen -W "$options" -- "$cur") )
+    [[ $cur == -* ]] || return 0
 
-    if [[ $action != save && $have_name == false && -z $operation && $selected_checkpoint == false && $selected_slot == false && $cur != -* ]]; then
-        local IFS=$' \t'
-        local list_position saved_name remainder
-        local -a saved_names=()
-        while read -r list_position saved_name remainder; do
-            [[ $list_position =~ ^[0-9]+\)$ ]] || continue
-            [[ $saved_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || continue
-            saved_names+=("$saved_name")
-        done < <(command ompi restore "${profile_arguments[@]}" --list 2>/dev/null)
-        COMPREPLY+=( $(compgen -W "${saved_names[*]}" -- "$cur") )
-    fi
+    local option
+    local -a available=()
+    for option in $options; do
+        [[ -n ${used[$option]} ]] || available+=("$option")
+    done
+    COMPREPLY=( $(compgen -W "${available[*]}" -- "$cur") )
+    return 0
 }
 
 _ompi()
 {
     local cur prev words cword
     _comp_initialize -n = || return
-
     if (( cword == 1 )); then
         _ompi_omp_completion "$@"
-        if [[ instances == "$cur"* ]]; then
-            COMPREPLY+=(instances)
-        fi
-        if [[ restore == "$cur"* ]]; then
-            COMPREPLY+=(restore)
-        fi
+        [[ control == "$cur"* ]] && COMPREPLY+=(control)
         return 0
     fi
-
-    if [[ ${words[1]} == restore ]]; then
-        _ompi_restore_completion "$@"
-        return 0
-    fi
-
-    if [[ ${words[1]} != instances ]]; then
+    if [[ ${words[1]} == control ]]; then
+        _ompi_control_completion "$@"
+    else
         _ompi_omp_completion "$@"
-        return 0
     fi
-
-    local options='--profile --json --help -h --version'
-    if (( cword == 2 )); then
-        COMPREPLY=( $(compgen -W "list restart cleanup $options" -- "$cur") )
-        return 0
-    fi
-
-    local action=list
-    case ${words[2]} in
-        list|restart|cleanup) action=${words[2]} ;;
-        -*) ;;
-        *) return 0 ;;
-    esac
-
-    # Values are free-form here; do not mistake them for actions or options.
-    case "$prev" in
-        --profile|--instance) return 0 ;;
-    esac
-    [[ $cur == *=* ]] && return 0
-
-    local index
-    for (( index=2; index<cword; index++ )); do
-        case ${words[index]} in
-            --profile|--instance) (( index++ )) ;;
-            --) return 0 ;;
-        esac
-    done
-
-    if [[ $action == restart ]]; then
-        options+=' --all --instance --no-wait'
-    fi
-    COMPREPLY=( $(compgen -W "$options" -- "$cur") )
-    return 0
 }
-
 
 complete -F _ompi ompi

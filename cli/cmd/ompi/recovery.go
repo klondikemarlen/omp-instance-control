@@ -130,7 +130,7 @@ func runRecovery(scope protocol.Scope, options restoreOptions) (int, error) {
 		}
 	}
 	if len(sessions) == 0 {
-		return 1, errors.New("no recoverable managed sessions in this scope; history is available with 'ompi restore --history'")
+		return 1, errors.New("no recoverable managed sessions in this scope; history is available with 'ompi control restore --history'")
 	}
 	if !hasRestoreTerminal(os.Stdin) || !hasRestoreTerminal(os.Stdout) {
 		return 1, errors.New("interactive recovery requires a terminal; use --list, --export, a saved name, or --slot ID")

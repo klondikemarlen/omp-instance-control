@@ -194,39 +194,20 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances", ctx)
+    await ui.command.handler("list", ctx)
 
     // Assert
     assert.deepEqual(
-      ui.command
-        .getArgumentCompletions("instances restart --instance 11111111")
-        .map((item) => item.value),
-      [`instances restart --instance ${defaultId}`]
+      ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
+      [`restart ${defaultId}`]
     )
     assert.deepEqual(
-      ui.command.getArgumentCompletions("instances rest").map((item) => item.value),
-      ["instances restart"]
-    )
-    assert.ok(ui.command.getArgumentCompletions("res").some((item) => item.value === "restart"))
-    assert.ok(
-      ui.command
-        .getArgumentCompletions("instances --p")
-        .some((item) => item.value === "instances --profile")
-    )
-    assert.ok(
-      ui.command
-        .getArgumentCompletions("instances --profile work --j")
-        .some((item) => item.value === "instances --profile work --json")
-    )
-    assert.deepEqual(
-      ui.command
-        .getArgumentCompletions("instances restart --instance 66666666")
-        .map((item) => item.value),
+      ui.command.getArgumentCompletions("restart 66666666").map((item) => item.value),
       []
     )
 
     // Act
-    await ui.command.handler("instances list --profile work --json", ctx)
+    await ui.command.handler("list --profile work --json", ctx)
 
     // Assert
     const workRows = JSON.parse(ui.notifications[1].message)
@@ -235,19 +216,50 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     assert.equal(workRows[0].record.scope, workScope.id)
     assert.deepEqual(
       ui.command
-        .getArgumentCompletions("instances restart --profile work --instance 22222222")
+        .getArgumentCompletions("restart --profile work 22222222")
         .map((item) => item.value),
-      [`instances restart --profile work --instance ${workId}`]
+      [`restart --profile work ${workId}`]
     )
     assert.deepEqual(
-      ui.command
-        .getArgumentCompletions("instances restart --instance 11111111")
-        .map((item) => item.value),
-      [`instances restart --instance ${defaultId}`]
+      ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
+      [`restart ${defaultId}`]
     )
   } finally {
     await fixture.close()
   }
+})
+
+test("when completion reaches consumed or conflicting choices, only valid next options remain", () => {
+  // Arrange
+  const { command } = createCommand(createContext(process.cwd()))
+  const cases = [
+    [
+      "restart all --json=true --",
+      ["restart all --json=true --profile", "restart all --json=true --no-wait"],
+    ],
+    ["restart all -- ", []],
+    ["restore --checkpoint=true --history", []],
+    ["restore --checkpoint=true --from=", []],
+    [
+      "restore --list --from=" + "a".repeat(32) + " --",
+      [
+        "restore --list --from=" + "a".repeat(32) + " --json",
+        "restore --list --from=" + "a".repeat(32) + " --profile",
+      ],
+    ],
+    ["restore --checkpoint -- ", []],
+  ]
+
+  // Act
+  const candidates = cases.map(([input]) =>
+    command.getArgumentCompletions(input).map(({ value }) => value)
+  )
+
+  // Assert
+  assert.deepEqual(
+    candidates,
+    cases.map(([, expected]) => expected)
+  )
 })
 
 test("when completing a profile value, candidates stay within the active configuration root", async () => {
@@ -264,17 +276,13 @@ test("when completing a profile value, candidates stay within the active configu
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances list", ctx)
-    const candidates = ui.command.getArgumentCompletions("instances list --profile ")
+    await ui.command.handler("list", ctx)
+    const candidates = ui.command.getArgumentCompletions("list --profile ")
 
     // Assert
     assert.deepEqual(
       candidates.map((item) => item.value),
-      [
-        "instances list --profile active",
-        "instances list --profile default",
-        "instances list --profile work",
-      ]
+      ["list --profile active", "list --profile default", "list --profile work"]
     )
   } finally {
     await fixture.close()
@@ -288,15 +296,15 @@ test("when a profile value is inline, completion preserves its command and optio
     await mkdir(path.join(fixture.root, "config", "profiles", "work"), { recursive: true })
     const ctx = createContext(fixture.cwd)
     const ui = createCommand(ctx)
-    await ui.command.handler("instances list", ctx)
+    await ui.command.handler("list", ctx)
 
     // Act
-    const candidates = ui.command.getArgumentCompletions("instances restart --json --profile=wo")
+    const candidates = ui.command.getArgumentCompletions("restart --json --profile=wo")
 
     // Assert
     assert.deepEqual(
       candidates.map((item) => item.value),
-      ["instances restart --json --profile=work"]
+      ["restart --json --profile=work"]
     )
   } finally {
     await fixture.close()
@@ -310,15 +318,15 @@ test("when default listing uses an inline profile, completion fills the profile 
     await mkdir(path.join(fixture.root, "config", "profiles", "work"), { recursive: true })
     const ctx = createContext(fixture.cwd)
     const ui = createCommand(ctx)
-    await ui.command.handler("instances", ctx)
+    await ui.command.handler("list", ctx)
 
     // Act
-    const candidates = ui.command.getArgumentCompletions("instances --profile=wo")
+    const candidates = ui.command.getArgumentCompletions("list --profile=wo")
 
     // Assert
     assert.deepEqual(
       candidates.map((item) => item.value),
-      ["instances --profile=work"]
+      ["list --profile=work"]
     )
   } finally {
     await fixture.close()
@@ -334,13 +342,13 @@ test("when no named profiles exist, completion still offers the active and defau
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances list", ctx)
-    const candidates = ui.command.getArgumentCompletions("instances --profile ")
+    await ui.command.handler("list", ctx)
+    const candidates = ui.command.getArgumentCompletions("list --profile ")
 
     // Assert
     assert.deepEqual(
       candidates.map((item) => item.value),
-      ["instances --profile active", "instances --profile default"]
+      ["list --profile active", "list --profile default"]
     )
   } finally {
     await fixture.close()
@@ -359,7 +367,7 @@ test("when profile selection is empty or repeated, discovery uses the effective 
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances list --profile= --json", ctx)
+    await ui.command.handler("list --profile= --json", ctx)
 
     // Assert
     const rows = JSON.parse(ui.notifications[0].message)
@@ -368,16 +376,16 @@ test("when profile selection is empty or repeated, discovery uses the effective 
     assert.equal(rows[0].record.scope, activeScope.id)
     assert.deepEqual(
       ui.command
-        .getArgumentCompletions("instances restart --profile=work --profile= --instance 88888888")
+        .getArgumentCompletions("restart --profile=work --profile= 88888888")
         .map((item) => item.value),
-      [`instances restart --profile=work --profile= --instance ${activeId}`]
+      [`restart --profile=work --profile= ${activeId}`]
     )
   } finally {
     await fixture.close()
   }
 })
 
-test("when restart selectors or list options conflict, the command rejects", async () => {
+test("when restart targets or legacy selectors are ambiguous, the command rejects", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -385,24 +393,25 @@ test("when restart selectors or list options conflict, the command rejects", asy
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances restart", ctx)
-    await ui.command.handler("instances list --all=false", ctx)
-    await ui.command.handler("instances list --no-wait=false", ctx)
-    await ui.command.handler("instances restart --instance=", ctx)
-    await ui.command.handler("list", ctx)
-    await ui.command.handler("help", ctx)
-    await ui.command.handler("version", ctx)
-    await ui.command.handler("instances --profile work restart", ctx)
+    await ui.command.handler("restart --no-wait", ctx)
+    await ui.command.handler(`restart --instance ${"a".repeat(32)}`, ctx)
+    await ui.command.handler("restart --all", ctx)
+    await ui.command.handler("instances list", ctx)
+    await ui.command.handler("list --no-wait", ctx)
+    await ui.command.handler("help unknown", ctx)
 
     // Assert
-    assert.equal(ui.notifications.length, 8)
-    assert.ok(ui.notifications.every((notification) => notification.level === "error"))
+    assert.equal(ui.notifications.length, 6)
+    assert.deepEqual(
+      ui.notifications.map((notification) => notification.level),
+      ["error", "error", "error", "error", "error", "error"]
+    )
   } finally {
     await fixture.close()
   }
 })
 
-test("when all is explicitly false, the instance selector remains effective", async () => {
+test("when an explicit restart target is selected, peer options remain available", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -413,10 +422,7 @@ test("when all is explicitly false, the instance selector remains effective", as
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler(
-      `instances restart --all=false --instance ${peerId} --no-wait --json`,
-      ctx
-    )
+    await ui.command.handler(`restart ${peerId} --no-wait --json`, ctx)
 
     // Assert
     const rows = JSON.parse(ui.notifications[0].message)
@@ -444,7 +450,7 @@ test("when a broadcast selects this session, restart returns pending without obs
     })
 
     // Act
-    await ui.command.handler("instances restart --all --json", ctx)
+    await ui.command.handler("restart all --json", ctx)
 
     // Assert
     const rows = JSON.parse(ui.notifications[0].message)
@@ -535,7 +541,7 @@ test("when Ctrl-C cancels peer observation, accepted restart remains pending", a
     const ui = createCommand(ctx, { cancelOnProgress: true })
 
     // Act
-    await ui.command.handler(`instances restart --instance ${peerId} --json`, ctx)
+    await ui.command.handler(`restart ${peerId} --json`, ctx)
 
     // Assert
     const rows = JSON.parse(ui.notifications[0].message)
@@ -637,10 +643,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
     assert.equal(records.length, 1)
     assert.equal(commands.filter((command) => command.name === "ompi").length, 1)
 
-    await commands[0].command.handler(
-      `instances restart --instance ${records[0].instanceId} --json`,
-      ctx
-    )
+    await commands[0].command.handler(`restart ${records[0].instanceId} --json`, ctx)
     await shutdownRequested.promise
     const outcomes = JSON.parse(notifications[0].message)
     assert.equal(outcomes[0].status, "accepted")
@@ -811,7 +814,7 @@ test("when cleanup is requested with JSON, ompi reports and removes a confirmed 
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances cleanup --json", ctx)
+    await ui.command.handler("cleanup --json", ctx)
 
     // Assert
     assert.equal(ui.notifications[0].level, "info")
@@ -822,7 +825,7 @@ test("when cleanup is requested with JSON, ompi reports and removes a confirmed 
       })),
       [{ instanceId, status: "removed" }]
     )
-    await ui.command.handler("instances cleanup --json", ctx)
+    await ui.command.handler("cleanup --json", ctx)
     assert.equal(ui.notifications[1].message, "[]")
   } finally {
     await fixture.close()
@@ -837,22 +840,18 @@ test("when completing cleanup, ompi offers only cleanup options and profile valu
     const ui = createCommand(ctx)
 
     // Act
-    const options = ui.command
-      .getArgumentCompletions("instances cleanup ")
-      .map(({ value }) => value)
+    const options = ui.command.getArgumentCompletions("cleanup ").map(({ value }) => value)
     const profiles = ui.command
-      .getArgumentCompletions("instances cleanup --profile ")
+      .getArgumentCompletions("cleanup --profile ")
       .map(({ value }) => value)
 
     // Assert
-    assert.deepEqual(options, [
-      "instances cleanup --profile",
-      "instances cleanup --json",
-      "instances cleanup --help",
-      "instances cleanup -h",
-      "instances cleanup --version",
+    assert.deepEqual(options, [])
+    assert.deepEqual(ui.command.getArgumentCompletions("cleanup --"), [
+      { value: "cleanup --profile", label: "--profile" },
+      { value: "cleanup --json", label: "--json" },
     ])
-    assert.deepEqual(profiles, ["instances cleanup --profile default"])
+    assert.deepEqual(profiles, ["cleanup --profile default"])
   } finally {
     await fixture.close()
   }
@@ -881,7 +880,7 @@ test("when cleanup receives restart-only options, ompi rejects without cleaning 
     const ui = createCommand(ctx)
 
     // Act
-    await ui.command.handler("instances cleanup --all", ctx)
+    await ui.command.handler("cleanup --no-wait", ctx)
 
     // Assert
     assert.equal(ui.notifications[0].level, "error")

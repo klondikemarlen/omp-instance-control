@@ -16,12 +16,12 @@ import (
 
 var version = "dev"
 
-const instancesHelp = `Usage:
-  ompi instances [list] [--profile NAME] [--json]
-  ompi instances restart (--all | --instance ID) [--profile NAME] [--json] [--no-wait]
-  ompi instances cleanup [--profile NAME] [--json]
-  ompi instances --help
-  ompi instances --version
+const controlHelp = `Usage:
+  ompi control [help [COMMAND] | version]
+  ompi control list [--profile NAME] [--json]
+  ompi control restart ID|all [--profile NAME] [--json] [--no-wait]
+  ompi control cleanup [--profile NAME] [--json]
+  ompi control restore ...
 
 Restart argv replays recognized OMP options but not startup prompts. Unknown
 long options followed by a value-like token disable automatic restart unless
@@ -43,11 +43,8 @@ func main() {
 var errUsage = errors.New("usage")
 
 func run(args []string) (int, error) {
-	if len(args) > 0 && args[0] == "instances" {
-		return runInstances(args[1:])
-	}
-	if len(args) > 0 && args[0] == "restore" {
-		return runRestore(args[1:])
+	if len(args) > 0 && args[0] == "control" {
+		return runControl(args[1:])
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -57,44 +54,109 @@ func run(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	extension := resolveExtension(executable)
-	code, err := linux.Launch(args, extension)
+	code, err := linux.Launch(args, resolveExtension(executable))
 	if err != nil {
 		return 1, err
 	}
 	if code == 0 && len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(os.Stdout, "\nInstance control: ompi instances list|restart|cleanup\nSaved sessions: ompi restore")
+		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nSaved sessions: ompi control restore")
 	}
 	return code, nil
 }
 
-func resolveExtension(executable string) string {
-	directory := filepath.Dir(executable)
-	if filepath.Base(directory) == "dist" {
-		return filepath.Join(filepath.Dir(directory), "omp", "index.js")
+func runControl(args []string) (int, error) {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Print(controlHelp)
+		return 0, nil
 	}
-	return filepath.Join(filepath.Dir(directory), "share", "omp-instance-control", "omp", "index.js")
+	if len(args) == 1 && args[0] == "--version" {
+		fmt.Printf("ompi %s\n", version)
+		return 0, nil
+	}
+	if len(args) == 0 {
+		fmt.Print(controlHelp)
+		return 0, nil
+	}
+	if args[0] == "help" {
+		if len(args) > 2 {
+			return 0, usageError("use 'ompi control help [COMMAND]'")
+		}
+		if len(args) == 1 {
+			fmt.Print(controlHelp)
+			return 0, nil
+		}
+		switch args[1] {
+		case "list":
+			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
+		case "restart":
+			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]")
+		case "cleanup":
+			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
+		case "restore":
+			fmt.Print(restoreHelp)
+		case "version":
+			fmt.Println("Usage: ompi control version")
+		default:
+			return 0, usageError("unknown control command " + args[1])
+		}
+		return 0, nil
+	}
+	if args[0] == "version" {
+		if len(args) != 1 {
+			return 0, usageError("'version' does not accept arguments")
+		}
+		fmt.Printf("ompi %s\n", version)
+		return 0, nil
+	}
+	if args[0] == "restore" {
+		return runRestore(args[1:])
+	}
+	return runControlAction(args)
 }
 
-func runInstances(args []string) (int, error) {
-	action := "list"
-	optionArgs := args
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		action = args[0]
-		optionArgs = args[1:]
+func splitControlArguments(args []string) ([]string, []string) {
+	options := make([]string, 0, len(args))
+	positionals := make([]string, 0, 1)
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--profile" {
+			options = append(options, argument)
+			if index+1 < len(args) {
+				index++
+				options = append(options, args[index])
+			}
+			continue
+		}
+		if argument == "--" {
+			positionals = append(positionals, args[index+1:]...)
+			break
+		}
+		if strings.HasPrefix(argument, "-") {
+			options = append(options, argument)
+			continue
+		}
+		positionals = append(positionals, argument)
 	}
+	return options, positionals
+}
+
+func runControlAction(args []string) (int, error) {
+	action := args[0]
 	if action != "list" && action != "restart" && action != "cleanup" {
-		return 0, usageError("use 'ompi instances list', 'ompi instances restart', or 'ompi instances cleanup'")
+		return 0, usageError("use 'ompi control list', 'ompi control restart ID|all', 'ompi control cleanup', or 'ompi control restore ...'")
 	}
-	flags := flag.NewFlagSet("ompi instances "+action, flag.ContinueOnError)
+
+	optionArgs, positionals := splitControlArguments(args[1:])
+	flags := flag.NewFlagSet("ompi control "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profile := flags.String("profile", "", "OMP profile")
 	jsonOutput := flags.Bool("json", false, "JSON output")
-	all := flags.Bool("all", false, "restart all discovered instances")
-	instance := flags.String("instance", "", "instance ID to restart")
-	noWait := flags.Bool("no-wait", false, "return after restart requests are accepted")
-	help := flags.Bool("help", false, "show instance command help")
-	flags.BoolVar(help, "h", false, "show instance command help")
+	var noWait bool
+	if action == "restart" {
+		flags.BoolVar(&noWait, "no-wait", false, "return after restart requests are accepted")
+	}
+	help := flags.Bool("help", false, "show command help")
+	flags.BoolVar(help, "h", false, "show command help")
 	showVersion := flags.Bool("version", false, "show wrapper version")
 	if err := flags.Parse(optionArgs); err != nil {
 		return 0, usageError(err.Error())
@@ -103,27 +165,31 @@ func runInstances(args []string) (int, error) {
 		return 0, usageError("choose either --help or --version")
 	}
 	if *help {
-		fmt.Print(instancesHelp)
+		switch action {
+		case "list":
+			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
+		case "restart":
+			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]")
+		case "cleanup":
+			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
+		}
 		return 0, nil
 	}
 	if *showVersion {
 		fmt.Printf("ompi %s\n", version)
 		return 0, nil
 	}
-	restartOptionSet := false
-	flags.Visit(func(option *flag.Flag) {
-		if option.Name == "all" || option.Name == "instance" || option.Name == "no-wait" {
-			restartOptionSet = true
+	remaining := append(positionals, flags.Args()...)
+	instanceID := ""
+	all := false
+	if action == "restart" {
+		var err error
+		all, instanceID, err = parseRestartTarget(remaining)
+		if err != nil {
+			return 0, usageError(err.Error())
 		}
-	})
-	if flags.NArg() != 0 {
+	} else if len(remaining) != 0 {
 		return 0, usageError("unexpected positional argument")
-	}
-	if action != "restart" && restartOptionSet {
-		return 0, usageError("--all, --instance, and --no-wait are only valid with restart")
-	}
-	if action == "restart" && (*all == (*instance != "")) {
-		return 0, usageError("choose exactly one of --all or --instance <id>")
 	}
 	scope, err := protocol.GetScope(*profile, "")
 	if err != nil {
@@ -140,7 +206,6 @@ func runInstances(args []string) (int, error) {
 		}
 		return printCleanupResults(results, *jsonOutput), nil
 	}
-
 	if action == "list" {
 		rows, err := cli.ListInstances(transport)
 		if err != nil {
@@ -148,8 +213,29 @@ func runInstances(args []string) (int, error) {
 		}
 		return printRows(rows, *jsonOutput), nil
 	}
+	return runRestart(transport, all, instanceID, *jsonOutput, noWait)
+}
 
-	return runRestart(transport, *all, *instance, *jsonOutput, *noWait)
+func parseRestartTarget(positionals []string) (bool, string, error) {
+	if len(positionals) != 1 {
+		return false, "", errors.New("restart requires exactly one target: ID or all")
+	}
+	instanceID := positionals[0]
+	if instanceID == "all" {
+		return true, "", nil
+	}
+	if err := protocol.ValidateInstanceID(instanceID); err != nil {
+		return false, "", fmt.Errorf("invalid restart ID: %w", err)
+	}
+	return false, instanceID, nil
+}
+
+func resolveExtension(executable string) string {
+	directory := filepath.Dir(executable)
+	if filepath.Base(directory) == "dist" {
+		return filepath.Join(filepath.Dir(directory), "omp", "index.js")
+	}
+	return filepath.Join(filepath.Dir(directory), "share", "omp-instance-control", "omp", "index.js")
 }
 
 func printRows(rows []cli.Row, jsonOutput bool) int {
@@ -172,7 +258,7 @@ func printRows(rows []cli.Row, jsonOutput bool) int {
 			}
 		}
 		if unreachable > 0 {
-			fmt.Fprintf(os.Stderr, "%d unreachable registration(s), %d reachable; entries may be stale. Run ompi instances cleanup for safe cleanup; --json retains full diagnostics.\n", unreachable, reachable)
+			fmt.Fprintf(os.Stderr, "%d unreachable registration(s), %d reachable; entries may be stale. Run ompi control cleanup for safe cleanup; --json retains full diagnostics.\n", unreachable, reachable)
 		}
 	}
 	return restartExitCode(rows, false)
