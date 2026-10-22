@@ -321,7 +321,7 @@ func ExportRecoveryCommands(scope protocol.Scope, sessions []protocol.RecoverySe
 		if err := validateExportPath(session.SessionFile); err != nil {
 			return "", fmt.Errorf("cannot export unsafe recovery session file: %w", err)
 		}
-		arguments := fmt.Sprintf("restore --slot %s --profile=%s", shellQuote(candidate.RestoreID), shellQuote(scope.Profile))
+		arguments := fmt.Sprintf("control restore --slot %s --profile=%s", shellQuote(candidate.RestoreID), shellQuote(scope.Profile))
 		output.WriteString("# Managed recovery slot; ownership and its current snapshot are rechecked by ompi.\n")
 		output.WriteString(recoveryExportCommand(scope, session.CWD, arguments))
 		output.WriteByte('\n')

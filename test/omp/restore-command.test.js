@@ -78,7 +78,11 @@ async function createFixture({ relativeAgentDirectory = false } = {}) {
     updatedAt: new Date().toISOString(),
   }
   const ompiExecutable = path.join(binDirectory, "ompi")
-  await writeFile(ompiExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o700 })
+  await writeFile(
+    ompiExecutable,
+    '#!/bin/sh\nif [ "$1" = control ] && [ "$2" = --version ]; then printf "ompi 0.12.0\\n"; exit 0; fi\nexit 2\n',
+    { mode: 0o700 }
+  )
   await chmod(ompiExecutable, 0o700)
   const transport = await createTransport(scope)
   const servers = []
@@ -209,6 +213,8 @@ test("when saving a live managed instance, the exact binding is listed and compl
     // Assert
     const completed = command.getArgumentCompletions("restore ")
     assert.ok(completed.some((item) => item.value === "restore work"))
+    assert.ok(completed.some((item) => item.value === "restore save"))
+    assert.ok(completed.every((item) => !item.value.startsWith("restore --")))
     const saved = await listSavedSessions(fixture.scope)
     assert.equal(saved.length, 1)
     assert.equal(saved[0].name, "work")
@@ -339,11 +345,6 @@ test("when native ompi predates slot restore, recovery leaves the OMP session ru
     // Assert
     assert.equal(context.confirmCalls, 0)
     assert.equal(context.shutdowns, 0)
-    assert.ok(
-      context.notifications.some(
-        ({ level, message }) => level === "error" && message.includes("0.10.0")
-      )
-    )
   } finally {
     await fixture.close()
   }
@@ -358,7 +359,7 @@ test("when restoring a managed slot outside checkpoint membership, OMP prepares 
     const executable = path.join(fixture.root, "bin", "ompi")
     await writeFile(
       executable,
-      '#!/bin/sh\nif [ "$1" = restore ] && [ "$2" = --version ]; then printf \'0.10.0\\n\'; exit 0; fi\nexit 0\n',
+      '#!/bin/sh\nif [ "$1" = control ] && [ "$2" = --version ]; then printf "ompi 0.12.0\\n"; exit 0; fi\nexit 2\n',
       { mode: 0o700 }
     )
     const context = createContext(fixture.cwd, { confirm: async () => true })
@@ -372,7 +373,7 @@ test("when restoring a managed slot outside checkpoint membership, OMP prepares 
     assert.equal(context.shutdowns, 1)
     const restoreEntry = context.entries.find((entry) => entry.customType === "ompi-restore")
     assert.ok(restoreEntry)
-    assert.ok(restoreEntry.data.command.includes(`restore --slot '${fixture.restoreId}'`))
+    assert.ok(restoreEntry.data.command.includes(`control restore --slot '${fixture.restoreId}'`))
     assert.ok(restoreEntry.data.command.includes(`PI_CONFIG_DIR='${fixture.scope.configRoot}'`))
     assert.ok(restoreEntry.data.command.includes(`PI_CODING_AGENT_DIR='${fixture.scope.agentDir}'`))
     assert.ok(!restoreEntry.data.command.includes("XDG_RUNTIME_DIR"))

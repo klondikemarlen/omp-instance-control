@@ -6,7 +6,12 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 
-import { prepareResumeCommand } from "../../linux/take-over.js"
+import {
+  prepareNamedRestoreCommand,
+  prepareResumeCommand,
+  prepareSlotRestoreCommand,
+} from "../../linux/take-over.js"
+import { getScope } from "../../protocol/index.js"
 
 const scopeEnvironmentKeys = [
   "PI_CONFIG_DIR",
@@ -16,7 +21,7 @@ const scopeEnvironmentKeys = [
   "XDG_RUNTIME_DIR",
 ]
 
-async function createSandbox(t, { cwdName, sessionName, executableName } = {}) {
+async function createSandbox(t, { cwdName, sessionName, executableName, version = "0.12.0" } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "ompi-takeover-"))
   const cwd = path.join(root, cwdName ?? "worktree")
   const sessionFile = path.join(root, sessionName ?? "session.jsonl")
@@ -25,10 +30,12 @@ async function createSandbox(t, { cwdName, sessionName, executableName } = {}) {
 
   await mkdir(cwd, { recursive: true })
   await writeFile(sessionFile, "persisted session data\n")
+  const versionOutput = ["0.10.9", "0.11.0"].includes(version) ? "18.12.6" : `ompi ${version}`
   const fakeExecutable = [
     `#!${process.execPath}`,
     'const { writeFileSync } = require("node:fs");',
     `const scopeKeys = ${JSON.stringify(scopeEnvironmentKeys)};`,
+    `if (process.argv[2] === "control" && process.argv[3] === "--version") { console.log(${JSON.stringify(versionOutput)}); process.exit(0); }`,
     `writeFileSync(${JSON.stringify(resultFile)}, JSON.stringify({`,
     "  argv: process.argv.slice(2),",
     "  cwd: process.cwd(),",
@@ -46,6 +53,112 @@ async function createSandbox(t, { cwdName, sessionName, executableName } = {}) {
 function makeSnapshot(cwd, sessionFile) {
   return { cwd, sessionFile }
 }
+
+async function createRestoreSession(sandbox) {
+  const env = { HOME: sandbox.root }
+  const scope = getScope({ env, cwd: sandbox.cwd })
+  return {
+    scope,
+    cwd: sandbox.cwd,
+    sessionFile: sandbox.sessionFile,
+    owner: {
+      bootId: "00000000-0000-0000-0000-000000000000",
+      pid: 1,
+      startTime: "0",
+    },
+    agentOwner: {
+      bootId: "00000000-0000-0000-0000-000000000000",
+      pid: 1,
+      startTime: "0",
+    },
+  }
+}
+
+test("when preparing a named restore, the command uses control restore and quotes arguments", async (t) => {
+  // Arrange
+  const sandbox = await createSandbox(t, {
+    cwdName: "work ' directory",
+    executableName: "ompi executable",
+  })
+  const session = await createRestoreSession(sandbox)
+  const name = "saved-session"
+
+  // Act
+  const command = await prepareNamedRestoreCommand(session.scope, name, session, {
+    env: { HOME: sandbox.root },
+    executable: sandbox.executable,
+  })
+  const invocation = await runCommand(command, sandbox.resultFile)
+
+  // Assert
+  assert.deepEqual(invocation.argv, ["control", "restore", name, "--profile=default"])
+})
+
+test("when preparing a slot restore, the command checks control version and uses control restore", async (t) => {
+  // Arrange
+  const sandbox = await createSandbox(t)
+  const session = await createRestoreSession(sandbox)
+  const restoreId = "a".repeat(32)
+
+  // Act
+  const command = await prepareSlotRestoreCommand(session.scope, restoreId, session, {
+    env: { HOME: sandbox.root },
+    executable: sandbox.executable,
+    assertOwnersNotLive: false,
+  })
+  const invocation = await runCommand(command, sandbox.resultFile)
+
+  // Assert
+  assert.deepEqual(invocation.argv, [
+    "control",
+    "restore",
+    "--slot",
+    restoreId,
+    "--profile=default",
+  ])
+})
+
+for (const version of ["0.10.9", "0.11.0", "0.12.0-rc.1"]) {
+  test(`when native ompi is ${version}, named and slot restore refuse before generating commands`, async (t) => {
+    // Arrange
+    const sandbox = await createSandbox(t, { version })
+    const session = await createRestoreSession(sandbox)
+
+    // Act / Assert
+    const unsupportedVersion = /0\.12\.0/
+    await assert.rejects(
+      prepareSlotRestoreCommand(session.scope, "a".repeat(32), session, {
+        env: { HOME: sandbox.root },
+        executable: sandbox.executable,
+        assertOwnersNotLive: false,
+      }),
+      unsupportedVersion
+    )
+    await assert.rejects(
+      prepareNamedRestoreCommand(session.scope, "saved-session", session, {
+        env: { HOME: sandbox.root },
+        executable: sandbox.executable,
+      }),
+      unsupportedVersion
+    )
+  })
+}
+
+test("when a saved working directory disappears, named restore refuses before preparing a command", async (t) => {
+  // Arrange
+  const sandbox = await createSandbox(t)
+  const session = await createRestoreSession(sandbox)
+  await rm(sandbox.cwd, { recursive: true })
+
+  // Act / Assert
+  await assert.rejects(
+    prepareNamedRestoreCommand(session.scope, "saved-session", session, {
+      env: { HOME: sandbox.root },
+      executable: sandbox.executable,
+    }),
+    { code: "ENOENT" }
+  )
+})
 
 async function runCommand(command, resultFile) {
   const child = spawnSync("/bin/sh", ["-c", command], {

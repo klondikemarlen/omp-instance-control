@@ -5,7 +5,7 @@
 
 override_dh_auto_build:
 	mkdir -p debian/build
-	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.11.0" -o debian/build/ompi ./cli/cmd/ompi
+	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=0.12.0" -o debian/build/ompi ./cli/cmd/ompi
 
 override_dh_auto_test:
 	GOCACHE=$(CURDIR)/debian/build/cache go test ./...

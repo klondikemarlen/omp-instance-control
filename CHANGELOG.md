@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0 - 2026-10-22
+
+### Changed
+
+- Keep Bash controller commands under `ompi control …`, leaving ordinary OMP commands and launch options untouched outside that namespace.
+- Use flat `/ompi list`, `/ompi restart [ID|all]`, and `/ompi cleanup` commands inside OMP. An omitted restart target selects only the current managed terminal; Bash requires an explicit target.
+- Discover controller usage through `help [COMMAND]` and `version`, with contextual actions, restart targets, and saved names rather than repeated metadata flags.
+- Migrate managed restore commands to `ompi control restore`; command preparation requires native 0.12.0 or newer. Old controller command spellings and restart selector flags are removed rather than aliased.
+
+### Fixed
+
+- Show advanced completion options only after typing `-`, omit already-used options and conflicting recovery operations, and keep option-value positions free of unrelated flag menus.
+
 ## 0.11.0 - 2026-10-22
 
 ### Added

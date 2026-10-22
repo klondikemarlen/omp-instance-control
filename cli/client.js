@@ -34,7 +34,7 @@ export async function listInstances(transport) {
 
 export async function restartInstances(transport, { all = false, instanceId } = {}) {
   if (all === Boolean(instanceId)) {
-    throw new TypeError("Choose exactly one of --all or --instance <id>.")
+    throw new TypeError("Choose one restart target: an instance ID or all.")
   }
 
   const records = await transport.readRecords()

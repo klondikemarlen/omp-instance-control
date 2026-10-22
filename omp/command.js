@@ -14,19 +14,8 @@ import { requestWrapperRestart } from "./restart.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
-const RESTART_ONLY_OPTIONS = ["all", "instance", "no-wait"]
-const ROOT_COMPLETIONS = [
-  "restart",
-  "instances",
-  "restore",
-  "take-over",
-  "--help",
-  "-h",
-  "--version",
-]
-const ACTION_COMPLETIONS = ["list", "restart", "cleanup", "--help", "-h", "--version"]
-const LIST_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
-const CLEANUP_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
+const ROOT_COMPLETIONS = ["help", "version", "list", "restart", "cleanup", "restore", "take-over"]
+const LIST_COMPLETIONS = ["--profile", "--json"]
 const RESTORE_COMPLETIONS = [
   "save",
   "--list",
@@ -37,48 +26,18 @@ const RESTORE_COMPLETIONS = [
   "--export",
   "--import-legacy",
   "--profile",
-  "--help",
-  "-h",
-  "--version",
 ]
-const RESTORE_LIST_COMPLETIONS = ["--json", "--from", "--profile", "--help", "-h", "--version"]
-const RESTORE_SAVE_COMPLETIONS = ["--instance", "--profile", "--help", "-h", "--version"]
-const RESTORE_HISTORY_COMPLETIONS = ["--json", "--profile", "--help", "-h", "--version"]
+const RESTORE_LIST_COMPLETIONS = ["--json", "--from", "--profile"]
+const RESTORE_SAVE_COMPLETIONS = ["--instance", "--profile"]
+const RESTORE_HISTORY_COMPLETIONS = ["--json", "--profile"]
 
-const RESTART_COMPLETIONS = [
-  "--all",
-  "--instance",
-  "--profile",
-  "--json",
-  "--no-wait",
-  "--help",
-  "-h",
-  "--version",
-]
-const COMPLETABLE_OPTIONS = new Set([
-  "--all",
-  "--instance",
-  "--list",
-  "--profile",
-  "--json",
-  "--no-wait",
-  "--help",
-  "-h",
-  "--version",
-  "--checkpoint",
-  "--history",
-  "--from",
-  "--slot",
-  "--export",
-  "--import-legacy",
-])
+const RESTART_COMPLETIONS = ["--profile", "--json", "--no-wait"]
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
 }
 
 const BOOLEAN_OPTIONS = new Set([
-  "all",
   "list",
   "json",
   "no-wait",
@@ -148,7 +107,6 @@ function parseOmpiArguments(args) {
   const parsed = parseArgs({
     args: normalized.args,
     options: {
-      all: { type: "boolean" },
       instance: { type: "string" },
       slot: { type: "string" },
       from: { type: "string" },
@@ -175,23 +133,40 @@ function parseOmpiArguments(args) {
   const positionals = [...parsed.positionals]
 
   if (parsed.values.help && parsed.values.version) {
-    throw new Error("Choose either --help or --version.")
+    throw new Error("Choose either help or version.")
   }
   if (positionals.length === 0) {
-    if (parsed.values.help) {
-      return { action: "help", values: parsed.values, present }
-    }
-    if (parsed.values.version) {
-      return { action: "version", values: parsed.values, present }
-    }
-    if (present.size === 0) {
-      return { action: "help", values: parsed.values, present }
-    }
-    throw new Error(`Usage: /${COMMAND} restart|instances list|restart|cleanup [options]`)
+    if (parsed.values.help) return { action: "help", values: parsed.values, present }
+    if (parsed.values.version) return { action: "version", values: parsed.values, present }
+    if (present.size === 0) return { action: "help", values: parsed.values, present }
+    throw new Error(`Usage: /${COMMAND} [help [COMMAND]|version|list|restart ID|all|cleanup]`)
   }
 
   const positionTokens = parsed.tokens.filter((token) => token.kind === "positional")
   const rootToken = positionTokens[0]
+  if (positionals[0] === "help") {
+    if (
+      positionals.length > 2 ||
+      [...present].some((name) => !["help", "version"].includes(name)) ||
+      (positionals.length === 2 &&
+        !["list", "restart", "cleanup", "restore", "take-over"].includes(positionals[1]))
+    ) {
+      throw new Error("Usage: /ompi help [list|restart|cleanup|restore|take-over]")
+    }
+    return {
+      action: "help",
+      helpTarget: positionals[1],
+      values: parsed.values,
+      present,
+    }
+  }
+  if (positionals[0] === "version") {
+    if (positionals.length !== 1 || present.size !== 0) {
+      throw new Error("Usage: /ompi version")
+    }
+    return { action: "version", values: parsed.values, present }
+  }
+
   if (positionals[0] === "restore") {
     if (
       parsed.tokens.some(
@@ -205,7 +180,7 @@ function parseOmpiArguments(args) {
       throw new Error("Usage: /ompi restore [NAME|save NAME|--list] [options]")
     }
     if (parsed.values.help) {
-      return { action: "help", values: parsed.values, present }
+      return { action: "help", helpTarget: "restore", values: parsed.values, present }
     }
     if (parsed.values.version) {
       return { action: "version", values: parsed.values, present }
@@ -246,8 +221,6 @@ function parseOmpiArguments(args) {
       }
       if (operation === "slot" && !/^[a-f0-9]{32}$/.test(parsed.values.slot ?? ""))
         throw new Error("--slot requires a full 32-character restore ID.")
-      if (operation === "from" && !/^[a-f0-9]{32}$/.test(parsed.values.from ?? ""))
-        throw new Error("--from requires a full 32-character checkpoint ID.")
       return {
         action: "restore",
         operation: `recovery-${operation}`,
@@ -334,31 +307,46 @@ function parseOmpiArguments(args) {
       throw new Error("Usage: /ompi take-over")
     }
     if (parsed.values.help) {
-      return { action: "help", values: parsed.values, present }
+      return { action: "help", helpTarget: "take-over", values: parsed.values, present }
     }
     if (parsed.values.version) {
       return { action: "version", values: parsed.values, present }
     }
     return { action: "take-over", values: parsed.values, present }
   }
+
   if (positionals[0] === "restart") {
+    const target = positionals[1]
     if (
-      positionals.length !== 1 ||
-      [...present].some((name) => !["help", "version"].includes(name))
+      positionals.length > 2 ||
+      [...present].some(
+        (name) => !["profile", "json", "no-wait", "help", "version"].includes(name)
+      ) ||
+      parsed.values.instance !== undefined
     ) {
-      throw new Error("Usage: /ompi restart")
+      throw new Error("Usage: /ompi restart [ID|all] [--profile NAME] [--json] [--no-wait]")
     }
     if (parsed.values.help) {
-      return { action: "help", values: parsed.values, present }
+      return { action: "help", helpTarget: "restart", values: parsed.values, present }
     }
     if (parsed.values.version) {
       return { action: "version", values: parsed.values, present }
     }
-    return { action: "restart-wrapper", values: parsed.values, present }
+    if (!target) {
+      if (["profile", "json", "no-wait"].some((option) => present.has(option))) {
+        throw new Error("Peer restart options require an ID or all target.")
+      }
+      return { action: "restart-wrapper", values: parsed.values, present }
+    }
+    if (target !== "all" && !/^[a-f0-9]{32}$/.test(target)) {
+      throw new Error("Restart target must be 'all' or a full 32-character instance ID.")
+    }
+    return { action: "restart", target, values: parsed.values, present }
   }
 
-  if (positionals.shift() !== "instances") {
-    throw new Error(`Usage: /${COMMAND} restart|instances list|restart|cleanup [options]`)
+  const action = positionals[0]
+  if (!["list", "cleanup"].includes(action) || positionals.length !== 1) {
+    throw new Error(`Usage: /${COMMAND} [help [COMMAND]|version|list|restart ID|all|cleanup]`)
   }
   if (
     parsed.tokens.some(
@@ -369,34 +357,13 @@ function parseOmpiArguments(args) {
         token.name !== "version"
     )
   ) {
-    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
+    throw new Error(`Usage: /${COMMAND} list|cleanup [options]`)
   }
-
-  const actionToken = positionTokens[1]
-  if (
-    actionToken &&
-    parsed.tokens.some(
-      (token) =>
-        token.kind === "option" && token.index > rootToken.index && token.index < actionToken.index
-    )
-  ) {
-    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
-  }
-  const action = positionals.shift() ?? "list"
-  if (positionals.length > 0 || !["list", "restart", "cleanup"].includes(action)) {
-    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
-  }
-  if (
-    action === "cleanup" &&
-    [...present].some((name) => !["profile", "json", "help", "version"].includes(name))
-  ) {
-    throw new Error("Usage: /ompi instances cleanup [--profile NAME] [--json]")
-  }
-  if (present.has("list")) {
-    throw new Error("--list applies only to restore.")
+  if ([...present].some((name) => !["profile", "json", "help", "version"].includes(name))) {
+    throw new Error(`Usage: /ompi ${action} [--profile NAME] [--json]`)
   }
   if (parsed.values.help) {
-    return { action: "help", values: parsed.values, present }
+    return { action: "help", helpTarget: action, values: parsed.values, present }
   }
   if (parsed.values.version) {
     return { action: "version", values: parsed.values, present }
@@ -468,173 +435,120 @@ function scopeRecoveryIds(recoveryIds, tokens, defaultScope) {
   }
 }
 
-function restorePositionals(tokens) {
+function completionContext(tokens) {
+  const valueOptions = new Set(["profile", "instance", "from", "slot", "import-legacy"])
+  const options = new Set()
   const positionals = []
+  let pendingValue
+
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]
-    if (token === "--profile" || token === "--instance") {
-      index += 1
+    if (token === "--") return { options, positionals, ended: true }
+    if (!token.startsWith("-")) {
+      positionals.push(token)
       continue
     }
-    if (token.startsWith("--") || token === "-h") continue
-    positionals.push({ value: token, index })
+
+    const name = token === "-h" ? "help" : token.slice(2).split("=")[0]
+    options.add(name)
+    if (!valueOptions.has(name) || token.includes("=")) continue
+
+    const next = tokens[index + 1]
+    if (next !== undefined && !next.startsWith("-")) {
+      index += 1
+    } else if (next === undefined) {
+      pendingValue = name
+    }
   }
-  return positionals
+  return { options, positionals, pendingValue, ended: false }
 }
 
 function getRestoreCompletions(
   completedTokens,
   tokenPrefix,
+  context,
   completionIds,
   completionNames,
-  profileNames,
-  cwd,
   defaultScope,
   recoveryIds
 ) {
-  const tokens = completedTokens.slice(1)
-  if (tokens.at(-1) === "--from") {
-    return completionValues(
-      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).checkpoints.map((id) =>
-        completionItem(id)
-      ),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokens.at(-1) === "--slot") {
-    return completionValues(
-      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).slots.map((id) =>
-        completionItem(id)
-      ),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokenPrefix.startsWith("--from=")) {
-    return completionValues(
-      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).checkpoints.map((id) =>
-        completionItem(`--from=${id}`)
-      ),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokenPrefix.startsWith("--slot=")) {
-    return completionValues(
-      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).slots.map((id) =>
-        completionItem(`--slot=${id}`)
-      ),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  const saveAction = tokens[0] === "save"
-  if (tokens.at(-1) === "--profile") {
-    return completionValues(
-      profileNames.map((name) => completionItem(name)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokenPrefix.startsWith("--profile=")) {
-    return completionValues(
-      profileNames.map((name) => completionItem(`--profile=${name}`, name)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokens.at(-1) === "--instance") {
+  const { options, positionals, pendingValue } = context
+  const operations = ["list", "checkpoint", "history", "export", "import-legacy", "slot"]
+  const selected = operations.filter((operation) => options.has(operation))
+  if (selected.length > 1) return []
+  const operation = selected[0]
+  if (options.has("from") && operation && !["list", "export"].includes(operation)) return []
+
+  const save = positionals[0] === "save"
+  const named = positionals.length > 0 && !save
+  if ((save || named) && (operation || options.has("from"))) return []
+  if (positionals.length > (save ? 2 : 1)) return []
+
+  if (pendingValue === "instance" || tokenPrefix.startsWith("--instance=")) {
+    if (!save) return []
+    const prefix = tokenPrefix.startsWith("--instance=") ? "--instance=" : ""
     return completionValues(
       [...scopeRestoreInstanceIds(completionIds, completedTokens, defaultScope)].map((id) =>
-        completionItem(id)
+        completionItem(`${prefix}${id}`)
       ),
       completedTokens,
       tokenPrefix
     )
   }
-  if (tokenPrefix.startsWith("--instance=")) {
-    const idPrefix = tokenPrefix.slice("--instance=".length)
-    const argumentPrefix = `${completedTokens.join(" ")} `
-    return [...scopeRestoreInstanceIds(completionIds, completedTokens, defaultScope)]
-      .filter((id) => id.startsWith(idPrefix))
-      .map((id) => completionItem(`${argumentPrefix}--instance=${id}`))
-  }
+  for (const selector of ["from", "slot"]) {
+    const prefix = `--${selector}=`
+    if (pendingValue !== selector && !tokenPrefix.startsWith(prefix)) continue
+    if (save || named) return []
+    if (selector === "from" && operation && !["list", "export"].includes(operation)) return []
+    if (selector === "slot" && (options.has("from") || (operation && operation !== "slot")))
+      return []
 
-  if (saveAction) {
-    const saveName = restorePositionals(tokens.slice(1))[0]
-    if (!saveName) {
-      if (!tokenPrefix.startsWith("-")) return []
-      return completionValues(
-        RESTORE_SAVE_COMPLETIONS.map((value) => completionItem(value)),
-        completedTokens,
-        tokenPrefix
+    const ids = scopeRecoveryIds(recoveryIds, completedTokens, defaultScope)
+    const values = selector === "from" ? ids.checkpoints : ids.slots
+    const inline = tokenPrefix.startsWith(prefix)
+    return completionValues(
+      values.map((id) => completionItem(inline ? `${prefix}${id}` : id)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (pendingValue === "import-legacy" && !tokenPrefix.startsWith("-")) return []
+
+  let candidates = RESTORE_COMPLETIONS
+  if (save) {
+    candidates = RESTORE_SAVE_COMPLETIONS
+  } else if (named || ["checkpoint", "import-legacy", "slot"].includes(operation)) {
+    candidates = ["--profile"]
+  } else if (operation === "list") {
+    candidates = RESTORE_LIST_COMPLETIONS
+  } else if (operation === "history") {
+    candidates = RESTORE_HISTORY_COMPLETIONS
+  } else if (operation === "export") {
+    candidates = ["--from", "--profile"]
+  } else if (options.has("from")) {
+    candidates = ["--list", "--export", "--profile"]
+  } else if (options.has("json")) {
+    candidates = ["--list", "--history", "--profile"]
+  }
+  if (tokenPrefix.startsWith("-")) {
+    return completionValues(
+      candidates
+        .filter((option) => option.startsWith("--") && !options.has(option.slice(2)))
+        .map((value) => completionItem(value)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (positionals.length || operation || options.has("from") || options.has("json")) return []
+
+  const names = scopeSavedNames(completionNames, completedTokens, defaultScope).map(
+    ({ name, unavailable }) =>
+      completionItem(
+        name,
+        unavailable ? `${name} (unavailable: ${safeTerminalText(unavailable)})` : name
       )
-    }
-    const usedOptions = new Set(
-      tokens.filter((token) => token.startsWith("--")).map((token) => token.slice(2).split("=")[0])
-    )
-    const options = RESTORE_SAVE_COMPLETIONS.filter((option) => {
-      const name = option.replace(/^--/, "")
-      return !usedOptions.has(name)
-    })
-    return completionValues(
-      options.map((value) => completionItem(value)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-
-  const namedSession = restorePositionals(tokens)[0]
-  if (namedSession) {
-    const optionTokens = tokens.slice(namedSession.index + 1)
-    const usedOptions = new Set(
-      optionTokens
-        .filter((token) => token.startsWith("--") || token === "-h")
-        .map((token) => (token === "-h" ? "help" : token.slice(2).split("=")[0]))
-    )
-    const options = ["--profile", "--help", "-h", "--version"].filter((option) => {
-      const name = option === "-h" ? "help" : option.slice(2)
-      return !usedOptions.has(name)
-    })
-    return completionValues(
-      options.map((value) => completionItem(value)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-
-  const usedOptions = new Set(
-    tokens
-      .filter((token) => token.startsWith("--") || token === "-h")
-      .map((token) => (token === "-h" ? "help" : token.slice(2).split("=")[0]))
   )
-  let optionCompletions = RESTORE_COMPLETIONS
-  if (usedOptions.has("list")) {
-    optionCompletions = RESTORE_LIST_COMPLETIONS
-  } else if (usedOptions.has("history")) {
-    optionCompletions = RESTORE_HISTORY_COMPLETIONS
-  }
-  const options = optionCompletions.filter((option) => {
-    const name = option === "-h" ? "help" : option.replace(/^--/, "")
-    return !usedOptions.has(name)
-  })
-  const recoveryOperations = ["checkpoint", "history", "export", "import-legacy", "slot", "from"]
-  let names = []
-  if (!recoveryOperations.some((name) => usedOptions.has(name))) {
-    names = scopeSavedNames(completionNames, completedTokens, defaultScope).map(
-      ({ name, unavailable }) =>
-        completionItem(
-          name,
-          unavailable ? `${name} (unavailable: ${safeTerminalText(unavailable)})` : name
-        )
-    )
-  }
-  return completionValues(
-    [...names, ...options.map((value) => completionItem(value))],
-    completedTokens,
-    tokenPrefix
-  )
+  return completionValues([completionItem("save"), ...names], completedTokens, tokenPrefix)
 }
 
 function getArgumentCompletions(
@@ -648,20 +562,10 @@ function getArgumentCompletions(
 ) {
   const trailingSpace = /\s$/.test(argumentText)
   const tokens = argumentText.trim() ? argumentText.trim().split(/\s+/) : []
-  let tokenPrefix = trailingSpace ? "" : (tokens.pop() ?? "")
+  const tokenPrefix = trailingSpace ? "" : (tokens.pop() ?? "")
   const completedTokens = trailingSpace ? tokens : [...tokens]
-  const completedActionOrOption =
-    tokenPrefix === "instances" ||
-    ["restore", "list", "restart", "cleanup", "take-over"].includes(tokenPrefix) ||
-    COMPLETABLE_OPTIONS.has(tokenPrefix)
-  if (
-    !trailingSpace &&
-    completedActionOrOption &&
-    (completedTokens.length === 0 || completedTokens[0] === "instances")
-  ) {
-    completedTokens.push(tokenPrefix)
-    tokenPrefix = ""
-  }
+  const context = completionContext(completedTokens.slice(1))
+  if (context.ended || context.options.has("help") || context.options.has("version")) return []
 
   if (completedTokens.length === 0) {
     return completionValues(
@@ -670,119 +574,57 @@ function getArgumentCompletions(
       tokenPrefix
     )
   }
-  if (completedTokens[0] === "restart") {
+  const command = completedTokens[0]
+  if (command === "help") {
+    if (completedTokens.length > 1) return []
     return completionValues(
-      ["--help", "-h", "--version"].map((value) => completionItem(value)),
+      ["list", "restart", "cleanup", "restore", "take-over"].map((value) => completionItem(value)),
       completedTokens,
       tokenPrefix
     )
   }
+  if (!["restore", "restart", "list", "cleanup"].includes(command)) return []
 
-  if (completedTokens[0] === "take-over") {
+  if (context.pendingValue === "profile" || tokenPrefix.startsWith("--profile=")) {
+    const inline = tokenPrefix.startsWith("--profile=")
     return completionValues(
-      ["--help", "-h", "--version"].map((value) => completionItem(value)),
+      profileNames.map((name) => completionItem(inline ? `--profile=${name}` : name, name)),
       completedTokens,
       tokenPrefix
     )
   }
-  if (completedTokens[0] === "restore") {
+  if (command === "restore") {
     return getRestoreCompletions(
       completedTokens,
       tokenPrefix,
+      context,
       completionIds,
       completionNames,
-      profileNames,
-      cwd,
       defaultScope,
       recoveryIds
     )
   }
-  if (completedTokens[0] !== "instances") {
-    return null
-  }
-  if (completedTokens.length === 1 && !tokenPrefix.startsWith("--profile=")) {
-    const defaults = [
-      ...ACTION_COMPLETIONS,
-      ...LIST_COMPLETIONS.filter((option) => !ACTION_COMPLETIONS.includes(option)),
-    ]
+  if (context.pendingValue) return []
+  if (context.positionals.length > (command === "restart" ? 1 : 0)) return []
+  if (command === "restart" && context.positionals.length === 0 && !tokenPrefix.startsWith("-")) {
     return completionValues(
-      defaults.map((value) => completionItem(value)),
+      [
+        completionItem("all"),
+        ...[...scopeInstanceIds(completionIds, cwd, completedTokens)].map((id) =>
+          completionItem(id)
+        ),
+      ],
       completedTokens,
       tokenPrefix
     )
   }
+  if (!tokenPrefix.startsWith("-")) return []
 
-  const explicitAction = ["list", "restart", "cleanup"].includes(completedTokens[1])
-  const action = explicitAction ? completedTokens[1] : "list"
-  const optionTokens = completedTokens.slice(explicitAction ? 2 : 1)
-  if (!explicitAction) {
-    for (let index = 0; index < optionTokens.length; index += 1) {
-      const token = optionTokens[index]
-      if (token === "--profile") {
-        if (optionTokens[index + 1] && !optionTokens[index + 1].startsWith("-")) {
-          index += 1
-        }
-        continue
-      }
-      if (token.startsWith("--profile=") || LIST_COMPLETIONS.includes(token)) {
-        continue
-      }
-      return null
-    }
-  }
-  const usedOptions = new Set(
-    optionTokens
-      .filter((token) => token.startsWith("--") || token === "-h")
-      .map((token) => (token === "-h" ? "help" : token.slice(2).split("=")[0]))
-  )
-  if (action === "restart" && optionTokens.at(-1) === "--instance") {
-    return completionValues(
-      [...scopeInstanceIds(completionIds, cwd, completedTokens)].map((id) => completionItem(id)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokenPrefix.startsWith("--instance=")) {
-    const idPrefix = tokenPrefix.slice("--instance=".length)
-    const argumentPrefix = `${completedTokens.join(" ")} `
-    return [...scopeInstanceIds(completionIds, cwd, completedTokens)]
-      .filter((id) => id.startsWith(idPrefix))
-      .map((id) => completionItem(`${argumentPrefix}--instance=${id}`))
-  }
-  if (optionTokens.at(-1) === "--profile") {
-    return completionValues(
-      profileNames.map((name) => completionItem(name)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-  if (tokenPrefix.startsWith("--profile=")) {
-    return completionValues(
-      profileNames.map((name) => completionItem(`--profile=${name}`, name)),
-      completedTokens,
-      tokenPrefix
-    )
-  }
-
-  let options = RESTART_COMPLETIONS
-  if (action === "list") {
-    options = LIST_COMPLETIONS
-  } else if (action === "cleanup") {
-    options = CLEANUP_COMPLETIONS
-  }
-  if (action === "restart") {
-    options = options.filter(
-      (option) =>
-        !(option === "--all" && usedOptions.has("instance")) &&
-        !(option === "--instance" && usedOptions.has("all"))
-    )
-  }
-  options = options.filter((option) => {
-    const name = option === "-h" ? "help" : option.replace(/^--/, "")
-    return !usedOptions.has(name)
-  })
+  const candidates = command === "restart" ? RESTART_COMPLETIONS : LIST_COMPLETIONS
   return completionValues(
-    options.map((value) => completionItem(value)),
+    candidates
+      .filter((option) => !context.options.has(option.slice(2)))
+      .map((value) => completionItem(value)),
     completedTokens,
     tokenPrefix
   )
@@ -830,9 +672,7 @@ function notifyRows(ctx, rows, json) {
 
   const lines = [outcomeSummary(rows), formatRows(rows)]
   if (rows.some((row) => row.status === "unreachable")) {
-    lines.push(
-      "Unreachable registrations may be stale. Run /ompi instances cleanup for safe cleanup."
-    )
+    lines.push("Unreachable registrations may be stale. Run /ompi cleanup for safe cleanup.")
   }
 
   ctx.ui.notify(lines.filter(Boolean).join("\n"), hasFailure ? "warning" : "info")
@@ -904,7 +744,7 @@ function renderPeerProgress(ctx, rows, started, frame) {
     )
   }
   if (rows.some((row) => row.status === "unreachable")) {
-    lines.push("Possibly stale: run /ompi instances cleanup (safe, explicit cleanup).")
+    lines.push("Possibly stale: run /ompi cleanup (safe, explicit cleanup).")
   }
   ctx.ui.setWidget(PROGRESS_WIDGET, lines, { placement: "aboveEditor" })
 }
@@ -979,7 +819,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   const restoreCommand = createRestoreCommand(pi, { getRuntime, refreshCompletionIds })
 
   pi.registerCommand(COMMAND, {
-    description: "Control this session and participating instances, restores, or manual takeover",
+    description: "Control this OMP session and peer instances, recovery, or manual takeover",
     getArgumentCompletions(argumentText) {
       return getArgumentCompletions(
         argumentText,
@@ -999,26 +839,45 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
       completionCwd = ctx.cwd
 
       try {
-        const { action, operation, name, values, present } = parseOmpiArguments(args)
+        const { action, operation, name, helpTarget, target, values } = parseOmpiArguments(args)
         if (action === "help") {
-          ctx.ui.notify(
-            [
-              "Usage: /ompi restart",
-              "Restart this OMP session and its owning ompi wrapper after a safe shutdown.",
-              "Usage: /ompi instances [list|restart|cleanup] [options]",
-              "Instance restart requires exactly one explicit --all or --instance selector. Listing is the default action.",
-              "Cleanup removes only safely confirmed stale records and endpoints; it supports --profile NAME and --json.",
-              "/ompi restore [NAME] or --slot ID selects a managed recovery slot, prepares a shell command, and confirms graceful exit.",
-              "/ompi restore save NAME [--instance FULL_ID] [--profile NAME] creates an optional immutable name.",
-              "/ompi restore --list [--json] [--from CHECKPOINT] [--profile NAME] lists recovery candidates.",
-              "/ompi restore --checkpoint saves membership; --history [--json] lists retained checkpoints.",
-              "/ompi restore --from CHECKPOINT selects its members; --export prints reviewed commands.",
-              "/ompi restore --import-legacy [PATH] imports review-only legacy data without executing shell text.",
+          const help = {
+            root: [
+              "Usage: /ompi COMMAND",
+              "list                 Show participating terminals",
+              "restart [ID|all]      Restart this terminal, one peer, or all in scope",
+              "restore [NAME]       Choose a recoverable conversation",
+              "cleanup              Remove safely confirmed stale registrations",
+              "take-over            Prepare a plain-OMP session for manual relaunch",
+              "help [COMMAND]       Show usage and advanced options",
+              "version              Show the controller version",
+            ],
+            list: ["Usage: /ompi list [--profile NAME] [--json]"],
+            restart: [
+              "Usage: /ompi restart [ID|all] [--profile NAME] [--json] [--no-wait]",
+              "With no target, restart this terminal through its owning wrapper.",
+              "With an ID or all, request peer restarts; Ctrl-C stops watching, not accepted requests.",
+            ],
+            cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
+            restore: [
+              "Usage: /ompi restore [NAME] [--profile NAME]",
+              "/ompi restore save NAME [--instance ID] [--profile NAME]",
+              "/ompi restore --list [--json] [--from CHECKPOINT]",
+              "/ompi restore --history [--json]",
+              "/ompi restore --checkpoint",
+              "/ompi restore --slot ID",
+              "/ompi restore --from CHECKPOINT",
+              "/ompi restore --export [--from CHECKPOINT]",
+              "/ompi restore --import-legacy [PATH]",
+              "All recovery operations accept --profile NAME.",
+              "Selection prepares a command to copy before graceful exit; paste it at the shell.",
+            ],
+            "take-over": [
               "/ompi take-over prepares the current saved session for manual relaunch under ompi.",
-              "Copy a prepared command before graceful exit, wait for your shell, then paste it. No terminal windows open automatically.",
-            ].join("\n"),
-            "info"
-          )
+            ],
+          }
+          const lines = helpTarget ? help[helpTarget] : help.root
+          ctx.ui.notify(lines.join("\n"), "info")
           return
         }
         if (action === "version") {
@@ -1062,16 +921,6 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           return
         }
 
-        if (action === "list" && RESTART_ONLY_OPTIONS.some((name) => present.has(name))) {
-          throw new Error("--all, --instance, and --no-wait apply only to restart.")
-        }
-
-        if (action === "restart") {
-          if (values.all === Boolean(values.instance)) {
-            throw new Error("Choose exactly one of --all or --instance <id>.")
-          }
-        }
-
         const scope = getScope({ cwd: ctx.cwd, profile: normalizeProfile(values.profile) })
         const transport = await createTransport(scope)
         if (action === "cleanup") {
@@ -1089,8 +938,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         }
 
         const rows = await restartInstances(transport, {
-          all: values.all === true,
-          instanceId: values.instance,
+          all: target === "all",
+          instanceId: target === "all" ? undefined : target,
         })
         const runtime = getRuntime()
         const selfRow =

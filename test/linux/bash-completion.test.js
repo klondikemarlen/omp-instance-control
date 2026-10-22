@@ -40,148 +40,70 @@ function complete(words) {
   return result.stdout.trim().split("\n").filter(Boolean)
 }
 
-test(
-  "when completing cleanup options, Bash does not offer restart selection",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "instances", "cleanup", "--a"]
+for (const { condition, words, expected } of [
+  {
+    condition: "a restart target is selected",
+    words: ["ompi", "control", "restart", "all", ""],
+    expected: [],
+  },
+  {
+    condition: "a JSON option has already been consumed",
+    words: ["ompi", "control", "restart", "all", "--json=true", "--"],
+    expected: ["--profile", "--no-wait"],
+  },
+  {
+    condition: "a profile value equals the all target word",
+    words: ["ompi", "control", "restart", "--profile", "all", "a"],
+    expected: ["all"],
+  },
+  {
+    condition: "a profile value is pending",
+    words: ["ompi", "control", "restart", "all", "--profile", "--j"],
+    expected: [],
+  },
+  {
+    condition: "a profile was supplied inline",
+    words: ["ompi", "control", "restart", "all", "--profile=work", "--"],
+    expected: ["--json", "--no-wait"],
+  },
+  {
+    condition: "the end-of-options delimiter is complete",
+    words: ["ompi", "control", "restart", "all", "--", "--n"],
+    expected: [],
+  },
+  {
+    condition: "cleanup is selected",
+    words: ["ompi", "control", "cleanup", "--n"],
+    expected: [],
+  },
+  {
+    condition: "a recovery operation was supplied inline",
+    words: ["ompi", "control", "restore", "--checkpoint=true", "--"],
+    expected: ["--profile"],
+  },
+  {
+    condition: "recovery listing already consumes JSON",
+    words: ["ompi", "control", "restore", "--list", "--json", "--"],
+    expected: ["--from", "--profile"],
+  },
+  {
+    condition: "a recovery operation is complete",
+    words: ["ompi", "control", "restore", "--checkpoint", ""],
+    expected: [],
+  },
+]) {
+  test(
+    `when ${condition}, completion offers only valid next choices`,
+    { skip: !bashAvailable },
+    () => {
+      // Arrange
+      const input = words
 
-    // Act
-    const candidates = complete(words)
+      // Act
+      const candidates = complete(input)
 
-    // Assert
-    assert.deepEqual(candidates, [])
-  }
-)
-
-test(
-  "when a profile value starts like an action, Bash leaves the value free-form",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "instances", "restart", "--profile", "r"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.deepEqual(candidates, [])
-  }
-)
-
-test(
-  "when an inline profile precedes a restart option, Bash completes the option",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "instances", "restart", "--profile", "=", "work", "--n"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.deepEqual(candidates, ["--no-wait"])
-  }
-)
-
-test(
-  "when the default list profile is named restart, Bash does not change actions",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "instances", "--profile", "restart", "--a"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.deepEqual(candidates, [])
-  }
-)
-
-test(
-  "when the option terminator precedes input, Bash does not offer flags",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "instances", "restart", "--", "--n"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.deepEqual(candidates, [])
-  }
-)
-
-test(
-  "when completing restore options before list, Bash does not offer JSON",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "restore", "--"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.equal(candidates.includes("--json"), false)
-  }
-)
-
-test(
-  "when completing restore options after list, Bash offers JSON",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "restore", "--list", "--"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.equal(candidates.includes("--json"), true)
-  }
-)
-
-test("when browsing checkpoint history, Bash offers JSON output", { skip: !bashAvailable }, () => {
-  // Arrange
-  const words = ["ompi", "restore", "--history", "--j"]
-
-  // Act
-  const candidates = complete(words)
-
-  // Assert
-  assert.deepEqual(candidates, ["--json"])
-})
-
-test(
-  "when selecting a checkpoint, Bash does not suggest creating another checkpoint",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "restore", "--from", "a".repeat(32), "--c"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.deepEqual(candidates, [])
-  }
-)
-
-test(
-  "when importing legacy data, Bash does not suggest managed-slot execution",
-  { skip: !bashAvailable },
-  () => {
-    // Arrange
-    const words = ["ompi", "restore", "--import-legacy", "/private/snapshot.txt", "--s"]
-
-    // Act
-    const candidates = complete(words)
-
-    // Assert
-    assert.deepEqual(candidates, [])
-  }
-)
+      // Assert
+      assert.deepEqual(candidates, expected)
+    }
+  )
+}

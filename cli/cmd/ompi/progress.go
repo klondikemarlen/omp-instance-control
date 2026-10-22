@@ -365,7 +365,7 @@ func (renderer *restartRenderer) appendNotes(lines []progressLine, footer string
 	lines = append(lines, progressLine{text: footer})
 	maximum--
 	if renderer.counts.unreachable > 0 && maximum > 0 {
-		lines = append(lines, progressLine{text: "Possibly stale: run ompi instances cleanup (safe, explicit cleanup)."})
+		lines = append(lines, progressLine{text: "Possibly stale: run ompi control cleanup (safe, explicit cleanup)."})
 		maximum--
 	}
 	if renderer.counts.pending > 0 && maximum > 0 {
