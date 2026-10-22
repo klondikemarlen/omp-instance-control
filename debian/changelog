@@ -1,3 +1,12 @@
+omp-instance-control (0.12.0~ppa1) resolute; urgency=medium
+
+  * Isolate Bash controls under ompi control and flatten /ompi commands.
+  * Select restarts with positional IDs or all, preserving safe self restart.
+  * Offer word help and contextual completion without repeated metadata flags.
+  * Migrate generated recovery commands and require compatible native tooling.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Thu, 22 Oct 2026 14:37:39 -0700
+
 omp-instance-control (0.11.0~ppa1) resolute; urgency=medium
 
   * Restart the current native wrapper and OMP through /ompi restart.
