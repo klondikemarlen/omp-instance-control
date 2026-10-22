@@ -1,6 +1,6 @@
 {
   "name": "omp-instance-control",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Native ompi wrapper and OMP adapter for scoped settled-boundary restart/resume.",
   "type": "module",
   "license": "MIT",
