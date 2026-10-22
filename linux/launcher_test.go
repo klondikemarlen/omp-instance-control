@@ -227,6 +227,32 @@ func TestFakeOMPChild(t *testing.T) {
 	if os.Getenv("OMPI_TEST_REGISTER") == "1" {
 		writeFakeRegistration(t, launch, entry.Token, callNumber)
 	}
+	if os.Getenv("OMPI_TEST_CHECK_LOCK") == "1" && callNumber == 2 {
+		restoreID, ok := launch["restoreId"].(string)
+		if !ok || restoreID == "" {
+			t.Fatal("replacement launch did not preserve its restore identity")
+		}
+		scopeFields, ok := launch["scope"].(map[string]any)
+		if !ok {
+			t.Fatal("replacement launch has no scope")
+		}
+		scope := protocol.Scope{
+			ID: scopeFields["id"].(string), ConfigRoot: scopeFields["configRoot"].(string),
+			Profile: scopeFields["profile"].(string), AgentDir: scopeFields["agentDir"].(string),
+		}
+		directories, err := ensureRestoreDirectories(scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherLock, err := lockRestoreSnapshot(directories, restoreID)
+		if err == nil {
+			_ = otherLock.Close()
+			t.Fatal("restore lock was released across native wrapper exec")
+		}
+		if !strings.Contains(err.Error(), "already in progress") {
+			t.Fatalf("replacement restore lock failed unexpectedly: %v", err)
+		}
+	}
 
 	if os.Getenv("OMPI_TEST_BLOCK") == "1" {
 		termination := make(chan os.Signal, 1)
@@ -239,15 +265,24 @@ func TestFakeOMPChild(t *testing.T) {
 		return
 	}
 	if callNumber == 1 && os.Getenv("OMPI_TEST_HANDOFF") != "" {
+		if replacement := os.Getenv("OMPI_TEST_WRAPPER_REPLACEMENT"); replacement != "" {
+			if err := os.Rename(replacement, os.Getenv("OMPI_TEST_WRAPPER_PATH")); err != nil {
+				t.Fatal(err)
+			}
+		}
 		token := entry.Token
 		if os.Getenv("OMPI_TEST_HANDOFF") == "invalid" {
 			token = strings.Repeat("0", 32)
 		}
+		instanceID := fmt.Sprintf("%032x", callNumber)
 		handoff := map[string]any{
 			"version": 1, "token": token, "operationId": "operation-123",
-			"instanceId":  strings.Repeat("a", 32),
+			"instanceId":  instanceID,
 			"sessionFile": os.Getenv("OMPI_TEST_SESSION"),
 			"cwd":         os.Getenv("OMPI_TEST_CWD"),
+		}
+		if os.Getenv("OMPI_TEST_RESTART_WRAPPER") == "1" {
+			handoff["restartWrapper"] = true
 		}
 		handoffBytes, _ := json.Marshal(handoff)
 		if err := os.WriteFile(filepath.Join(launchDir, "handoff.json"), append(handoffBytes, '\n'), 0600); err != nil {

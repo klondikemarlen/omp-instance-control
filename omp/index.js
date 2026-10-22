@@ -182,7 +182,12 @@ export default async function instanceControl(pi) {
         },
       }
     }
-    rejectRestartAfterExitRequest(state, ctx)
+    if (request.action === "restart-wrapper" && runtime.launch.canRestartWrapper !== true) {
+      throw new ProtocolError(
+        "WRAPPER_RESTART_UNAVAILABLE",
+        "This launcher does not support wrapper restart; start a fresh OMP session from an updated ompi launcher."
+      )
+    }
     if (process.ppid !== runtime.launch.pid) {
       throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
     }
@@ -198,10 +203,17 @@ export default async function instanceControl(pi) {
     }
     rejectRestartAfterExitRequest(state, ctx)
 
+    if (runtime.pending && runtime.pendingAction !== request.action) {
+      throw new ProtocolError(
+        "RESTART_ALREADY_PENDING",
+        "A different restart operation is already pending for this instance."
+      )
+    }
     const firstRequest = !runtime.pending
     if (firstRequest) {
       runtime.restartAcknowledged = false
       runtime.pending = request.requestId
+      runtime.pendingAction = request.action
       runtime.admission = refresh(ctx)
     }
     const admission = runtime.admission
@@ -210,6 +222,7 @@ export default async function instanceControl(pi) {
     } catch (error) {
       if (runtime.admission === admission) {
         runtime.pending = null
+        runtime.pendingAction = null
         runtime.admission = undefined
       }
       throw error
@@ -217,6 +230,7 @@ export default async function instanceControl(pi) {
     if (hasMatchingExitRequest(state, ctx)) {
       if (firstRequest && state.admission === admission && state.pending === request.requestId) {
         state.pending = null
+        state.pendingAction = null
         state.admission = undefined
       }
       rejectRestartAfterExitRequest(state, ctx)
@@ -267,6 +281,7 @@ export default async function instanceControl(pi) {
         ctx,
         instanceId: randomBytes(16).toString("hex"),
         pending: null,
+        pendingAction: null,
       }
       // Persist ownership before binding the socket or publishing the public record.
       await recordLaunchRegistration(launch, scope, runtime.instanceId)
@@ -309,7 +324,13 @@ export default async function instanceControl(pi) {
         state.closing = true
         try {
           if (runtime.pending && !hasMatchingExitRequest(runtime, ctx)) {
-            writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx)
+            writeRestartHandoff(
+              runtime.launch,
+              runtime.pending,
+              runtime.instanceId,
+              ctx,
+              runtime.pendingAction === "restart-wrapper"
+            )
           }
         } finally {
           const previousWrite = state.recordWrite ?? Promise.resolve()

@@ -258,7 +258,7 @@ func ValidateInstanceID(instanceID string) error {
 	return nil
 }
 
-// CreateRequest creates a versioned status or restart request with a fresh UUID.
+// CreateRequest creates a versioned status or lifecycle request with a fresh UUID.
 func CreateRequest(instanceID, action string) (Request, error) {
 	if err := ValidateInstanceID(instanceID); err != nil {
 		return Request{}, err
@@ -297,8 +297,8 @@ func ValidateRequest(request Request) error {
 	if request.RequestID == "" || requestIDLength > 128 {
 		return &Error{Code: "INVALID_REQUEST", Message: "Expected a bounded nonempty request identifier."}
 	}
-	if request.Action != "status" && request.Action != "restart" {
-		return &Error{Code: "UNSUPPORTED_ACTION", Message: "Only status and restart are supported; resource-only reload is unavailable."}
+	if request.Action != "status" && request.Action != "restart" && request.Action != "restart-wrapper" {
+		return &Error{Code: "UNSUPPORTED_ACTION", Message: "Only status, restart, and restart-wrapper are supported; resource-only reload is unavailable."}
 	}
 	return nil
 }

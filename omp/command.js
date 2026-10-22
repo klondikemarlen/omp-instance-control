@@ -10,11 +10,20 @@ import { listSavedSessions, validateRestoreName } from "../linux/restore.js"
 import { prepareTakeover } from "./take-over.js"
 import { listRecoveryCheckpoints, listRecoverySlotIds } from "../linux/recovery.js"
 import { createRestoreCommand, getRestoreScope } from "./recovery-command.js"
+import { requestWrapperRestart } from "./restart.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
 const RESTART_ONLY_OPTIONS = ["all", "instance", "no-wait"]
-const ROOT_COMPLETIONS = ["instances", "restore", "take-over", "--help", "-h", "--version"]
+const ROOT_COMPLETIONS = [
+  "restart",
+  "instances",
+  "restore",
+  "take-over",
+  "--help",
+  "-h",
+  "--version",
+]
 const ACTION_COMPLETIONS = ["list", "restart", "cleanup", "--help", "-h", "--version"]
 const LIST_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
 const CLEANUP_COMPLETIONS = ["--profile", "--json", "--help", "-h", "--version"]
@@ -178,7 +187,7 @@ function parseOmpiArguments(args) {
     if (present.size === 0) {
       return { action: "help", values: parsed.values, present }
     }
-    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
+    throw new Error(`Usage: /${COMMAND} restart|instances list|restart|cleanup [options]`)
   }
 
   const positionTokens = parsed.tokens.filter((token) => token.kind === "positional")
@@ -332,8 +341,24 @@ function parseOmpiArguments(args) {
     }
     return { action: "take-over", values: parsed.values, present }
   }
+  if (positionals[0] === "restart") {
+    if (
+      positionals.length !== 1 ||
+      [...present].some((name) => !["help", "version"].includes(name))
+    ) {
+      throw new Error("Usage: /ompi restart")
+    }
+    if (parsed.values.help) {
+      return { action: "help", values: parsed.values, present }
+    }
+    if (parsed.values.version) {
+      return { action: "version", values: parsed.values, present }
+    }
+    return { action: "restart-wrapper", values: parsed.values, present }
+  }
+
   if (positionals.shift() !== "instances") {
-    throw new Error(`Usage: /${COMMAND} instances list|restart|cleanup [options]`)
+    throw new Error(`Usage: /${COMMAND} restart|instances list|restart|cleanup [options]`)
   }
   if (
     parsed.tokens.some(
@@ -645,6 +670,14 @@ function getArgumentCompletions(
       tokenPrefix
     )
   }
+  if (completedTokens[0] === "restart") {
+    return completionValues(
+      ["--help", "-h", "--version"].map((value) => completionItem(value)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+
   if (completedTokens[0] === "take-over") {
     return completionValues(
       ["--help", "-h", "--version"].map((value) => completionItem(value)),
@@ -946,7 +979,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   const restoreCommand = createRestoreCommand(pi, { getRuntime, refreshCompletionIds })
 
   pi.registerCommand(COMMAND, {
-    description: "Control participating instances, named restores, or manual takeover",
+    description: "Control this session and participating instances, restores, or manual takeover",
     getArgumentCompletions(argumentText) {
       return getArgumentCompletions(
         argumentText,
@@ -963,15 +996,17 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         ctx.ui.notify("Instance control requires a main OMP terminal.", "error")
         return
       }
-
       completionCwd = ctx.cwd
+
       try {
         const { action, operation, name, values, present } = parseOmpiArguments(args)
         if (action === "help") {
           ctx.ui.notify(
             [
+              "Usage: /ompi restart",
+              "Restart this OMP session and its owning ompi wrapper after a safe shutdown.",
               "Usage: /ompi instances [list|restart|cleanup] [options]",
-              "Restart requires exactly one explicit --all or --instance selector. Listing is the default action.",
+              "Instance restart requires exactly one explicit --all or --instance selector. Listing is the default action.",
               "Cleanup removes only safely confirmed stale records and endpoints; it supports --profile NAME and --json.",
               "/ompi restore [NAME] or --slot ID selects a managed recovery slot, prepares a shell command, and confirms graceful exit.",
               "/ompi restore save NAME [--instance FULL_ID] [--profile NAME] creates an optional immutable name.",
@@ -996,7 +1031,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         }
         if (action === "take-over") {
           if (getRuntime()) {
-            throw new Error("This session already runs under ompi; use /ompi instances restart.")
+            throw new Error("This session already runs under ompi; use /ompi restart.")
           }
           const command = await prepareTakeover(ctx)
           const confirmed = await ctx.ui.confirm(
@@ -1015,6 +1050,15 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
 
           pi.appendEntry("ompi-take-over", { command })
           ctx.shutdown()
+          return
+        }
+
+        if (action === "restart-wrapper") {
+          await requestWrapperRestart(getRuntime())
+          ctx.ui.notify(
+            "Wrapper restart accepted. OMP will shut down at a safe boundary; the owning ompi launcher will replace it.",
+            "info"
+          )
           return
         }
 

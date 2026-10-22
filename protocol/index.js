@@ -56,10 +56,10 @@ export function validateRequest(value) {
   ) {
     throw new ProtocolError("INVALID_REQUEST", "Expected a bounded nonempty request identifier.")
   }
-  if (value.action !== "status" && value.action !== "restart") {
+  if (!["status", "restart", "restart-wrapper"].includes(value.action)) {
     throw new ProtocolError(
       "UNSUPPORTED_ACTION",
-      "Only status and restart are supported; resource-only reload is unavailable."
+      "Only status, restart, and restart-wrapper are supported; resource-only reload is unavailable."
     )
   }
   return value

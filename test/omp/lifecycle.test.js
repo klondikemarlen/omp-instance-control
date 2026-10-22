@@ -201,6 +201,7 @@ test("when restart arrives before the first saved response, it waits for persist
     assert.equal(shutdowns, 1)
     assert.equal(shutdownsAfterPersistence, 1)
     assert.equal(handoff.operationId, request.requestId)
+    assert.equal(handoff.restartWrapper, undefined)
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
     for (const [key, value] of Object.entries(previous)) {
@@ -211,7 +212,103 @@ test("when restart arrives before the first saved response, it waits for persist
   }
 })
 
-test("when an explicit matching exit arrives after restart acceptance, shutdown does not hand off", async () => {
+test("when wrapper restart is pending, a child-only request cannot downgrade its handoff", async () => {
+  // Arrange
+  const root = await mkdtemp(path.join(tmpdir(), "ic-wrapper-restart-"))
+  const launchDirectory = path.join(root, "launch")
+  await mkdir(launchDirectory, { mode: 0o700 })
+  const scope = getScope({ env: { HOME: root } })
+  const token = "8".repeat(32)
+  const sessionFile = path.join(root, "wrapper-session.jsonl")
+  await writeFile(sessionFile, '{"type":"session","id":"wrapper-session"}\n', { mode: 0o600 })
+  await writePrivateJson(path.join(launchDirectory, "launch.json"), {
+    version: 1,
+    token,
+    pid: process.ppid,
+    scope,
+    extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
+    canRestartWrapper: true,
+    lastRestart: null,
+    builtinFlags: [],
+  })
+  const environment = {
+    HOME: root,
+    PI_CONFIG_DIR: path.join(root, ".omp"),
+    PI_CODING_AGENT_DIR: path.join(root, ".omp", "agent"),
+    OMP_PROFILE: "",
+    PI_PROFILE: "",
+    XDG_RUNTIME_DIR: root,
+    OMP_INSTANCE_CONTROL_LAUNCH_DIR: launchDirectory,
+    OMP_INSTANCE_CONTROL_LAUNCH_TOKEN: token,
+  }
+  const previous = Object.fromEntries(
+    Object.keys(environment).map((key) => [key, process.env[key]])
+  )
+  Object.assign(process.env, environment)
+  const handlers = new Map()
+  const events = createEventBus()
+  const shutdownRequested = Promise.withResolvers()
+  const ctx = {
+    agent: { kind: "main" },
+    mode: "tui",
+    cwd: root,
+    sessionManager: {
+      getSessionId: () => "wrapper-session",
+      getSessionFile: () => sessionFile,
+    },
+    ui: {
+      setStatus() {},
+      notify(message) {
+        assert.fail(message)
+      },
+    },
+    shutdown() {
+      shutdownRequested.resolve()
+    },
+  }
+
+  try {
+    await instanceControl({
+      events,
+      pi: createSdk(),
+      runtime: { flagValues: new Map() },
+      on(event, handler) {
+        handlers.set(event, handler)
+      },
+      registerCommand() {},
+    })
+    await handlers.get("session_start")({}, ctx)
+    const transport = await createTransport(scope)
+    const [record] = await transport.readRecords()
+    const request = createRequest(record.instanceId, "restart-wrapper")
+
+    // Act
+    const accepted = await transport.request(record, request)
+    await shutdownRequested.promise
+    const conflicting = await transport.request(record, createRequest(record.instanceId, "restart"))
+    await handlers.get("session_shutdown")({}, ctx)
+    const handoff = JSON.parse(await readFile(path.join(launchDirectory, "handoff.json"), "utf8"))
+
+    // Assert
+    assert.equal(accepted.ok, true)
+    assert.equal(accepted.requestId, request.requestId)
+    assert.equal(accepted.data.operationId, request.requestId)
+    assert.equal(conflicting.ok, false)
+    assert.equal(conflicting.error.code, "RESTART_ALREADY_PENDING")
+    assert.equal(handoff.operationId, request.requestId)
+    assert.equal(handoff.instanceId, record.instanceId)
+    assert.equal(handoff.restartWrapper, true)
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx)
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("when an explicit matching exit arrives after restart acceptance, wrapper restart is rejected", async () => {
   // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-exit-precedence-"))
   const launchDirectory = path.join(root, "launch")
@@ -226,6 +323,7 @@ test("when an explicit matching exit arrives after restart acceptance, shutdown 
     pid: process.ppid,
     scope,
     extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
+    canRestartWrapper: true,
     lastRestart: null,
     builtinFlags: [],
   })
@@ -282,6 +380,10 @@ test("when an explicit matching exit arrives after restart acceptance, shutdown 
     events.emit("omp-exit-command:exit-requested", { sessionId: "exit-session" })
     const status = await transport.request(record, createRequest(record.instanceId, "status"))
     const rejected = await transport.request(record, createRequest(record.instanceId, "restart"))
+    const rejectedWrapper = await transport.request(
+      record,
+      createRequest(record.instanceId, "restart-wrapper")
+    )
     await handlers.get("session_shutdown")({}, ctx)
 
     // Assert
@@ -290,6 +392,8 @@ test("when an explicit matching exit arrives after restart acceptance, shutdown 
     assert.equal(status.data.canRestart, false)
     assert.equal(rejected.ok, false)
     assert.equal(rejected.error.code, "EXPLICIT_EXIT_REQUESTED")
+    assert.equal(rejectedWrapper.ok, false)
+    assert.equal(rejectedWrapper.error.code, "EXPLICIT_EXIT_REQUESTED")
     await assert.rejects(readFile(path.join(launchDirectory, "handoff.json")), { code: "ENOENT" })
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
