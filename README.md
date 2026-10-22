@@ -10,7 +10,7 @@ OMP owns settlement, transcript persistence, and graceful teardown. The native G
 - An interactive terminal for participating sessions; a persisted session for restart/resume.
 - OMP 18.8.7 is the initial verification target. Lifecycle actions use public extension APIs; one read-only private flag-metadata boundary is documented below.
 
-The `ompi` executable is statically linked and does not require Node.js. OMP loads the shipped JavaScript adapter using its own runtime. macOS and Windows are not supported. Resource-only reload and automatic package/executable upgrades are not implemented.
+The `ompi` executable is statically linked and does not require Node.js. OMP loads the shipped JavaScript adapter using its own runtime. macOS and Windows are not supported. Resource-only reload, automatic package installation, and background binary-update detection are not implemented.
 
 ## Installation
 
@@ -76,9 +76,14 @@ Human-facing lists show short display IDs, current state, the final two project-
 
 Use `ompi instances restart --all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
+Inside a managed session, `/ompi restart` restarts that terminal's native `ompi` wrapper as well as OMP. After OMP settles and exits successfully, the wrapper executes its installed replacement, reloads the adapter, and resumes the exact current transcript and working directory. Other terminals are not selected. The recovery slot and its lock survive native replacement; a fresh control identity identifies the new OMP launch.
+
+This is explicit adoption of code already installed on disk, not live code patching or package installation. Start one fresh `ompi` launcher after upgrading from a version before 0.11.0: older wrappers cannot acquire the native replacement protocol merely by reloading their adapter. Ordinary unwrapped OMP and older launchers refuse `/ompi restart` before shutdown. Existing `instances restart` commands continue to restart only OMP under the current wrapper.
+
 From OMP with the plugin loaded:
 
 ```text
+/ompi restart
 /ompi instances
 /ompi instances list --json
 /ompi instances restart --instance FULL_INSTANCE_ID
@@ -89,7 +94,7 @@ From OMP with the plugin loaded:
 /ompi instances --version
 ```
 
-Both surfaces expose `list`, `restart`, and `cleanup`, with five control options: `--all`, `--instance ID`, `--profile NAME`, `--json`, and `--no-wait`. `instances` defaults to listing; restart requires an explicit selector. Cleanup accepts only `--profile` and `--json` (plus help/version). Control-command `--cwd` and `--timeout` are removed; standard OMP launch arguments, including `--cwd`, are unchanged.
+The `instances` group on both surfaces exposes `list`, `restart`, and `cleanup`, with five control options: `--all`, `--instance ID`, `--profile NAME`, `--json`, and `--no-wait`. `instances` defaults to listing; instance restart requires an explicit selector. Cleanup accepts only `--profile` and `--json` (plus help/version). Control-command `--cwd` and `--timeout` are removed; standard OMP launch arguments, including `--cwd`, are unchanged.
 
 Inside OMP, peer restart waits with animated, themed progress, elapsed time, and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
 
