@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.0 - 2026-10-23
+
+### Changed
+
+- Replace the native `ompi` wrapper as well as OMP for every restart target, including explicit IDs/prefixes and `all` on both command surfaces. After installing an update, one scoped batch can adopt the installed wrapper while preserving each conversation, cwd, profile and recovery slot.
+- Refuse unsupported launchers before shutdown instead of silently restarting only OMP; supported peers in the same batch still restart independently.
+
 ## 0.13.0 - 2026-10-23
 
 ### Added
