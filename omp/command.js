@@ -858,8 +858,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
             restart: [
               "Usage: /ompi restart [ID|all] [--profile NAME] [--json] [--no-wait]",
               "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
-              "With no target, restart this terminal through its owning wrapper.",
-              "With an ID or all, request peer restarts; Ctrl-C stops watching, not accepted requests.",
+              "Every target replaces its native ompi wrapper and OMP using the installed code.",
+              "With no target, select only this terminal. Ctrl-C stops watching, not accepted requests.",
             ],
             cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
             restore: [

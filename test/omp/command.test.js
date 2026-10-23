@@ -429,7 +429,7 @@ test("when an explicit restart target is selected, peer options remain available
     assert.equal(rows.length, 1)
     assert.equal(rows[0].instanceId, peerId)
     assert.equal(rows[0].status, "accepted")
-    assert.equal(peer.requests.filter((request) => request.action === "restart").length, 1)
+    assert.equal(peer.requests.filter((request) => request.action === "restart-wrapper").length, 1)
   } finally {
     await fixture.close()
   }
@@ -490,8 +490,8 @@ test("when a broadcast selects this session, restart returns pending without obs
         [peerId, "accepted"],
       ].sort()
     )
-    assert.equal(self.requests.filter((request) => request.action === "restart").length, 1)
-    assert.equal(peer.requests.filter((request) => request.action === "restart").length, 1)
+    assert.equal(self.requests.filter((request) => request.action === "restart-wrapper").length, 1)
+    assert.equal(peer.requests.filter((request) => request.action === "restart-wrapper").length, 1)
   } finally {
     await fixture.close()
   }
@@ -551,7 +551,7 @@ test("when a scoped prefix selects this session, restart returns acceptance with
     assert.equal(rows[0].instanceId, selfId)
     assert.equal(rows[0].status, "accepted")
     assert.equal(self.requests[0].instanceId, selfId)
-    assert.equal(self.requests[0].action, "restart")
+    assert.equal(self.requests[0].action, "restart-wrapper")
     assert.deepEqual(otherProfilePeer.requests, [])
   } finally {
     await fixture.close()
@@ -606,7 +606,7 @@ test("when Ctrl-C cancels peer observation, accepted restart remains pending", a
     assert.equal(rows.length, 1)
     assert.equal(rows[0].instanceId, peerId)
     assert.equal(rows[0].status, "waiting")
-    assert.equal(peer.requests.filter((request) => request.action === "restart").length, 1)
+    assert.equal(peer.requests.filter((request) => request.action === "restart-wrapper").length, 1)
   } finally {
     await fixture.close()
   }
@@ -628,6 +628,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
     pid: process.ppid,
     scope,
     extensionPath: entryPath,
+    canRestartWrapper: true,
     lastRestart: null,
     builtinFlags: [],
   })

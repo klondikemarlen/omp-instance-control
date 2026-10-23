@@ -39,7 +39,7 @@ function liveStatus(record, lastRestart = record.lastRestart) {
   }
 }
 
-test("waits for a correlated replacement that reuses the original PID without replaying restart", async () => {
+test("when a correlated replacement reuses the original PID, observation completes without replaying restart", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)
   const replacement = makeRecord(REPLACEMENT_ID, original.pid, {
@@ -54,7 +54,7 @@ test("waits for a correlated replacement that reuses the original PID without re
     },
     async request(record, request) {
       sentActions.push(request.action)
-      if (request.action === "restart") {
+      if (request.action === "restart-wrapper") {
         restartAccepted = true
         return { ok: true, data: { state: "accepted", operationId: OPERATION_ID } }
       }
@@ -73,13 +73,13 @@ test("waits for a correlated replacement that reuses the original PID without re
   })
 
   // Assert
-  assert.deepEqual(sentActions, ["restart", "status"])
+  assert.deepEqual(sentActions, ["restart-wrapper", "status"])
   assert.deepEqual(progressStatuses, ["waiting", "restarted"])
   assert.equal(rows[0].status, "restarted")
   assert.equal(rows[0].data.instanceId, replacement.instanceId)
 })
 
-test("does not recognize a replacement record with mismatched restart metadata", async () => {
+test("when replacement metadata does not match, observation ignores the unrelated record", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)
   const unrelatedRecord = makeRecord(REPLACEMENT_ID, 43, {
@@ -117,7 +117,7 @@ test("does not recognize a replacement record with mismatched restart metadata",
   assert.equal(statusRequests, 0)
 })
 
-test("treats a closing replacement endpoint as a transient teardown phase", async () => {
+test("when a replacement endpoint is closing, observation treats it as transient teardown", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)
   const replacement = makeRecord(REPLACEMENT_ID, 43, {
@@ -156,7 +156,7 @@ test("treats a closing replacement endpoint as a transient teardown phase", asyn
   assert.equal(statusRequests, 1)
 })
 
-test("rejects a live status whose restart metadata does not match its discovered record", async () => {
+test("when live status disagrees with discovered restart metadata, observation rejects it", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)
   const replacement = makeRecord(REPLACEMENT_ID, 43, {
@@ -169,7 +169,7 @@ test("rejects a live status whose restart metadata does not match its discovered
       return restartAccepted ? [replacement] : [original]
     },
     async request(_record, request) {
-      if (request.action === "restart") {
+      if (request.action === "restart-wrapper") {
         restartAccepted = true
         return { ok: true, data: { state: "accepted", operationId: OPERATION_ID } }
       }
@@ -191,7 +191,7 @@ test("rejects a live status whose restart metadata does not match its discovered
   assert.equal(rows[0].status, "unknown")
 })
 
-test("cancellation interrupts a pending replacement probe and preserves progress", async () => {
+test("when observation is cancelled, a pending replacement probe stops and progress is preserved", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)
   const replacement = makeRecord(REPLACEMENT_ID, 43, {
@@ -230,7 +230,7 @@ test("cancellation interrupts a pending replacement probe and preserves progress
   assert.equal(latestProgress[0].status, "restarting")
 })
 
-test("does not poll failed or unknown restart acknowledgements", async () => {
+test("when restart acknowledgements fail or remain unknown, observation does not poll them", async () => {
   // Arrange
   const first = makeRecord(ORIGINAL_ID, 42)
   const second = makeRecord(REPLACEMENT_ID, 43)
@@ -256,8 +256,8 @@ test("does not poll failed or unknown restart acknowledgements", async () => {
 
   // Assert
   assert.deepEqual(actions, [
-    [first.instanceId, "restart"],
-    [second.instanceId, "restart"],
+    [first.instanceId, "restart-wrapper"],
+    [second.instanceId, "restart-wrapper"],
   ])
   assert.equal(recordReads, 1)
 })

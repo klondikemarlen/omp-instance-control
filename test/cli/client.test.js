@@ -40,7 +40,7 @@ test("when one instance is selected, restart dispatches only to that snapshot me
   const result = await restartInstances(client, { instanceId: second.instanceId })
 
   // Assert
-  assert.deepEqual(sent, [[second.instanceId, "restart"]])
+  assert.deepEqual(sent, [[second.instanceId, "restart-wrapper"]])
   assert.equal(result[0].status, "accepted")
   assert.equal(result[0].instanceId, second.instanceId)
 })
@@ -102,9 +102,14 @@ test("when a longer prefix selects one of several instances, restart uses its fu
 
 test("when broadcasting, rejection remains distinct from an inconclusive acknowledgement", async () => {
   // Arrange
-  const client = transport([first, second], async (record) => {
+  const sent = []
+  const client = transport([first, second], async (record, request) => {
+    sent.push([record.instanceId, request.action])
     if (record.instanceId === first.instanceId) {
-      return { ok: false, error: { code: "NOT_RESTARTABLE", message: "No persisted session." } }
+      return {
+        ok: false,
+        error: { code: "WRAPPER_RESTART_UNAVAILABLE", message: "Start a fresh ompi launcher." },
+      }
     }
     throw Object.assign(new Error("response timed out"), { code: "ETIMEDOUT", ambiguous: true })
   })
@@ -114,8 +119,12 @@ test("when broadcasting, rejection remains distinct from an inconclusive acknowl
 
   // Assert
   assert.equal(rows[0].status, "failed")
-  assert.equal(rows[0].errorCode, "NOT_RESTARTABLE")
+  assert.equal(rows[0].errorCode, "WRAPPER_RESTART_UNAVAILABLE")
   assert.equal(rows[1].status, "unknown")
+  assert.deepEqual(sent, [
+    [first.instanceId, "restart-wrapper"],
+    [second.instanceId, "restart-wrapper"],
+  ])
 })
 
 test("when restart fails, output identifies its project without injecting terminal controls", async () => {
