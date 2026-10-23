@@ -79,12 +79,24 @@ func RestartInstances(transport Transport, all bool, instanceID string) ([]Row, 
 	}
 	selected := records
 	if !all {
-		selected = nil
+		matchIndex := -1
 		for index := range records {
-			if records[index].InstanceID == instanceID {
-				selected = records[index : index+1]
-				break
+			if !strings.HasPrefix(records[index].InstanceID, instanceID) {
+				continue
 			}
+			if matchIndex >= 0 {
+				return []Row{{
+					InstanceID: instanceID,
+					Status:     "failed",
+					Error:      "Instance ID prefix matches multiple instances; use a longer ID.",
+					ErrorCode:  "AMBIGUOUS_INSTANCE",
+				}}, nil
+			}
+			matchIndex = index
+		}
+		selected = nil
+		if matchIndex >= 0 {
+			selected = records[matchIndex : matchIndex+1]
 		}
 	}
 	if len(selected) == 0 {

@@ -16,6 +16,8 @@ Give an operator or another OMP instance an explicit way to request safe restart
 
 A control endpoint belongs to a main interactive launch, not a subagent or persisted transcript. Instance identity changes on every boot, including native POSIX restart that can retain the PID. A launcher token binds a handoff to one child launch; it is not a network credential.
 
+A user-facing restart selector may be a unique lowercase hexadecimal prefix of the current instance ID. The client resolves it against one profile/config-root-scoped discovery snapshot, retaining stale registrations when checking ambiguity. No lifecycle request is sent until exactly one record matches; protocol requests, result identities, and restart correlation continue using full 32-character IDs. A session ID identifies the persisted conversation instead and is not a restart selector.
+
 ## Settled Restart Handoff
 
 1. The client reads a profile/config-root-scoped snapshot and sends one request per selected instance.
@@ -91,7 +93,7 @@ The map contains values, not every registration: unused flags without defaults a
 
 This is a private metadata dependency, not a supported host API. Lifecycle actions still use public `ctx.shutdown()`. Remove the guard when OMP supplies public parsed-flag metadata or owns restart argument selection; do not extend the exception to other internals.
 
-`ompi` is an additive native wrapper, not a replacement OMP runtime. Standard commands and arguments pass to the installed `omp`; `instances` and `restore` provide the additional control and recovery interfaces. The JavaScript adapter remains host-loaded package data. Temporary relaunch/argv, adapter, and discovery responsibilities have separate [upstream removal criteria](README.md#temporary-ownership-and-upstream-removal). Remove each when the corresponding supported OMP contract preserves its invariants; remove the wrapper entirely when standard OMP covers the complete outcome.
+`ompi` is an additive native wrapper, not a replacement OMP runtime. Standard commands and arguments pass to the installed `omp`; the reserved `control` namespace provides additional control and recovery interfaces, while `/ompi` exposes them directly inside OMP. The JavaScript adapter remains host-loaded package data. Temporary relaunch/argv, adapter, and discovery responsibilities have separate [upstream removal criteria](README.md#temporary-ownership-and-upstream-removal). Remove each when the corresponding supported OMP contract preserves its invariants; remove the wrapper entirely when standard OMP covers the complete outcome.
 
 ## Platform Scope
 

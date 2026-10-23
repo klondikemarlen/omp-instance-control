@@ -60,7 +60,7 @@ From another terminal:
 
 ```bash
 ompi control list
-ompi control restart FULL_INSTANCE_ID
+ompi control restart INSTANCE_ID_OR_PREFIX
 ompi control restart all
 ompi control list --profile work --json
 ompi control cleanup
@@ -72,7 +72,7 @@ External restart waits until every accepted target has a verified live replaceme
 
 Long project paths shorten from the left to retain the project-name ending; duplicate working directories show a short session suffix. Failed restart rows retain the original project/session record, including in JSON. Pending guidance means OMP has not yet shut down; active turns, queued submissions, and background work can defer settlement. The helper cannot identify the exact host-side blocker from the public lifecycle API and does not impose a deadline or force shutdown. Unreachable records get an explicit cleanup command, not automatic removal.
 
-Human-facing lists show short display IDs, current state, the final two project-path components, concise connection failures, and a small annotation for a previous completed restart. These display IDs are not abbreviated selectors: use `--json` or in-OMP Tab completion for full IDs. JSON retains full paths, restart correlation, and raw diagnostics. Partial-failure warnings distinguish unreachable registrations from reachable instances.
+Human-facing lists show short instance IDs, current state, the final two project-path components, concise connection failures, and a small annotation for a previous completed restart. The short ID shown in a list or the OMP status line can select that instance: for example, `ompi control restart 906e493e` or `/ompi restart 906e493e`. Any nonempty lowercase hexadecimal prefix up to the full 32-character ID is accepted when it matches exactly one registration in the selected profile/config scope. Ambiguous prefixes restart nothing; use a longer prefix or the full ID. Stale registrations also count toward ambiguity. These are current control-instance IDs, not persisted conversation/session IDs; they change after relaunch. JSON and autocomplete retain full IDs, paths, restart correlation, and diagnostics. Partial-failure warnings distinguish unreachable registrations from reachable instances.
 
 Use `ompi control restart all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
@@ -84,7 +84,7 @@ From OMP with the plugin loaded:
 
 ```text
 /ompi restart
-/ompi restart FULL_INSTANCE_ID
+/ompi restart INSTANCE_ID_OR_PREFIX
 /ompi restart all
 /ompi list
 /ompi list --profile work
@@ -95,7 +95,7 @@ From OMP with the plugin loaded:
 /ompi version
 ```
 
-Restart targets are positional: omit the target inside OMP for the invoking managed instance, use a full instance ID for one peer, or `all` for a scoped snapshot. Bash requires an explicit target and never guesses a current instance. `list` and `cleanup` accept `--profile NAME` and `--json`; explicit-target restart also accepts `--no-wait`. Word-based `help [COMMAND]` explains each command, and `version` reports controller metadata. Recovery retains its own options below. The old `ompi instances …`, root `ompi restore …`, `/ompi instances …`, and restart `--all`/`--instance` forms are removed, not aliased; migrate shell calls to `ompi control …` and slash calls to the flat commands above. Standard OMP launch arguments, including `--cwd`, are unchanged.
+Restart targets are positional: omit the target inside OMP for the invoking managed instance, use a full instance ID or unique prefix for one peer, or `all` for a scoped snapshot. Bash requires an explicit target and never guesses a current instance. `list` and `cleanup` accept `--profile NAME` and `--json`; explicit-target restart also accepts `--no-wait`. Word-based `help [COMMAND]` explains each command, and `version` reports controller metadata. Recovery retains its own options below. The old `ompi instances …`, root `ompi restore …`, `/ompi instances …`, and restart `--all`/`--instance` forms are removed, not aliased; migrate shell calls to `ompi control …` and slash calls to the flat commands above. Standard OMP launch arguments, including `--cwd`, are unchanged.
 
 Inside OMP, peer restart waits with animated, themed progress, elapsed time, and Ctrl-C cancellation. A selection containing the invoking wrapped session returns accepted/pending immediately for the entire snapshot: waiting for its own relaunch would prevent shutdown. `--no-wait` works on both surfaces. Use it when invoking the external command as an OMP tool in a selected session.
 
@@ -234,7 +234,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.12.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.13.0~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.

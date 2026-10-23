@@ -38,10 +38,23 @@ export async function restartInstances(transport, { all = false, instanceId } = 
   }
 
   const records = await transport.readRecords()
-  const selected = all ? records : records.filter((record) => record.instanceId === instanceId)
+  const selected = all
+    ? records
+    : records.filter((record) => record.instanceId.startsWith(instanceId))
 
   if (selected.length === 0) {
     return [{ instanceId, status: "failed", error: "No matching instance found." }]
+  }
+
+  if (!all && selected.length > 1) {
+    return [
+      {
+        instanceId,
+        status: "failed",
+        errorCode: "AMBIGUOUS_INSTANCE",
+        error: "Instance ID prefix matches multiple instances; use a longer ID.",
+      },
+    ]
   }
 
   return Promise.all(

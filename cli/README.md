@@ -2,7 +2,7 @@
 
 Own instance selection, explicit profile/config-root scope, request dispatch, and truthful per-instance outcome reporting. Another OMP instance should use the same client behavior rather than a second broadcast implementation.
 
-`client.go` and the adapter's `client.js` select a snapshot through a platform transport, never future replacement instances. They report accepted, failed, unreachable, and unknown outcomes without automatic replay; status includes the replacement's completed-operation metadata. Linux socket paths do not belong in shared client behavior.
+`client.go` and the adapter's `client.js` select a snapshot through a platform transport, never future replacement instances. Single-instance restart resolves a unique ID prefix against that complete scoped snapshot before dispatch; multiple matches, including stale registrations, fail without sending requests. Requests and successful result rows retain the selected full instance ID so lifecycle correlation and self-selection use the real identity. Clients report accepted, failed, unreachable, and unknown outcomes without automatic replay; status includes the replacement's completed-operation metadata. Linux socket paths do not belong in shared client behavior.
 
 `restart_wait.go` and `restart-wait.js` observe accepted operations with read-only status requests and verify a live replacement against both the original instance ID and accepted operation ID. Connection-close and missing-endpoint transitions remain pending; cancellation stops only observation. Native requests accept a context; JavaScript requests accept an AbortSignal so blocked probes can be cancelled without waiting for their socket deadline.
 

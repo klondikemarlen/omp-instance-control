@@ -23,6 +23,8 @@ const controlHelp = `Usage:
   ompi control cleanup [--profile NAME] [--json]
   ompi control restore ...
 
+Restart IDs may be unique lowercase hexadecimal prefixes.
+
 Restart argv replays recognized OMP options but not startup prompts. Unknown
 long options followed by a value-like token disable automatic restart unless
 written with an explicit --option=value form.
@@ -89,7 +91,7 @@ func runControl(args []string) (int, error) {
 		case "list":
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
-			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]")
+			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.")
 		case "cleanup":
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		case "restore":
@@ -169,7 +171,7 @@ func runControlAction(args []string) (int, error) {
 		case "list":
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
-			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]")
+			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.")
 		case "cleanup":
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		}
@@ -224,8 +226,8 @@ func parseRestartTarget(positionals []string) (bool, string, error) {
 	if instanceID == "all" {
 		return true, "", nil
 	}
-	if err := protocol.ValidateInstanceID(instanceID); err != nil {
-		return false, "", fmt.Errorf("invalid restart ID: %w", err)
+	if len(instanceID) == 0 || len(instanceID) > 32 || strings.Trim(instanceID, "0123456789abcdef") != "" {
+		return false, "", errors.New("invalid restart ID: use 1-32 lowercase hexadecimal characters")
 	}
 	return false, instanceID, nil
 }

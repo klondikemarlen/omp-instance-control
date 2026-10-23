@@ -42,6 +42,62 @@ test("when one instance is selected, restart dispatches only to that snapshot me
   // Assert
   assert.deepEqual(sent, [[second.instanceId, "restart"]])
   assert.equal(result[0].status, "accepted")
+  assert.equal(result[0].instanceId, second.instanceId)
+})
+
+test("when a unique ID prefix is selected, restart dispatches the full snapshot ID", async () => {
+  // Arrange
+  const record = { ...first, instanceId: "906e493e".padEnd(32, "0") }
+  const client = transport([record, second], async (selectedRecord, request) => {
+    assert.equal(selectedRecord.instanceId, record.instanceId)
+    assert.equal(request.instanceId, record.instanceId)
+    return { ok: true, data: { state: "accepted" } }
+  })
+
+  // Act
+  const rows = await restartInstances(client, { instanceId: "906e493e" })
+
+  // Assert
+  assert.equal(rows[0].instanceId, record.instanceId)
+  assert.equal(rows[0].status, "accepted")
+})
+
+test("when an ID prefix matches multiple records, restart rejects without dispatching", async () => {
+  // Arrange
+  const stale = { ...first, instanceId: "ab".padEnd(32, "1") }
+  const live = { ...second, instanceId: "ab".padEnd(32, "2") }
+  const client = transport([stale, live], async () => assert.fail("must not send a request"))
+
+  // Act
+  const rows = await restartInstances(client, { instanceId: "ab" })
+
+  // Assert
+  assert.deepEqual(rows, [
+    {
+      instanceId: "ab",
+      status: "failed",
+      errorCode: "AMBIGUOUS_INSTANCE",
+      error: "Instance ID prefix matches multiple instances; use a longer ID.",
+    },
+  ])
+})
+
+test("when a longer prefix selects one of several instances, restart uses its full ID", async () => {
+  // Arrange
+  const selected = { ...first, instanceId: "abcdef".padEnd(32, "0") }
+  const other = { ...second, instanceId: "abc999".padEnd(32, "0") }
+  let dispatched
+  const client = transport([selected, other], async (record) => {
+    dispatched = record.instanceId
+    return { ok: true, data: { state: "accepted" } }
+  })
+
+  // Act
+  const rows = await restartInstances(client, { instanceId: "abcd" })
+
+  // Assert
+  assert.equal(dispatched, selected.instanceId)
+  assert.equal(rows[0].instanceId, selected.instanceId)
 })
 
 test("when broadcasting, rejection remains distinct from an inconclusive acknowledgement", async () => {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0 - 2026-10-23
+
+### Added
+
+- Restart a terminal using the short instance ID shown in its OMP status line or an instance list: `ompi control restart PREFIX` and `/ompi restart PREFIX` accept unique lowercase hexadecimal prefixes within the selected profile/config scope.
+- Refuse ambiguous prefixes without restarting any instance; use a longer prefix or full ID to select the intended terminal. Restart requests and completion observation continue using full identities.
+
 ## 0.12.0 - 2026-10-22
 
 ### Changed

@@ -1,3 +1,11 @@
+omp-instance-control (0.13.0~ppa1) resolute; urgency=medium
+
+  * Restart scoped instances with the short IDs displayed in terminal status.
+  * Refuse ambiguous prefixes before sending lifecycle requests.
+  * Preserve full wire identities, profile isolation and restart correlation.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 23 Oct 2026 07:42:41 -0700
+
 omp-instance-control (0.12.0~ppa1) resolute; urgency=medium
 
   * Isolate Bash controls under ompi control and flatten /ompi commands.
