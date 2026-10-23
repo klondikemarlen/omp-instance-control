@@ -58,7 +58,7 @@ func TestRestartBroadcastUsesOnlyInitialSnapshot(t *testing.T) {
 		records:     []protocol.Record{first, second},
 		replacement: replacement,
 		respond: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
-			if request.Action != "restart" || request.InstanceID != record.InstanceID {
+			if request.Action != "restart-wrapper" || request.InstanceID != record.InstanceID {
 				t.Errorf("request did not target its snapshot record: record=%q request=%#v", record.InstanceID, request)
 			}
 			return protocol.Response{OK: true, Data: &protocol.Data{State: "accepted"}}, nil
@@ -103,7 +103,7 @@ func TestRestartAcceptsUniquePrefixesAndReturnsFullIdentity(t *testing.T) {
 			transport := &testTransport{
 				records: []protocol.Record{first, second, third},
 				respond: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
-					if request.Action != "restart" || request.InstanceID != testCase.wantID || record.InstanceID != testCase.wantID {
+					if request.Action != "restart-wrapper" || request.InstanceID != testCase.wantID || record.InstanceID != testCase.wantID {
 						t.Errorf("request did not target the full matching ID: record=%q request=%#v", record.InstanceID, request)
 					}
 					return protocol.Response{OK: true, Data: &protocol.Data{State: "accepted"}}, nil

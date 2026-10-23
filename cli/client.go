@@ -119,7 +119,7 @@ func RestartInstances(transport Transport, all bool, instanceID string) ([]Row, 
 }
 
 func restartRecord(ctx context.Context, transport Transport, record protocol.Record) Row {
-	request, err := protocol.CreateRequest(record.InstanceID, "restart")
+	request, err := protocol.CreateRequest(record.InstanceID, "restart-wrapper")
 	if err != nil {
 		return Row{Record: &record, InstanceID: record.InstanceID, Status: "failed", Error: err.Error()}
 	}

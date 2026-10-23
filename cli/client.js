@@ -62,7 +62,7 @@ export async function restartInstances(transport, { all = false, instanceId } = 
       try {
         const response = await transport.request(
           record,
-          createRequest(record.instanceId, "restart")
+          createRequest(record.instanceId, "restart-wrapper")
         )
         if (!response.ok) {
           return {
