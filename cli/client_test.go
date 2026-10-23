@@ -86,6 +86,83 @@ func TestRestartBroadcastUsesOnlyInitialSnapshot(t *testing.T) {
 	}
 }
 
+func TestRestartAcceptsUniquePrefixesAndReturnsFullIdentity(t *testing.T) {
+	first := clientRecord("123456789" + strings.Repeat("a", 23))
+	second := clientRecord("12345678a" + strings.Repeat("b", 23))
+	third := clientRecord("abcdef012" + strings.Repeat("c", 23))
+	for _, testCase := range []struct {
+		name     string
+		selector string
+		wantID   string
+	}{
+		{name: "displayed eight-character prefix", selector: "abcdef01", wantID: third.InstanceID},
+		{name: "longer prefix", selector: "123456789", wantID: first.InstanceID},
+		{name: "full ID", selector: second.InstanceID, wantID: second.InstanceID},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			transport := &testTransport{
+				records: []protocol.Record{first, second, third},
+				respond: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+					if request.Action != "restart" || request.InstanceID != testCase.wantID || record.InstanceID != testCase.wantID {
+						t.Errorf("request did not target the full matching ID: record=%q request=%#v", record.InstanceID, request)
+					}
+					return protocol.Response{OK: true, Data: &protocol.Data{State: "accepted"}}, nil
+				},
+			}
+			rows, err := RestartInstances(transport, false, testCase.selector)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].Status != "accepted" || rows[0].InstanceID != testCase.wantID ||
+				rows[0].Record == nil || rows[0].Record.InstanceID != testCase.wantID {
+				t.Fatalf("restart result did not retain the full matching ID: %#v", rows)
+			}
+
+			transport.mu.Lock()
+			defer transport.mu.Unlock()
+			if transport.readCount != 1 {
+				t.Fatalf("restart reread discovery %d times, want one snapshot", transport.readCount)
+			}
+			if len(transport.requested) != 1 || transport.requested[0] != testCase.wantID {
+				t.Fatalf("restart requests = %q, want only %q", transport.requested, testCase.wantID)
+			}
+		})
+	}
+}
+
+func TestRestartAmbiguousPrefixMakesNoRequests(t *testing.T) {
+	first := clientRecord("deadbeef0" + strings.Repeat("a", 23))
+	stale := clientRecord("deadbeef1" + strings.Repeat("b", 23))
+	transport := &testTransport{
+		records: []protocol.Record{first, stale},
+		respond: func(record protocol.Record, _ protocol.Request) (protocol.Response, error) {
+			if record.InstanceID == stale.InstanceID {
+				return protocol.Response{}, syscall.ENOENT
+			}
+			return protocol.Response{OK: true}, nil
+		},
+	}
+
+	rows, err := RestartInstances(transport, false, "deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Status != "failed" || rows[0].InstanceID != "deadbeef" ||
+		rows[0].ErrorCode != "AMBIGUOUS_INSTANCE" ||
+		rows[0].Error != "Instance ID prefix matches multiple instances; use a longer ID." {
+		t.Fatalf("ambiguous prefix result = %#v", rows)
+	}
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	if transport.readCount != 1 {
+		t.Fatalf("ambiguous restart read discovery %d times, want one snapshot", transport.readCount)
+	}
+	if len(transport.requested) != 0 {
+		t.Fatalf("ambiguous restart sent requests for %q", transport.requested)
+	}
+}
+
 func TestRestartSelectionAndOutcomeClassification(t *testing.T) {
 	first := clientRecord(strings.Repeat("a", 32))
 	second := clientRecord(strings.Repeat("b", 32))

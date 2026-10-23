@@ -338,8 +338,10 @@ function parseOmpiArguments(args) {
       }
       return { action: "restart-wrapper", values: parsed.values, present }
     }
-    if (target !== "all" && !/^[a-f0-9]{32}$/.test(target)) {
-      throw new Error("Restart target must be 'all' or a full 32-character instance ID.")
+    if (target !== "all" && !/^[a-f0-9]{1,32}$/.test(target)) {
+      throw new Error(
+        "Restart target must be 'all' or a 1-32 character lowercase hexadecimal instance ID prefix."
+      )
     }
     return { action: "restart", target, values: parsed.values, present }
   }
@@ -855,6 +857,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
             list: ["Usage: /ompi list [--profile NAME] [--json]"],
             restart: [
               "Usage: /ompi restart [ID|all] [--profile NAME] [--json] [--no-wait]",
+              "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
               "With no target, restart this terminal through its owning wrapper.",
               "With an ID or all, request peer restarts; Ctrl-C stops watching, not accepted requests.",
             ],

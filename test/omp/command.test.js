@@ -435,6 +435,35 @@ test("when an explicit restart target is selected, peer options remain available
   }
 })
 
+test("when a slash restart prefix is ambiguous, no peer receives a request", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const scope = getScope({ cwd: ctx.cwd })
+    const first = await fixture.addPeer(scope, "ab".padEnd(32, "1"))
+    const second = await fixture.addPeer(scope, "ab".padEnd(32, "2"))
+    const ui = createCommand(ctx)
+
+    // Act
+    await ui.command.handler("restart ab --no-wait --json", ctx)
+
+    // Assert
+    assert.deepEqual(JSON.parse(ui.notifications[0].message), [
+      {
+        instanceId: "ab",
+        status: "failed",
+        errorCode: "AMBIGUOUS_INSTANCE",
+        error: "Instance ID prefix matches multiple instances; use a longer ID.",
+      },
+    ])
+    assert.deepEqual(first.requests, [])
+    assert.deepEqual(second.requests, [])
+  } finally {
+    await fixture.close()
+  }
+})
+
 test("when a broadcast selects this session, restart returns pending without observation", async () => {
   // Arrange
   const fixture = await createFixture()
@@ -495,6 +524,35 @@ test("when /ompi restart runs in a managed session, it targets only that instanc
     assert.equal(self.requests[0].instanceId, selfId)
     assert.deepEqual(peer.requests, [])
     assert.equal(notifications[0].level, "info")
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when a scoped prefix selects this session, restart returns acceptance without observation", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const defaultScope = getScope({ cwd: ctx.cwd })
+    const selectedScope = getScope({ cwd: ctx.cwd, profile: "work" })
+    const selfId = "906e493e".padEnd(32, "a")
+    const self = await fixture.addPeer(selectedScope, selfId)
+    const otherProfilePeer = await fixture.addPeer(defaultScope, selfId)
+    const ui = createCommand(ctx, {
+      runtime: { instanceId: selfId, launch: { scope: selectedScope } },
+    })
+
+    // Act
+    await ui.command.handler("restart 906e493e --profile work --json", ctx)
+
+    // Assert
+    const rows = JSON.parse(ui.notifications[0].message)
+    assert.equal(rows[0].instanceId, selfId)
+    assert.equal(rows[0].status, "accepted")
+    assert.equal(self.requests[0].instanceId, selfId)
+    assert.equal(self.requests[0].action, "restart")
+    assert.deepEqual(otherProfilePeer.requests, [])
   } finally {
     await fixture.close()
   }
