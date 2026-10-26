@@ -10,6 +10,8 @@ Current user-facing restart commands always send `restart-wrapper`, including sc
 
 Received response data is read-only. Native CLI JSON preserves the host payload's explicit nulls, absent capability fields, and unknown fields rather than synthesizing values from Go defaults.
 
+Status data may include `sendContext: {version, protocolVersion}` for the loaded Send Context plugin, or `null` when unverified. Its package version and routing protocol are independent of this control protocol's version, OMP, and the native wrapper. An older response without the field stays absent in JSON and renders as unknown in human-facing lists. Restart admission and completion correlation do not depend on plugin metadata.
+
 `canRestart` reports current persisted-session readiness. A persistent session may accept a restart while that flag is false because its first response has not materialized the allocated transcript yet. The operation remains `restart-requested` while waiting for persistence and OMP settlement; acceptance does not claim shutdown or completion.
 
 Recovery contracts describe persistent managed snapshots, optional name bindings, checkpoint membership, and review-only legacy entries. A checkpoint records which slots belonged to a recovery set; a slot's latest safe snapshot remains authoritative. Legacy entries have no managed owner and cannot be treated as launchable slots. Platform implementations validate private storage and process identities; CLI and host consumers preserve unavailable states rather than falling back to an older conversation.

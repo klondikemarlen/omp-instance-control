@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.0 - 2026-10-26
+
+### Added
+
+- Show each online instance's loaded Send Context version and routing protocol in `ompi control list` and `/ompi list`, with structured metadata under `data.sendContext` in JSON.
+- Keep missing, stale, unsafe, or older plugin metadata explicitly unknown. Version queries neither change context routing nor expose private bridge tokens.
+
 ## 0.14.0 - 2026-10-23
 
 ### Changed
