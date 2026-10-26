@@ -159,3 +159,42 @@ test("when listing a vanished endpoint, its outcome remains distinct from a live
   )
   assert.match(formatRows(rows), /\\u000apath/)
 })
+
+test("when status includes loaded Send Context metadata, listing shows its version and protocol", async () => {
+  // Arrange
+  const client = transport([first, second], async (record) => {
+    let data
+    if (record.instanceId === first.instanceId) {
+      data = { state: "running", sendContext: { version: "2.8.0", protocolVersion: 1 } }
+    } else {
+      data = { state: "running", sendContext: null }
+    }
+    return { ok: true, data }
+  })
+
+  // Act
+  const rows = await listInstances(client)
+
+  // Assert
+  assert.deepEqual(
+    rows.map((row) => row.data.sendContext),
+    [{ version: "2.8.0", protocolVersion: 1 }, null]
+  )
+  assert.match(formatRows(rows), /Send Context: 2\.8\.0 \(routing protocol 1\)/)
+  assert.match(formatRows(rows), /Send Context: unknown/)
+  assert.equal(Object.hasOwn(rows[0], "sendContext"), false)
+  assert.equal(JSON.parse(JSON.stringify(rows))[1].data.sendContext, null)
+})
+
+test("when older status data omits Send Context, listing keeps JSON and human output explicitly unknown", async () => {
+  // Arrange
+  const client = transport([first], async () => ({ ok: true, data: { state: "running" } }))
+
+  // Act
+  const rows = await listInstances(client)
+
+  // Assert
+  assert.equal(Object.hasOwn(rows[0].data, "sendContext"), false)
+  assert.match(formatRows(rows), /Send Context: unknown/)
+  assert.deepEqual(JSON.parse(JSON.stringify(rows))[0].data, { state: "running" })
+})

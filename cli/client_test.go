@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -242,6 +243,85 @@ func TestListDistinguishesUnreachableAndCorrelatedRejection(t *testing.T) {
 	}
 	if rows[0].Status != "unreachable" || rows[1].Status != "unreachable" || rows[2].Status != "failed" || rows[2].ErrorCode != "INSTANCE_CLOSING" {
 		t.Fatalf("list outcomes were not preserved: %#v", rows)
+	}
+}
+
+func TestListDisplaysLoadedSendContextAndKeepsUnknownExplicit(t *testing.T) {
+	first := clientRecord(strings.Repeat("a", 32))
+	second := clientRecord(strings.Repeat("b", 32))
+	third := clientRecord(strings.Repeat("c", 32))
+	var verifiedData protocol.Data
+	if err := json.Unmarshal([]byte(`{"state":"running","sendContext":{"version":"2.8.0","protocolVersion":1}}`), &verifiedData); err != nil {
+		t.Fatal(err)
+	}
+	var explicitUnknownData protocol.Data
+	if err := json.Unmarshal([]byte(`{"state":"running","sendContext":null}`), &explicitUnknownData); err != nil {
+		t.Fatal(err)
+	}
+	var absentData protocol.Data
+	if err := json.Unmarshal([]byte(`{"state":"running"}`), &absentData); err != nil {
+		t.Fatal(err)
+	}
+	transport := &testTransport{
+		records: []protocol.Record{first, second, third},
+		respond: func(record protocol.Record, _ protocol.Request) (protocol.Response, error) {
+			switch record.InstanceID {
+			case first.InstanceID:
+				return protocol.Response{OK: true, Data: &verifiedData}, nil
+			case second.InstanceID:
+				return protocol.Response{OK: true, Data: &explicitUnknownData}, nil
+			default:
+				return protocol.Response{OK: true, Data: &absentData}, nil
+			}
+		},
+	}
+
+	rows, err := ListInstances(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || rows[0].Data.SendContext == nil ||
+		rows[0].Data.SendContext.Version != "2.8.0" || rows[0].Data.SendContext.ProtocolVersion != 1 ||
+		rows[1].Data.SendContext != nil || rows[2].Data.SendContext != nil {
+		t.Fatalf("list did not preserve verified and unknown metadata: %#v", rows)
+	}
+	formatted := FormatRows(rows)
+	if !strings.Contains(formatted, "Send Context: 2.8.0 (routing protocol 1)") ||
+		!strings.Contains(formatted, "Send Context: unknown") {
+		t.Fatalf("list output did not distinguish loaded metadata from unknown: %q", formatted)
+	}
+
+	encoded, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output []map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output) != 3 {
+		t.Fatalf("JSON list row count = %d, want 3: %s", len(output), encoded)
+	}
+	expectedSendContext := []struct {
+		value   string
+		present bool
+	}{
+		{value: `{"version":"2.8.0","protocolVersion":1}`, present: true},
+		{value: "null", present: true},
+		{value: "", present: false},
+	}
+	for index, expected := range expectedSendContext {
+		var data map[string]json.RawMessage
+		if err := json.Unmarshal(output[index]["data"], &data); err != nil {
+			t.Fatal(err)
+		}
+		value, present := data["sendContext"]
+		if present != expected.present || (present && string(value) != expected.value) {
+			t.Fatalf("JSON sendContext for row %d = %s, want %s: %s", index, value, expected.value, encoded)
+		}
+		if _, duplicated := output[index]["sendContext"]; duplicated {
+			t.Fatalf("JSON repeated Send Context outside status data: %s", encoded)
+		}
 	}
 }
 

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 
 import { captureRecoveryCheckpoint } from "../linux/recovery.js"
 import { captureRestoreSnapshot } from "../linux/restore.js"
-import { createTransport } from "../linux/transport.js"
+import { createTransport, readSendContextMetadata } from "../linux/transport.js"
 import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
 import {
   readLauncherContext,
@@ -172,13 +172,18 @@ export default async function instanceControl(pi) {
     const state = runtime
     const ctx = state.ctx
     if (request.action === "status") {
+      const currentRecord = record(ctx)
+      const [sendContext, canRestart] = await Promise.all([
+        readSendContextMetadata(currentRecord),
+        !hasMatchingExitRequest(state, ctx) &&
+          !runtime.launch.restartError &&
+          (await sessionPersistence(ctx)) === "persisted",
+      ])
       return {
         data: {
-          ...record(ctx),
-          canRestart:
-            !hasMatchingExitRequest(state, ctx) &&
-            !runtime.launch.restartError &&
-            (await sessionPersistence(ctx)) === "persisted",
+          ...currentRecord,
+          canRestart,
+          sendContext,
         },
       }
     }

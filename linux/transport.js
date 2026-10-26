@@ -17,6 +17,177 @@ function scopeDirectoryName(scopeId) {
 const MAX_FRAME_BYTES = 64 * 1024
 const REQUEST_TIMEOUT_MS = 5_000
 const INSTANCE_ID = /^[a-f0-9]{32}$/
+const SEND_CONTEXT_STATE_DIRECTORY = [".omp", "agent", "editor-context-bridge.json.d"]
+const SEND_CONTEXT_HEALTH_TIMEOUT_MS = 500
+const MAX_HEALTH_RESPONSE_BYTES = 4096
+
+// Return loaded metadata only after the private record and live health identity agree.
+export async function readSendContextMetadata(instanceRecord) {
+  if (
+    !instanceRecord ||
+    !INSTANCE_ID.test(instanceRecord.instanceId ?? "") ||
+    !Number.isSafeInteger(instanceRecord.pid) ||
+    instanceRecord.pid <= 0
+  ) {
+    return null
+  }
+
+  let directory
+  try {
+    directory = path.join(os.homedir(), ...SEND_CONTEXT_STATE_DIRECTORY)
+    await assertExistingPrivateDirectory(directory)
+  } catch {
+    return null
+  }
+
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true })
+  } catch {
+    return null
+  }
+
+  let matchingState
+  for (const entry of entries) {
+    if (!entry.name.endsWith(".json")) continue
+    const instanceId = entry.name.slice(0, -".json".length)
+    if (!INSTANCE_ID.test(instanceId)) continue
+    if (!entry.isFile()) return null
+
+    let state
+    try {
+      state = await readPrivateJson(path.join(directory, entry.name))
+    } catch {
+      return null
+    }
+    if (
+      !state ||
+      typeof state !== "object" ||
+      Array.isArray(state) ||
+      state.instanceId !== instanceId ||
+      !Number.isSafeInteger(state.pid) ||
+      state.pid <= 0
+    ) {
+      return null
+    }
+    if (state.pid !== instanceRecord.pid) continue
+    if (typeof state.endpoint !== "string") return null
+    if (matchingState !== undefined) return null
+    matchingState = { endpoint: state.endpoint, instanceId: state.instanceId, pid: state.pid }
+  }
+
+  if (matchingState === undefined) return null
+  return verifySendContextHealth(matchingState)
+}
+
+async function assertExistingPrivateDirectory(directory) {
+  const absolute = path.resolve(directory)
+  const components = absolute.split(path.sep).filter(Boolean)
+  let current = path.parse(absolute).root
+  for (const component of components) {
+    current = path.join(current, component)
+    const info = await lstat(current)
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      throw new Error(`Unsafe private directory: ${current}`)
+    }
+    if (current === absolute) {
+      if (info.uid !== currentUid() || (info.mode & 0o077) !== 0) {
+        throw new Error(`Unsafe private directory: ${current}`)
+      }
+      continue
+    }
+    const trustedOwner = info.uid === 0 || info.uid === currentUid()
+    const stickyTmp = current === "/tmp" && info.uid === 0 && (info.mode & 0o1000) !== 0
+    if (!trustedOwner || ((info.mode & 0o022) !== 0 && !stickyTmp)) {
+      throw new Error(`Unsafe private directory ancestor: ${current}`)
+    }
+  }
+}
+
+async function verifySendContextHealth(state) {
+  let endpoint
+  try {
+    endpoint = new URL(state.endpoint)
+  } catch {
+    return null
+  }
+  if (
+    endpoint.protocol !== "http:" ||
+    endpoint.hostname !== "127.0.0.1" ||
+    !/^[1-9]\d{0,4}$/.test(endpoint.port) ||
+    Number(endpoint.port) > 65535 ||
+    endpoint.pathname !== "/" ||
+    endpoint.search !== "" ||
+    endpoint.hash !== "" ||
+    endpoint.username !== "" ||
+    endpoint.password !== ""
+  ) {
+    return null
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SEND_CONTEXT_HEALTH_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${endpoint.origin}/health`, {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      if (response.body !== null) await response.body.cancel().catch(() => {})
+      return null
+    }
+    const health = await readBoundedJson(response)
+    if (
+      health?.ok !== true ||
+      health.instanceId !== state.instanceId ||
+      health.pid !== state.pid ||
+      typeof health.version !== "string" ||
+      health.version.trim() === "" ||
+      health.version !== health.version.trim() ||
+      health.version.toLowerCase() === "unknown" ||
+      health.version.length > 128 ||
+      !Number.isSafeInteger(health.protocolVersion) ||
+      health.protocolVersion <= 0
+    ) {
+      return null
+    }
+    return { version: health.version, protocolVersion: health.protocolVersion }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function readBoundedJson(response) {
+  if (response.body === null) return null
+  const contentLength = response.headers.get("content-length")
+  if (/^\d+$/.test(contentLength ?? "") && Number(contentLength) > MAX_HEALTH_RESPONSE_BYTES) {
+    await response.body.cancel().catch(() => {})
+    return null
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let bytes = 0
+  let text = ""
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      if (bytes > MAX_HEALTH_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {})
+        return null
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return JSON.parse(text + decoder.decode())
+  } finally {
+    reader.releaseLock()
+  }
+}
 
 function currentUid() {
   return typeof process.getuid === "function" ? process.getuid() : os.userInfo().uid

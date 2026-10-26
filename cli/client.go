@@ -177,6 +177,19 @@ func FormatRows(rows []Row) string {
 		formatted.WriteString(safeText(id))
 		formatted.WriteString("  ")
 		formatted.WriteString(safeText(state))
+		if row.Status == "online" {
+			contextVersion := "unknown"
+			if row.Data != nil && validSendContext(row.Data.SendContext) {
+				contextVersion = fmt.Sprintf(
+					"%s (routing protocol %d)",
+					row.Data.SendContext.Version,
+					row.Data.SendContext.ProtocolVersion,
+				)
+			}
+			formatted.WriteString("  Send Context: ")
+			formatted.WriteString(safeText(contextVersion))
+		}
+
 		cwd := ""
 		if row.Data != nil {
 			cwd = row.Data.CWD
@@ -197,6 +210,15 @@ func FormatRows(rows []Row) string {
 		}
 	}
 	return formatted.String()
+}
+
+func validSendContext(metadata *protocol.SendContextMetadata) bool {
+	return metadata != nil &&
+		metadata.Version != "" &&
+		metadata.Version == strings.TrimSpace(metadata.Version) &&
+		!strings.EqualFold(metadata.Version, "unknown") &&
+		len(metadata.Version) <= 128 &&
+		metadata.ProtocolVersion > 0
 }
 
 func compactProjectPath(value string) string {
