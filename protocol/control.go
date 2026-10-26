@@ -203,21 +203,28 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
+// SendContextMetadata describes the loaded plugin and its routing protocol.
+type SendContextMetadata struct {
+	Version         string `json:"version"`
+	ProtocolVersion int    `json:"protocolVersion"`
+}
+
 // Data is the structured status or restart result supplied by an OMP process.
 type Data struct {
-	Version         int      `json:"version,omitempty"`
-	InstanceID      string   `json:"instanceId,omitempty"`
-	Scope           string   `json:"scope,omitempty"`
-	PID             int      `json:"pid,omitempty"`
-	CWD             string   `json:"cwd,omitempty"`
-	SessionID       string   `json:"sessionId,omitempty"`
-	SessionFile     *string  `json:"sessionFile,omitempty"`
-	LauncherManaged bool     `json:"launcherManaged,omitempty"`
-	State           string   `json:"state,omitempty"`
-	OperationID     *string  `json:"operationId,omitempty"`
-	LastRestart     *Restart `json:"lastRestart,omitempty"`
-	CanRestart      bool     `json:"canRestart"`
-	Message         string   `json:"message,omitempty"`
+	Version         int                  `json:"version,omitempty"`
+	InstanceID      string               `json:"instanceId,omitempty"`
+	Scope           string               `json:"scope,omitempty"`
+	PID             int                  `json:"pid,omitempty"`
+	CWD             string               `json:"cwd,omitempty"`
+	SessionID       string               `json:"sessionId,omitempty"`
+	SessionFile     *string              `json:"sessionFile,omitempty"`
+	LauncherManaged bool                 `json:"launcherManaged,omitempty"`
+	State           string               `json:"state,omitempty"`
+	OperationID     *string              `json:"operationId,omitempty"`
+	LastRestart     *Restart             `json:"lastRestart,omitempty"`
+	CanRestart      bool                 `json:"canRestart"`
+	Message         string               `json:"message,omitempty"`
+	SendContext     *SendContextMetadata `json:"sendContext,omitempty"`
 	// Received data is immutable. Keep its wire payload so CLI JSON preserves
 	// explicit nulls, absent capability fields, and unrecognized host fields.
 	raw json.RawMessage

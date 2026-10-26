@@ -16,7 +16,11 @@ export async function listInstances(transport) {
             errorCode: response.error.code,
           }
         }
-        return { record, status: "online", data: response.data }
+        return {
+          record,
+          status: "online",
+          data: response.data,
+        }
       } catch (error) {
         return {
           record,
@@ -138,6 +142,9 @@ export function formatRows(rows) {
 
       const currentCwd = row.data?.cwd || row.record?.cwd
       const parts = [id, state]
+      if (row.status === "online") {
+        parts.push(formatSendContext(row.data?.sendContext ?? null))
+      }
       if (currentCwd) {
         parts.push(compactProjectPath(currentCwd))
       }
@@ -154,4 +161,20 @@ export function formatRows(rows) {
       return parts.map(safeText).join("  ")
     })
     .join("\n")
+}
+
+function formatSendContext(metadata) {
+  if (
+    !metadata ||
+    typeof metadata.version !== "string" ||
+    metadata.version.trim() === "" ||
+    metadata.version !== metadata.version.trim() ||
+    metadata.version.toLowerCase() === "unknown" ||
+    metadata.version.length > 128 ||
+    !Number.isSafeInteger(metadata.protocolVersion) ||
+    metadata.protocolVersion <= 0
+  ) {
+    return "Send Context: unknown"
+  }
+  return `Send Context: ${metadata.version} (routing protocol ${metadata.protocolVersion})`
 }

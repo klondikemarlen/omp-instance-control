@@ -7,8 +7,8 @@ import test from "node:test"
 import { fileURLToPath } from "node:url"
 
 import { createTransport, writePrivateJson } from "../../linux/transport.js"
-import { registerOmpiCommand } from "../../omp/command.js"
 import { getScope } from "../../protocol/index.js"
+import { registerOmpiCommand } from "../../omp/command.js"
 
 const ENVIRONMENT_KEYS = [
   "HOME",
@@ -39,7 +39,7 @@ async function createFixture() {
   return {
     root,
     cwd,
-    async addPeer(scope, instanceId, peerCwd = cwd) {
+    async addPeer(scope, instanceId, peerCwd = cwd, sendContext) {
       const transport = await createTransport(scope)
       const record = {
         version: 1,
@@ -59,7 +59,11 @@ async function createFixture() {
       const server = await transport.serve(instanceId, async (request) => {
         requests.push(request)
         if (request.action === "status") {
-          return { data: { ...record, canRestart: true } }
+          const data = { ...record, canRestart: true }
+          if (sendContext !== undefined) {
+            data.sendContext = sendContext
+          }
+          return { data }
         }
         return {
           data: {
@@ -183,7 +187,10 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
       defaultId,
       path.join(fixture.root, "default-peer")
     )
-    await fixture.addPeer(workScope, workId, path.join(fixture.root, "work-peer"))
+    await fixture.addPeer(workScope, workId, path.join(fixture.root, "work-peer"), {
+      version: "2.8.0",
+      protocolVersion: 1,
+    })
     const offlineId = "6".repeat(32)
     const defaultTransport = await createTransport(defaultScope)
     await defaultTransport.writeRecord({
@@ -197,6 +204,7 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     await ui.command.handler("list", ctx)
 
     // Assert
+    assert.match(ui.notifications[0].message, /Send Context: unknown/)
     assert.deepEqual(
       ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
       [`restart ${defaultId}`]
@@ -214,12 +222,19 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     assert.equal(workRows.length, 1)
     assert.equal(workRows[0].record.instanceId, workId)
     assert.equal(workRows[0].record.scope, workScope.id)
+    assert.deepEqual(workRows[0].data.sendContext, { version: "2.8.0", protocolVersion: 1 })
     assert.deepEqual(
       ui.command
         .getArgumentCompletions("restart --profile work 22222222")
         .map((item) => item.value),
       [`restart --profile work ${workId}`]
     )
+
+    // Act
+    await ui.command.handler("list --profile work", ctx)
+
+    // Assert
+    assert.match(ui.notifications[2].message, /Send Context: 2\.8\.0 \(routing protocol 1\)/)
     assert.deepEqual(
       ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
       [`restart ${defaultId}`]

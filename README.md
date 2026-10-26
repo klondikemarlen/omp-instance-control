@@ -74,6 +74,8 @@ Long project paths shorten from the left to retain the project-name ending; dupl
 
 Human-facing lists show short instance IDs, current state, the final two project-path components, concise connection failures, and a small annotation for a previous completed restart. The short ID shown in a list or the OMP status line can select that instance: for example, `ompi control restart 906e493e` or `/ompi restart 906e493e`. Any nonempty lowercase hexadecimal prefix up to the full 32-character ID is accepted when it matches exactly one registration in the selected profile/config scope. Ambiguous prefixes restart nothing; use a longer prefix or the full ID. Stale registrations also count toward ambiguity. These are current control-instance IDs, not persisted conversation/session IDs; they change after relaunch. JSON and autocomplete retain full IDs, paths, restart correlation, and diagnostics. Partial-failure warnings distinguish unreachable registrations from reachable instances.
 
+`ompi control list` and `/ompi list` also show each online child's **loaded Send Context version** and routing protocol. This is the running plugin's health metadata, not the installed-on-disk package version, OMP version, or native `ompi` version. `--json` exposes it under `data.sendContext`; the current adapter emits `null` when unknown, while older status payloads remain unchanged. Missing or older metadata, mismatched identities, unreachable health endpoints, and unsafe private state display as unknown. Queries use only read-only `/health` requests: they do not claim focus, send prompts, invoke `/ide`, or restart sessions. Send Context package and routing-protocol versions remain separate; matching package versions are not required.
+
 Use `ompi control restart all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
 Every `ompi control restart ID_OR_PREFIX|all` and `/ompi restart [ID_OR_PREFIX|all]` replaces each selected terminal's native `ompi` wrapper as well as OMP. After OMP settles and exits successfully, the wrapper executes its installed replacement, reloads the adapter, and resumes the exact current transcript and working directory. The recovery slot and its lock survive native replacement; a fresh control identity identifies the new OMP launch. Bare `/ompi restart` selects only the invoking terminal; explicit IDs and `all` retain their profile/config-root scope.
@@ -234,7 +236,7 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.13.0~ppa1_source.changes
+dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.15.0~ppa1_source.changes
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.

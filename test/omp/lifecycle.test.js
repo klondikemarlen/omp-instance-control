@@ -1,13 +1,14 @@
 import assert from "node:assert/strict"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import http from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 
 import { createTransport, writePrivateJson } from "../../linux/transport.js"
-import instanceControl from "../../omp/index.js"
 import { createRequest, getScope } from "../../protocol/index.js"
+import instanceControl from "../../omp/index.js"
 
 function createEventBus() {
   const listeners = new Map()
@@ -103,6 +104,133 @@ test("when agent-end arrives during shutdown, removed endpoint records stay remo
     assert.deepEqual(await transport.readRecords(), [])
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("when status is queried, it exposes loaded Send Context health metadata or explicit unknown", async () => {
+  // Arrange
+  const root = await mkdtemp(path.join(tmpdir(), "ic-send-context-"))
+  const launchDirectory = path.join(root, "launch")
+  await mkdir(launchDirectory, { mode: 0o700 })
+  const scope = getScope({ env: { HOME: root } })
+  const token = "3".repeat(32)
+  await writePrivateJson(path.join(launchDirectory, "launch.json"), {
+    version: 1,
+    token,
+    pid: process.ppid,
+    scope,
+    extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
+    lastRestart: null,
+    builtinFlags: [],
+  })
+  const environment = {
+    HOME: root,
+    PI_CONFIG_DIR: path.join(root, ".omp"),
+    PI_CODING_AGENT_DIR: path.join(root, ".omp", "agent"),
+    OMP_PROFILE: "",
+    PI_PROFILE: "",
+    XDG_RUNTIME_DIR: root,
+    OMP_INSTANCE_CONTROL_LAUNCH_DIR: launchDirectory,
+    OMP_INSTANCE_CONTROL_LAUNCH_TOKEN: token,
+  }
+  const previous = Object.fromEntries(
+    Object.keys(environment).map((key) => [key, process.env[key]])
+  )
+  Object.assign(process.env, environment)
+  const handlers = new Map()
+  const healthRequests = []
+  const bridgeId = "c".repeat(32)
+  const server = http.createServer((request, response) => {
+    healthRequests.push({
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+    })
+    response.writeHead(200, { "Content-Type": "application/json" })
+    response.end(
+      JSON.stringify({
+        ok: true,
+        instanceId: bridgeId,
+        endpoint: `http://127.0.0.1:${server.address().port}`,
+        pid: process.pid,
+        version: "2.8.0",
+        protocolVersion: 1,
+      })
+    )
+  })
+  const ctx = {
+    agent: { kind: "main" },
+    mode: "tui",
+    cwd: root,
+    sessionManager: { getSessionId: () => "status-session", getSessionFile: () => null },
+    ui: {
+      setStatus() {},
+      notify(message) {
+        assert.fail(message)
+      },
+    },
+  }
+
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+    await instanceControl({
+      events: createEventBus(),
+      pi: createSdk(),
+      on(event, handler) {
+        handlers.set(event, handler)
+      },
+      registerCommand() {},
+    })
+    await handlers.get("session_start")({}, ctx)
+    const transport = await createTransport(scope)
+    const [record] = await transport.readRecords()
+    const endpoint = `http://127.0.0.1:${server.address().port}`
+    const statePath = path.join(
+      root,
+      ".omp",
+      "agent",
+      "editor-context-bridge.json.d",
+      `${bridgeId}.json`
+    )
+    await writePrivateJson(statePath, {
+      endpoint,
+      instanceId: bridgeId,
+      pid: record.pid,
+      version: "installed-package-version",
+      protocolVersion: 1,
+      token: "never-return-this",
+    })
+
+    // Act
+    const response = await transport.request(record, createRequest(record.instanceId, "status"))
+
+    // Assert
+    assert.equal(response.ok, true)
+    assert.equal(response.data.instanceId, record.instanceId)
+    assert.deepEqual(response.data.sendContext, { version: "2.8.0", protocolVersion: 1 })
+    assert.deepEqual(healthRequests, [{ method: "GET", url: "/health", authorization: undefined }])
+    assert.equal(JSON.stringify(response).includes("never-return-this"), false)
+
+    // Act
+    await rm(statePath)
+    const withoutPrivateState = await transport.request(
+      record,
+      createRequest(record.instanceId, "status")
+    )
+
+    // Assert
+    assert.equal(withoutPrivateState.ok, true)
+    assert.equal(withoutPrivateState.data.sendContext, null)
+    assert.equal(JSON.stringify(withoutPrivateState).includes("never-return-this"), false)
+    assert.equal(healthRequests.length, 1)
+  } finally {
+    await handlers.get("session_shutdown")?.({}, ctx)
+    await new Promise((resolve) => server.close(resolve))
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value

@@ -1,3 +1,11 @@
+omp-instance-control (0.15.0~ppa1) resolute; urgency=medium
+
+  * Show verified loaded Send Context versions and routing protocols.
+  * Keep unavailable metadata unknown without changing context routing.
+  * Preserve private tokens, scoped identities and restart correlation.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Mon, 26 Oct 2026 12:29:49 -0700
+
 omp-instance-control (0.14.0~ppa1) resolute; urgency=medium
 
   * Replace native wrappers and OMP for ID, prefix and all restart targets.

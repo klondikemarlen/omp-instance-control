@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import fsPromises from "node:fs/promises"
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, chmod } from "node:fs/promises"
+import http from "node:http"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
@@ -9,13 +10,14 @@ import { syncBuiltinESMExports } from "node:module"
 import { afterEach, test } from "node:test"
 
 import { listInstances, restartInstances } from "../../cli/client.js"
-import { ProtocolError } from "../../protocol/index.js"
 import {
   createTransport,
   ensurePrivateDirectory,
   readPrivateJson,
+  readSendContextMetadata,
   writePrivateJson,
 } from "../../linux/transport.js"
+import { ProtocolError } from "../../protocol/index.js"
 
 const INSTANCE_A = "a".repeat(32)
 const INSTANCE_B = "b".repeat(32)
@@ -55,6 +57,168 @@ function transportFor(root, scope) {
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+})
+
+test("when Send Context health matches its private per-console identity, listing exposes only loaded metadata", async (t) => {
+  // Arrange
+  const root = await createRoot()
+  t.mock.method(os, "homedir", () => root)
+  const bridgeId = INSTANCE_C
+  const requests = []
+  const health = {
+    ok: true,
+    instanceId: bridgeId,
+    pid: process.pid,
+    endpoint: "http://127.0.0.1:47687",
+    version: "2.8.0",
+    protocolVersion: 1,
+  }
+  const server = http.createServer((request, response) => {
+    requests.push({
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+    })
+    response.writeHead(200, { "Content-Type": "application/json" })
+    response.end(JSON.stringify(health))
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const endpoint = `http://127.0.0.1:${server.address().port}`
+  health.endpoint = endpoint
+  const directory = path.join(root, ".omp", "agent", "editor-context-bridge.json.d")
+  await ensurePrivateDirectory(directory)
+  await writePrivateJson(path.join(directory, `${bridgeId}.json`), {
+    endpoint,
+    instanceId: bridgeId,
+    pid: process.pid,
+    version: "installed-package-version",
+    protocolVersion: 1,
+    token: "never-return-this",
+  })
+  const controlRecord = makeRecord(SCOPE_A, INSTANCE_A)
+
+  try {
+    // Act
+    const metadata = await readSendContextMetadata(controlRecord)
+
+    // Assert
+    assert.deepEqual(metadata, { version: "2.8.0", protocolVersion: 1 })
+    assert.deepEqual(requests, [{ method: "GET", url: "/health", authorization: undefined }])
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test("when Send Context metadata is absent, listing keeps it unknown without creating state", async (t) => {
+  // Arrange
+  const root = await createRoot()
+  t.mock.method(os, "homedir", () => root)
+  const controlRecord = makeRecord(SCOPE_A, INSTANCE_A)
+  const directory = path.join(root, ".omp", "agent", "editor-context-bridge.json.d")
+
+  // Act
+  const metadata = await readSendContextMetadata(controlRecord)
+
+  // Assert
+  assert.equal(metadata, null)
+  await assert.rejects(fsPromises.lstat(directory), { code: "ENOENT" })
+})
+
+test("when Send Context metadata lives under a symlink, listing keeps it unknown", async (t) => {
+  // Arrange
+  const root = await createRoot()
+  t.mock.method(os, "homedir", () => root)
+  const agentDirectory = path.join(root, ".omp", "agent")
+  const outsideDirectory = path.join(root, "outside")
+  const directory = path.join(agentDirectory, "editor-context-bridge.json.d")
+  await mkdir(agentDirectory, { recursive: true, mode: 0o700 })
+  await mkdir(outsideDirectory, { mode: 0o700 })
+  await symlink(outsideDirectory, directory)
+  const controlRecord = makeRecord(SCOPE_A, INSTANCE_A)
+
+  // Act
+  const metadata = await readSendContextMetadata(controlRecord)
+
+  // Assert
+  assert.equal(metadata, null)
+})
+
+test("when private metadata or live health is invalid, listing keeps metadata unknown", async (t) => {
+  // Arrange
+  const root = await createRoot()
+  t.mock.method(os, "homedir", () => root)
+  const controlRecord = makeRecord(SCOPE_A, INSTANCE_A)
+  const directory = path.join(root, ".omp", "agent", "editor-context-bridge.json.d")
+  await ensurePrivateDirectory(directory)
+  const bridgeId = INSTANCE_C
+  const health = {
+    ok: true,
+    instanceId: bridgeId,
+    pid: process.pid,
+    endpoint: "http://127.0.0.1:47687",
+    version: "2.8.0",
+    protocolVersion: 1,
+  }
+  const requests = []
+  let responseStatus = 200
+  let responseHealth = health
+  const server = http.createServer((request, response) => {
+    requests.push({
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization,
+    })
+    response.writeHead(responseStatus, { "Content-Type": "application/json" })
+    response.end(JSON.stringify(responseHealth))
+  })
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const endpoint = `http://127.0.0.1:${server.address().port}`
+  health.endpoint = endpoint
+  const statePath = path.join(directory, `${bridgeId}.json`)
+
+  try {
+    // Act / Assert
+    await writePrivateJson(statePath, {
+      endpoint,
+      instanceId: bridgeId,
+      pid: controlRecord.pid + 1,
+      token: "never-return-this",
+    })
+    assert.equal(await readSendContextMetadata(controlRecord), null)
+    assert.equal(requests.length, 0)
+
+    await writePrivateJson(statePath, {
+      endpoint,
+      instanceId: bridgeId,
+      pid: controlRecord.pid,
+      token: "never-return-this",
+    })
+    const withoutVersion = { ...health }
+    delete withoutVersion.version
+    const withoutProtocol = { ...health }
+    delete withoutProtocol.protocolVersion
+    for (const [name, status, body] of [
+      ["mismatched bridge identity", 200, { ...health, instanceId: INSTANCE_B }],
+      ["reused endpoint PID", 200, { ...health, pid: health.pid + 1 }],
+      ["missing loaded version", 200, withoutVersion],
+      ["unknown loaded version", 200, { ...health, version: "unknown" }],
+      ["missing routing protocol", 200, withoutProtocol],
+      ["unhealthy endpoint", 503, health],
+    ]) {
+      responseStatus = status
+      responseHealth = body
+      assert.equal(await readSendContextMetadata(controlRecord), null, name)
+    }
+
+    assert.ok(
+      requests.every(
+        ({ method, url, authorization }) =>
+          method === "GET" && url === "/health" && authorization === undefined
+      )
+    )
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
 })
 
 test("when private paths are permissive or symlinked, filesystem operations reject them", async () => {
