@@ -1,3 +1,11 @@
+omp-instance-control (0.17.0~ppa1) resolute; urgency=medium
+
+  * Prepare a cooperative pause and persisted checkpoint before safe restart.
+  * Continue unfinished work once after correlated replacement.
+  * Expose concrete blockers without forced shutdown or ambiguous retries.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 27 Oct 2026 15:35:00 -0700
+
 omp-instance-control (0.16.0~ppa1) resolute; urgency=medium
 
   * Adopt installed native replacements automatically at OMP's settled boundary.
