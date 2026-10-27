@@ -535,7 +535,7 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
   }
 })
 
-test("when an installed update arrives before transcript persistence, automatic restart waits and coalesces", async () => {
+test("when an installed update joins a pending manual restart, coalescing retains its verified image", async () => {
   // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-auto-"))
   const launchDirectory = path.join(root, "launch")
@@ -612,7 +612,12 @@ test("when an installed update arrives before transcript persistence, automatic 
     await writeFile(replacement, "#!/bin/sh\nprintf 'ompi 0.17.0\\n'\n", { mode: 0o700 })
 
     // Act
+    const manual = await transport.request(
+      record,
+      createRequest(record.instanceId, "restart-wrapper")
+    )
     await rename(replacement, executable)
+    const installed = await stat(executable, { bigint: true })
     const deadline = performance.now() + 10_000
     let status
     do {
@@ -640,8 +645,15 @@ test("when an installed update arrives before transcript persistence, automatic 
     assert.equal(beforePersistence, 0)
     assert.equal(shutdowns, 1)
     assert.equal(duplicate.data.operationId, status.data.operationId)
+    assert.equal(manual.data.operationId, status.data.operationId)
     assert.equal(handoff.operationId, status.data.operationId)
     assert.equal(handoff.restartWrapper, true)
+    assert.deepEqual(handoff.nativeTarget, {
+      device: installed.dev.toString(),
+      inode: installed.ino.toString(),
+      size: installed.size.toString(),
+      modifiedNs: installed.mtimeNs.toString(),
+    })
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
     for (const [key, value] of Object.entries(previous)) {

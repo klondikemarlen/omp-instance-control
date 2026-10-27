@@ -226,7 +226,7 @@ export default async function instanceControl(pi) {
       runtime.nativeTarget = request.nativeTarget ?? null
       runtime.admission = refresh(ctx)
     }
-    if (runtime.nativeTarget && request.nativeTarget) {
+    if (request.nativeTarget) {
       runtime.nativeTarget = request.nativeTarget
     }
     const admission = runtime.admission
