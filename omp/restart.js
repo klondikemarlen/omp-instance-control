@@ -1,6 +1,6 @@
 import { createRequest } from "../protocol/index.js"
 
-export async function requestWrapperRestart(runtime) {
+export async function requestWrapperRestart(runtime, nativeTarget) {
   if (!runtime) {
     throw new Error(
       "This OMP session is not managed by ompi. Start a fresh OMP session from an ompi launcher before using /ompi restart."
@@ -33,6 +33,7 @@ export async function requestWrapperRestart(runtime) {
   }
 
   const request = createRequest(runtime.instanceId, "restart-wrapper")
+  if (nativeTarget) request.nativeTarget = nativeTarget
   const response = await runtime.transport.request(record, request)
   if (!response.ok) {
     throw new Error(response.error.message)

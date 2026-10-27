@@ -144,6 +144,7 @@ export function formatRows(rows) {
       const parts = [id, state]
       if (row.status === "online") {
         parts.push(formatSendContext(row.data?.sendContext ?? null))
+        parts.push(formatNative(row.data?.native ?? null))
       }
       if (currentCwd) {
         parts.push(compactProjectPath(currentCwd))
@@ -177,4 +178,18 @@ function formatSendContext(metadata) {
     return "Send Context: unknown"
   }
   return `Send Context: ${metadata.version} (routing protocol ${metadata.protocolVersion})`
+}
+
+function formatNative(metadata) {
+  if (!metadata || typeof metadata.runningVersion !== "string" || !metadata.runningVersion) {
+    return "Native ompi: unknown"
+  }
+
+  const installedVersion = metadata.installedVersion ?? "unknown"
+  let summary = `Native ompi: ${metadata.runningVersion} (installed ${installedVersion}; update ${metadata.state})`
+  if (metadata.message) {
+    summary += `: ${metadata.message}`
+  }
+
+  return summary
 }

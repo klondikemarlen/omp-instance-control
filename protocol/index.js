@@ -62,7 +62,39 @@ export function validateRequest(value) {
       "Only status, restart, and restart-wrapper are supported; resource-only reload is unavailable."
     )
   }
+  if (value.nativeTarget !== undefined && value.nativeTarget !== null) {
+    validateNativeTarget(value.nativeTarget, value.action)
+  }
   return value
+}
+
+function validateNativeTarget(target, action) {
+  if (
+    action !== "restart-wrapper" ||
+    !target ||
+    typeof target !== "object" ||
+    Array.isArray(target)
+  ) {
+    throw new ProtocolError("INVALID_REQUEST", "A native target requires wrapper restart.")
+  }
+
+  for (const field of ["device", "inode", "size", "modifiedNs"]) {
+    const value = target[field]
+    if (typeof value !== "string" || value.length > 20 || !/^-?\d+$/.test(value)) {
+      throw new ProtocolError("INVALID_REQUEST", "Native target identity is invalid.")
+    }
+
+    const number = BigInt(value)
+    let minimum = 0n
+    let maximum = (1n << 64n) - 1n
+    if (field === "modifiedNs") {
+      minimum = -(1n << 63n)
+      maximum = (1n << 63n) - 1n
+    }
+    if (number < minimum || number > maximum || number.toString() !== value) {
+      throw new ProtocolError("INVALID_REQUEST", "Native target identity is out of range.")
+    }
+  }
 }
 
 export function validateResponse(value, request) {

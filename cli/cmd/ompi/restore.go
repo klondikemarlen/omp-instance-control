@@ -114,7 +114,7 @@ func runRestore(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	code, err := linux.RestoreNamedSession(scope, selected.Name, resolveExtension(executable), selected.Session)
+	code, err := linux.RestoreNamedSession(scope, selected.Name, resolveExtension(executable), version, selected.Session)
 	if err != nil {
 		return 1, err
 	}

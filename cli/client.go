@@ -188,8 +188,35 @@ func FormatRows(rows []Row) string {
 			}
 			formatted.WriteString("  Send Context: ")
 			formatted.WriteString(safeText(contextVersion))
+			if row.Data != nil && row.Data.Native != nil {
+				native := row.Data.Native
+				formatted.WriteString("  Native ompi: ")
+				runningVersion := native.RunningVersion
+				if runningVersion == "" {
+					runningVersion = "unknown"
+				}
+				formatted.WriteString(safeText(runningVersion))
+				formatted.WriteString(" (installed ")
+				installedVersion := native.InstalledVersion
+				if installedVersion == "" {
+					installedVersion = "unknown"
+				}
+				formatted.WriteString(safeText(installedVersion))
+				formatted.WriteString("; update ")
+				updateState := native.State
+				if updateState == "" {
+					updateState = "unknown"
+				}
+				formatted.WriteString(safeText(updateState))
+				formatted.WriteByte(')')
+				if native.Message != "" {
+					formatted.WriteString(": ")
+					formatted.WriteString(safeText(native.Message))
+				}
+			} else {
+				formatted.WriteString("  Native ompi: unknown")
+			}
 		}
-
 		cwd := ""
 		if row.Data != nil {
 			cwd = row.Data.CWD

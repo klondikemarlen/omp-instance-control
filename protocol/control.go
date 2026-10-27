@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 )
@@ -19,8 +20,10 @@ import (
 const Version = 1
 
 var (
-	profilePattern  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
-	instancePattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	profilePattern        = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+	instancePattern       = regexp.MustCompile(`^[a-f0-9]{32}$`)
+	nativeUnsignedPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+	nativeSignedPattern   = regexp.MustCompile(`^(0|-?[1-9][0-9]*)$`)
 )
 
 // Scope identifies one OMP profile and agent directory for control discovery.
@@ -182,12 +185,21 @@ type Record struct {
 	RestoreID       string   `json:"restoreId,omitempty"`
 }
 
+// NativeTarget identifies one installed wrapper image verified by the requester.
+type NativeTarget struct {
+	Device     string `json:"device"`
+	Inode      string `json:"inode"`
+	Size       string `json:"size"`
+	ModifiedNs string `json:"modifiedNs"`
+}
+
 // Request is one versioned operation addressed to a specific OMP process.
 type Request struct {
-	Version    int    `json:"version"`
-	InstanceID string `json:"instanceId"`
-	RequestID  string `json:"requestId"`
-	Action     string `json:"action"`
+	Version      int           `json:"version"`
+	InstanceID   string        `json:"instanceId"`
+	RequestID    string        `json:"requestId"`
+	Action       string        `json:"action"`
+	NativeTarget *NativeTarget `json:"nativeTarget,omitempty"`
 }
 
 // Error is a correlated protocol-level rejection returned by an OMP process.
@@ -209,6 +221,14 @@ type SendContextMetadata struct {
 	ProtocolVersion int    `json:"protocolVersion"`
 }
 
+// NativeMetadata describes running and installed native wrapper versions.
+type NativeMetadata struct {
+	RunningVersion   string `json:"runningVersion,omitempty"`
+	InstalledVersion string `json:"installedVersion,omitempty"`
+	State            string `json:"state,omitempty"`
+	Message          string `json:"message,omitempty"`
+}
+
 // Data is the structured status or restart result supplied by an OMP process.
 type Data struct {
 	Version         int                  `json:"version,omitempty"`
@@ -225,6 +245,7 @@ type Data struct {
 	CanRestart      bool                 `json:"canRestart"`
 	Message         string               `json:"message,omitempty"`
 	SendContext     *SendContextMetadata `json:"sendContext,omitempty"`
+	Native          *NativeMetadata      `json:"native,omitempty"`
 	// Received data is immutable. Keep its wire payload so CLI JSON preserves
 	// explicit nulls, absent capability fields, and unrecognized host fields.
 	raw json.RawMessage
@@ -289,6 +310,38 @@ func CreateRequest(instanceID, action string) (Request, error) {
 	return request, nil
 }
 
+// ValidateNativeTarget validates the identity of an installed executable image.
+func ValidateNativeTarget(target *NativeTarget) error {
+	if target == nil {
+		return nil
+	}
+	if !nativeUnsignedPattern.MatchString(target.Device) {
+		return errors.New("native target device must be an unsigned decimal integer")
+	}
+	if _, err := strconv.ParseUint(target.Device, 10, 64); err != nil {
+		return errors.New("native target device must be an unsigned decimal integer")
+	}
+	if !nativeUnsignedPattern.MatchString(target.Inode) {
+		return errors.New("native target inode must be an unsigned decimal integer")
+	}
+	if _, err := strconv.ParseUint(target.Inode, 10, 64); err != nil {
+		return errors.New("native target inode must be an unsigned decimal integer")
+	}
+	if !nativeUnsignedPattern.MatchString(target.Size) {
+		return errors.New("native target size must be a nonnegative decimal integer")
+	}
+	if _, err := strconv.ParseUint(target.Size, 10, 64); err != nil {
+		return errors.New("native target size must be a nonnegative decimal integer")
+	}
+	if !nativeSignedPattern.MatchString(target.ModifiedNs) {
+		return errors.New("native target modifiedNs must be a signed decimal integer")
+	}
+	if _, err := strconv.ParseInt(target.ModifiedNs, 10, 64); err != nil {
+		return errors.New("native target modifiedNs must be a signed decimal integer")
+	}
+	return nil
+}
+
 // ValidateRequest applies the same protocol version, identity, and action rules as OMP.
 func ValidateRequest(request Request) error {
 	if request.Version != Version {
@@ -306,6 +359,14 @@ func ValidateRequest(request Request) error {
 	}
 	if request.Action != "status" && request.Action != "restart" && request.Action != "restart-wrapper" {
 		return &Error{Code: "UNSUPPORTED_ACTION", Message: "Only status, restart, and restart-wrapper are supported; resource-only reload is unavailable."}
+	}
+	if request.NativeTarget != nil {
+		if request.Action != "restart-wrapper" {
+			return &Error{Code: "INVALID_REQUEST", Message: "Native target is only valid for restart-wrapper."}
+		}
+		if err := ValidateNativeTarget(request.NativeTarget); err != nil {
+			return &Error{Code: "INVALID_REQUEST", Message: err.Error()}
+		}
 	}
 	return nil
 }

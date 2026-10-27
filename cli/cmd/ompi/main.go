@@ -57,7 +57,7 @@ func run(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	code, err := linux.Launch(args, resolveExtension(executable))
+	code, err := linux.Launch(args, resolveExtension(executable), version)
 	if err != nil {
 		return 1, err
 	}

@@ -132,8 +132,11 @@ func ListSavedSessions(scope protocol.Scope) ([]protocol.NamedSession, error) {
 
 // RestoreNamedSession resumes the selected named transcript in its recorded cwd.
 // It holds a per-snapshot flock until the foreground launcher has returned.
-func RestoreNamedSession(scope protocol.Scope, name, extensionPath string, expected protocol.SavedSession) (int, error) {
-	return restoreNamedSessionWithExpected(scope, name, extensionPath, &expected, stdinIsTerminal() && stdoutIsTerminal(), launch)
+func RestoreNamedSession(scope protocol.Scope, name, extensionPath, nativeVersion string, expected protocol.SavedSession) (int, error) {
+	launchSession := func(args []string, path, restoreID string, lock *os.File) (int, error) {
+		return launch(args, path, nativeVersion, restoreID, lock)
+	}
+	return restoreNamedSessionWithExpected(scope, name, extensionPath, &expected, stdinIsTerminal() && stdoutIsTerminal(), launchSession)
 }
 
 func restoreNamedSession(scope protocol.Scope, name, extensionPath string, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
@@ -158,8 +161,11 @@ func restoreNamedSessionWithExpected(scope protocol.Scope, name, extensionPath s
 // RestoreSessionSlot resumes the selected snapshot for one managed slot.
 // The expected snapshot prevents confirmation-time changes from changing the
 // session that the operator approved.
-func RestoreSessionSlot(scope protocol.Scope, restoreID, extensionPath string, expected protocol.SavedSession) (int, error) {
-	return restoreSessionSlotExpected(scope, restoreID, extensionPath, expected, stdinIsTerminal() && stdoutIsTerminal(), launch)
+func RestoreSessionSlot(scope protocol.Scope, restoreID, extensionPath, nativeVersion string, expected protocol.SavedSession) (int, error) {
+	launchSession := func(args []string, path, selectedID string, lock *os.File) (int, error) {
+		return launch(args, path, nativeVersion, selectedID, lock)
+	}
+	return restoreSessionSlotExpected(scope, restoreID, extensionPath, expected, stdinIsTerminal() && stdoutIsTerminal(), launchSession)
 }
 
 func restoreSessionSlot(scope protocol.Scope, restoreID, extensionPath string, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
