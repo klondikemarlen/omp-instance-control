@@ -19,12 +19,14 @@ type Transport interface {
 
 // Row is the stable JSON result shape used by list and restart commands.
 type Row struct {
-	Record     *protocol.Record `json:"record,omitempty"`
-	InstanceID string           `json:"instanceId,omitempty"`
-	Status     string           `json:"status"`
-	Data       *protocol.Data   `json:"data,omitempty"`
-	Error      string           `json:"error,omitempty"`
-	ErrorCode  string           `json:"errorCode,omitempty"`
+	Record                   *protocol.Record `json:"record,omitempty"`
+	InstanceID               string           `json:"instanceId,omitempty"`
+	Status                   string           `json:"status"`
+	Data                     *protocol.Data   `json:"data,omitempty"`
+	Error                    string           `json:"error,omitempty"`
+	ErrorCode                string           `json:"errorCode,omitempty"`
+	restartOperationID       string
+	restartNeedsContinuation bool
 }
 
 // ListInstances probes exactly the records in the transport snapshot.
@@ -228,7 +230,16 @@ func FormatRows(rows []Row) string {
 			formatted.WriteString("  ")
 			formatted.WriteString(safeText(compactProjectPath(cwd)))
 		}
-		if row.Status == "online" && row.Data != nil && row.Data.LastRestart != nil {
+		if row.Data != nil && row.Data.Cooperative != nil {
+			formatted.WriteString("  ")
+			formatted.WriteString(safeText(row.Data.Cooperative.Phase))
+			if row.Data.Cooperative.Message != "" {
+				formatted.WriteString(": ")
+				formatted.WriteString(safeText(row.Data.Cooperative.Message))
+			}
+		}
+		if row.Status == "online" && row.Data != nil && row.Data.LastRestart != nil &&
+			(row.Data.Cooperative == nil || row.Data.Cooperative.Phase == "resumed") {
 			formatted.WriteString("  (previous restart completed)")
 		}
 		if details := ErrorSummary(row); details != "" {

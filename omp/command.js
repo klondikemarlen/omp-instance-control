@@ -665,7 +665,7 @@ function outcomeSummary(rows) {
 
 function notifyRows(ctx, rows, json) {
   const hasFailure = rows.some((row) =>
-    ["failed", "unknown", "unreachable", "restarting", "waiting"].includes(row.status)
+    ["blocked", "failed", "unknown", "unreachable", "restarting", "waiting"].includes(row.status)
   )
   if (json) {
     ctx.ui.notify(JSON.stringify(rows), hasFailure ? "warning" : "info")
@@ -860,6 +860,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
               "Every target replaces its native ompi wrapper and OMP using the installed code.",
               "With no target, select only this terminal. Ctrl-C stops watching, not accepted requests.",
+              "Restart normally asks the agent to checkpoint, then resumes with a continuation after correlated replacement.",
+              "A blocked phase reports why safe preparation or continuation could not proceed; Ctrl-C stops watching only.",
             ],
             cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
             restore: [

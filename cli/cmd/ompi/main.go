@@ -25,6 +25,7 @@ const controlHelp = `Usage:
 
 Restart IDs may be unique lowercase hexadecimal prefixes.
 Every target replaces its native ompi wrapper and OMP using the installed code.
+Ordinary restarts cooperatively request a checkpoint and continue after a correlated replacement resumes.
 
 Restart argv replays recognized OMP options but not startup prompts. Unknown
 long options followed by a value-like token disable automatic restart unless
@@ -92,7 +93,7 @@ func runControl(args []string) (int, error) {
 		case "list":
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
-			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.")
+			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.\n  Ordinary restarts request a cooperative checkpoint and continue after correlated replacement.")
 		case "cleanup":
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		case "restore":
@@ -172,7 +173,7 @@ func runControlAction(args []string) (int, error) {
 		case "list":
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
-			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.")
+			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.\n  Ordinary restarts request a cooperative checkpoint and continue after correlated replacement.")
 		case "cleanup":
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		}
@@ -269,7 +270,7 @@ func printRows(rows []cli.Row, jsonOutput bool) int {
 
 func restartExitCode(rows []cli.Row, waiting bool) int {
 	for _, row := range rows {
-		if row.Status == "failed" || row.Status == "unreachable" || row.Status == "unknown" {
+		if row.Status == "failed" || row.Status == "unreachable" || row.Status == "unknown" || row.Status == "blocked" {
 			return 1
 		}
 		if waiting && row.Status != "restarted" {

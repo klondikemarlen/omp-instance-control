@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.0 - 2026-10-27
+
+### Added
+
+- Ask active agents to pause and checkpoint unfinished work before a safe restart, then submit one correlated continuation in the resumed conversation without repeating completed effects.
+- Show cooperative preparation, restart, continuation and concrete blocked outcomes in native and in-OMP controls. Report missing checkpoints after about a minute without forcing shutdown.
+- Require stable OMP 18.13.2 or newer for non-interrupting cooperative delivery; preserve normal launch and peer controls on older hosts. Ambiguous continuation admission blocks rather than automatically sending again.
+
 ## 0.16.0 - 2026-10-27
 
 ### Added

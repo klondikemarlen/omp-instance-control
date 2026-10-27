@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
+import { appendFileSync } from "node:fs"
 import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -634,7 +635,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   const launchToken = "7".repeat(32)
   const sessionFile = path.join(fixture.root, "session.jsonl")
   await mkdir(launchDirectory, { mode: 0o700 })
-  await writeFile(sessionFile, "persisted session", { mode: 0o600 })
+  await writeFile(sessionFile, '{"type":"session","id":"persisted-session"}\n', { mode: 0o600 })
   const scope = getScope({ cwd: fixture.cwd })
   const entryPath = fileURLToPath(new URL("../../omp/index.js", import.meta.url))
   await writePrivateJson(path.join(launchDirectory, "launch.json"), {
@@ -659,11 +660,37 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   const events = createEventBus()
   const handlers = new Map()
   const commands = []
+  const branch = []
+  const tools = new Map()
+  const preparation = Promise.withResolvers()
   function createExtensionApi() {
     return {
       events,
-      pi: createSdk(),
+      pi: {
+        ...createSdk(),
+        VERSION: "18.13.2",
+        z: {
+          object: (properties) => properties,
+          string: () => ({
+            optional() {
+              return this
+            },
+          }),
+          boolean: () => ({}),
+        },
+      },
       runtime: { flagValues: new Map() },
+      registerTool(tool) {
+        tools.set(tool.name, tool)
+      },
+      appendEntry(customType, data) {
+        const entry = { type: "custom", customType, data }
+        branch.push(entry)
+        appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`)
+      },
+      sendUserMessage() {
+        preparation.resolve()
+      },
       on(event, handler) {
         const eventHandlers = handlers.get(event) ?? []
         eventHandlers.push(handler)
@@ -678,14 +705,13 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   const ctx = createContext(fixture.cwd)
   const notifications = []
   let shutdownRequests = 0
-  const shutdownRequested = Promise.withResolvers()
   ctx.sessionManager = {
     getSessionId: () => "persisted-session",
     getSessionFile: () => sessionFile,
+    getBranch: () => branch,
   }
   ctx.shutdown = () => {
     shutdownRequests += 1
-    shutdownRequested.resolve()
   }
   ctx.ui = {
     setStatus() {},
@@ -718,8 +744,25 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
     assert.equal(commands.filter((command) => command.name === "ompi").length, 1)
 
     await commands[0].command.handler(`restart ${records[0].instanceId} --json`, ctx)
-    await shutdownRequested.promise
+    await Promise.race([
+      preparation.promise,
+      new Promise((_, reject) => {
+        const timer = setTimeout(() => reject(new Error(JSON.stringify(notifications))), 1000)
+        timer.unref()
+      }),
+    ])
     const outcomes = JSON.parse(notifications[0].message)
+    await tools.get("ompi_restart_checkpoint").execute(
+      "checkpoint-call",
+      {
+        operationId: outcomes[0].data.operationId,
+        checkpoint: "Resume this session.",
+        ready: true,
+      },
+      undefined,
+      undefined,
+      ctx
+    )
     assert.equal(outcomes[0].status, "accepted")
     assert.equal(shutdownRequests, 1)
   } finally {
@@ -959,6 +1002,24 @@ test("when cleanup receives restart-only options, ompi rejects without cleaning 
     // Assert
     assert.equal(ui.notifications[0].level, "error")
     assert.equal((await transport.readRecords()).length, 1)
+  } finally {
+    await fixture.close()
+  }
+})
+test("when restart help is requested, it explains cooperative preparation and observation", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+
+    // Act
+    await ui.command.handler("help restart", ctx)
+
+    // Assert
+    assert.match(ui.notifications[0].message, /checkpoint/)
+    assert.match(ui.notifications[0].message, /correlated replacement/)
+    assert.match(ui.notifications[0].message, /blocked phase/)
   } finally {
     await fixture.close()
   }

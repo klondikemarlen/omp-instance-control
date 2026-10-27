@@ -28,10 +28,16 @@ func restartRow(row cli.Row, showSession bool) progressLine {
 	}
 
 	line := restartStatusText(row.Status) + "  " + displayInstanceID(id)
+	if row.Data != nil && row.Data.Cooperative != nil {
+		cooperative := row.Data.Cooperative
+		line += "  " + safeTerminalText(cooperative.Phase)
+		if cooperative.Message != "" {
+			line += ": " + safeTerminalText(cooperative.Message)
+		}
+	}
 	if row.Data != nil && row.Data.LastRestart != nil && row.Status == "restarted" {
 		line += " -> " + displayInstanceID(row.Data.InstanceID)
 	}
-
 	lineInfo := progressLine{text: line, status: row.Status}
 	if cwd := restartWorkingDirectory(row); cwd != "" {
 		lineInfo.path = compactRestartPath(cwd)
@@ -101,6 +107,8 @@ func restartStatusText(status string) string {
 		return "Waiting"
 	case "restarting":
 		return "Restarting"
+	case "blocked":
+		return "Blocked"
 	case "restarted":
 		return "Restarted"
 	default:
@@ -494,7 +502,7 @@ func countRestartRows(rows []cli.Row) restartRowCounts {
 		case "unreachable":
 			counts.failed++
 			counts.unreachable++
-		case "failed", "unknown":
+		case "failed", "unknown", "blocked":
 			counts.failed++
 		}
 	}
