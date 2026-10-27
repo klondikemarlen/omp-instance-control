@@ -261,3 +261,165 @@ test("when restart acknowledgements fail or remain unknown, observation does not
   ])
   assert.equal(recordReads, 1)
 })
+
+test("when a cooperative replacement is resuming, observation waits for continuation submission", async () => {
+  // Arrange
+  const original = makeRecord(ORIGINAL_ID, 42)
+  const replacement = makeRecord(REPLACEMENT_ID, 43, {
+    operationId: OPERATION_ID,
+    previousInstanceId: original.instanceId,
+  })
+  let replacementProbes = 0
+  const transport = {
+    async readRecords() {
+      return [replacement]
+    },
+    async request(_record, request) {
+      assert.equal(request.action, "status")
+      replacementProbes += 1
+      return {
+        ok: true,
+        data: {
+          ...liveStatus(replacement),
+          cooperative: {
+            operationId: OPERATION_ID,
+            phase: replacementProbes === 1 ? "resuming" : "resumed",
+            message:
+              replacementProbes === 1 ? "Submitting continuation." : "Continuation submitted.",
+            requestedAt: 100,
+            resumedAt: replacementProbes === 1 ? undefined : 200,
+          },
+        },
+      }
+    },
+  }
+  const progress = []
+
+  // Act
+  const rows = await waitForRestarts(transport, [acceptedRow(original)], {
+    onProgress(current) {
+      progress.push(current[0].status)
+    },
+  })
+
+  // Assert
+  assert.deepEqual(progress, ["waiting", "restarting", "restarted"])
+  assert.equal(replacementProbes, 2)
+  assert.equal(rows[0].status, "restarted")
+  assert.equal(rows[0].data.cooperative.phase, "resumed")
+})
+
+test("when cooperative preparation is blocked, observation reports blocked without restarting", async () => {
+  // Arrange
+  const original = makeRecord(ORIGINAL_ID, 42)
+  let actions = 0
+  const transport = {
+    async readRecords() {
+      return [original]
+    },
+    async request(_record, request) {
+      actions += 1
+      assert.equal(request.action, "status")
+      return {
+        ok: true,
+        data: {
+          ...liveStatus(original),
+          cooperative: {
+            operationId: OPERATION_ID,
+            phase: "blocked",
+            message: "Unsafe background job remains active.",
+            requestedAt: 100,
+          },
+        },
+      }
+    },
+  }
+
+  // Act
+  const rows = await waitForRestarts(transport, [acceptedRow(original)])
+
+  // Assert
+  assert.equal(actions, 1)
+  assert.equal(rows[0].status, "blocked")
+  assert.match(rows[0].error, /Unsafe background job/)
+})
+
+test("when preparation status is unchanged across probes, progress reports only transitions", async () => {
+  // Arrange
+  const original = makeRecord(ORIGINAL_ID, 42)
+  const replacement = makeRecord(REPLACEMENT_ID, 43, {
+    operationId: OPERATION_ID,
+    previousInstanceId: original.instanceId,
+  })
+  let reads = 0
+  const phases = []
+  const transport = {
+    async readRecords() {
+      reads += 1
+      return reads <= 2 ? [original] : [replacement]
+    },
+    async request(record) {
+      return {
+        ok: true,
+        data: {
+          ...liveStatus(record),
+          cooperative: {
+            operationId: OPERATION_ID,
+            phase: record.instanceId === original.instanceId ? "preparing" : "resumed",
+            message: "Checkpoint progress.",
+            requestedAt: 100,
+          },
+        },
+      }
+    },
+  }
+
+  // Act
+  await waitForRestarts(transport, [acceptedRow(original)], {
+    onProgress(current) {
+      phases.push(current[0].data?.cooperative?.phase ?? "accepted")
+    },
+  })
+
+  // Assert
+  assert.deepEqual(phases, ["accepted", "preparing", "resumed"])
+})
+
+for (const finalPhase of ["resumed", "blocked"]) {
+  test(`when a cooperative replacement initially omits progress, observation waits for ${finalPhase}`, async () => {
+    // Arrange
+    const original = makeRecord(ORIGINAL_ID, 42)
+    const replacement = makeRecord(REPLACEMENT_ID, 43, {
+      operationId: OPERATION_ID,
+      previousInstanceId: original.instanceId,
+    })
+    const accepted = acceptedRow(original)
+    accepted.data.cooperative = { operationId: OPERATION_ID, phase: "preparing" }
+    let probes = 0
+    const transport = {
+      async readRecords() {
+        return [replacement]
+      },
+      async request() {
+        probes += 1
+        const data = liveStatus(replacement)
+        if (probes > 1) {
+          data.cooperative = {
+            operationId: OPERATION_ID,
+            phase: probes === 2 ? "resuming" : finalPhase,
+            message: "Continuation outcome.",
+          }
+        }
+        return { ok: true, data }
+      },
+    }
+
+    // Act
+    const rows = await waitForRestarts(transport, [accepted])
+
+    // Assert
+    assert.equal(probes, 3)
+    assert.equal(rows[0].status, finalPhase === "resumed" ? "restarted" : "blocked")
+    assert.equal(rows[0].data.cooperative.phase, finalPhase)
+  })
+}

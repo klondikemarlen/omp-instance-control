@@ -150,7 +150,15 @@ export function formatRows(rows) {
         parts.push(compactProjectPath(currentCwd))
       }
 
-      if (row.status === "online" && row.data?.lastRestart) {
+      if (row.data?.cooperative) {
+        const { phase, message } = row.data.cooperative
+        parts.push(message ? `${phase}: ${message}` : phase)
+      }
+      if (
+        row.status === "online" &&
+        row.data?.lastRestart &&
+        (!row.data.cooperative || row.data.cooperative.phase === "resumed")
+      ) {
         parts.push("(previous restart completed)")
       }
 

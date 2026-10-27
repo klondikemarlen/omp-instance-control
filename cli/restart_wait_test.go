@@ -419,3 +419,187 @@ func TestWaitForRestartsMissingOperationIDBecomesUnknown(t *testing.T) {
 		t.Fatalf("missing operation ID was not reported truthfully: rows=%#v err=%v", rows, err)
 	}
 }
+
+func TestWaitForRestartsWaitsForCooperativeContinuation(t *testing.T) {
+	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	operationID := "restart-operation"
+	candidate := replacementRecord("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 11, operationID, original.InstanceID)
+	probes := 0
+	transport := restartWaitTransport{
+		readRecords: func() ([]protocol.Record, error) {
+			return []protocol.Record{candidate}, nil
+		},
+		request: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+			if record.InstanceID != candidate.InstanceID || request.Action != "status" {
+				t.Fatalf("unexpected restart observation request: record=%q action=%q", record.InstanceID, request.Action)
+			}
+			probes++
+			phase := "resuming"
+			var resumedAt *int64
+			if probes == 2 {
+				phase = "resumed"
+				value := int64(200)
+				resumedAt = &value
+			}
+			return statusResponse(request, &protocol.Data{
+				InstanceID: candidate.InstanceID,
+				PID:        candidate.PID,
+				LastRestart: &protocol.Restart{
+					OperationID:        operationID,
+					PreviousInstanceID: original.InstanceID,
+				},
+				Cooperative: &protocol.CooperativeRestart{
+					OperationID: operationID,
+					Phase:       phase,
+					Message:     "Continuation status.",
+					RequestedAt: 100,
+					ResumedAt:   resumedAt,
+				},
+			}), nil
+		},
+	}
+	var progressStatuses []string
+
+	rows, err := WaitForRestarts(context.Background(), transport, []Row{acceptedRestartRow(original, operationID)}, func(rows []Row) {
+		progressStatuses = append(progressStatuses, rows[0].Status)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probes != 2 || len(rows) != 1 || rows[0].Status != "restarted" {
+		t.Fatalf("observer completed before continuation was submitted: probes=%d rows=%#v", probes, rows)
+	}
+	if rows[0].Data.Cooperative == nil || rows[0].Data.Cooperative.Phase != "resumed" {
+		t.Fatalf("completion did not retain resumed metadata: %#v", rows[0].Data)
+	}
+	if len(progressStatuses) != 3 || progressStatuses[1] != "restarting" || progressStatuses[2] != "restarted" {
+		t.Fatalf("progress statuses = %#v", progressStatuses)
+	}
+}
+
+func TestWaitForRestartsReportsCooperativeBlock(t *testing.T) {
+	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	operationID := "restart-operation"
+	requests := 0
+	transport := restartWaitTransport{
+		readRecords: func() ([]protocol.Record, error) {
+			return []protocol.Record{original}, nil
+		},
+		request: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+			requests++
+			if record.InstanceID != original.InstanceID || request.Action != "status" {
+				t.Fatalf("unexpected blocked status request: record=%q action=%q", record.InstanceID, request.Action)
+			}
+			return statusResponse(request, &protocol.Data{
+				InstanceID: original.InstanceID,
+				Cooperative: &protocol.CooperativeRestart{
+					OperationID: operationID,
+					Phase:       "blocked",
+					Message:     "Unsafe background job remains active.",
+					RequestedAt: 100,
+				},
+			}), nil
+		},
+	}
+	rows, err := WaitForRestarts(context.Background(), transport, []Row{acceptedRestartRow(original, operationID)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || len(rows) != 1 || rows[0].Status != "blocked" {
+		t.Fatalf("blocked operation was not terminal to the observer: requests=%d rows=%#v", requests, rows)
+	}
+	if rows[0].Error != "Unsafe background job remains active." {
+		t.Fatalf("blocked reason = %q", rows[0].Error)
+	}
+}
+
+func TestWaitForRestartsReportsOnlyCooperativeTransitions(t *testing.T) {
+	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	operationID := "restart-operation"
+	candidate := replacementRecord("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 11, operationID, original.InstanceID)
+	reads := 0
+	transport := restartWaitTransport{
+		readRecords: func() ([]protocol.Record, error) {
+			reads++
+			if reads <= 2 {
+				return []protocol.Record{original}, nil
+			}
+			return []protocol.Record{candidate}, nil
+		},
+		request: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+			phase := "preparing"
+			if record.InstanceID == candidate.InstanceID {
+				phase = "resumed"
+			}
+			return statusResponse(request, &protocol.Data{
+				InstanceID:  record.InstanceID,
+				PID:         record.PID,
+				LastRestart: record.LastRestart,
+				Cooperative: &protocol.CooperativeRestart{
+					OperationID: operationID,
+					Phase:       phase,
+					Message:     "Checkpoint progress.",
+					RequestedAt: 100,
+				},
+			}), nil
+		},
+	}
+	var phases []string
+
+	_, err := WaitForRestarts(context.Background(), transport, []Row{acceptedRestartRow(original, operationID)}, func(rows []Row) {
+		phase := "accepted"
+		if rows[0].Data.Cooperative != nil {
+			phase = rows[0].Data.Cooperative.Phase
+		}
+		phases = append(phases, phase)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(phases) != 3 || phases[0] != "accepted" || phases[1] != "preparing" || phases[2] != "resumed" {
+		t.Fatalf("progress did not retain only preparation transitions: %#v", phases)
+	}
+}
+
+func TestCooperativeReplacementWaitsThroughMissingStartupProgress(t *testing.T) {
+	for _, finalPhase := range []string{"resumed", "blocked"} {
+		t.Run(finalPhase, func(t *testing.T) {
+			original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+			operationID := "restart-operation"
+			candidate := replacementRecord("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 11, operationID, original.InstanceID)
+			accepted := acceptedRestartRow(original, operationID)
+			accepted.Data.Cooperative = &protocol.CooperativeRestart{OperationID: operationID, Phase: "preparing"}
+			probes := 0
+			transport := restartWaitTransport{
+				readRecords: func() ([]protocol.Record, error) { return []protocol.Record{candidate}, nil },
+				request: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+					probes++
+					data := &protocol.Data{
+						InstanceID:  candidate.InstanceID,
+						PID:         candidate.PID,
+						LastRestart: &protocol.Restart{OperationID: operationID, PreviousInstanceID: original.InstanceID},
+					}
+					if probes > 1 {
+						phase := "resuming"
+						if probes > 2 {
+							phase = finalPhase
+						}
+						data.Cooperative = &protocol.CooperativeRestart{OperationID: operationID, Phase: phase}
+					}
+					return statusResponse(request, data), nil
+				},
+			}
+			rows, err := WaitForRestarts(context.Background(), transport, []Row{accepted}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStatus := "restarted"
+			if finalPhase == "blocked" {
+				wantStatus = "blocked"
+			}
+			if probes != 3 || rows[0].Status != wantStatus || rows[0].Data.Cooperative.Phase != finalPhase {
+				t.Fatalf("startup status bypassed continuation: probes=%d rows=%#v", probes, rows)
+			}
+		})
+	}
+}

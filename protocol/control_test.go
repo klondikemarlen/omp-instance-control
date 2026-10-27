@@ -3,6 +3,7 @@ package protocol
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -175,4 +176,23 @@ func TestGetScopeUsesHomeAndProfileAgentBoundaries(t *testing.T) {
 		t.Fatalf("profile scopes should be independent of process cwd: %#v %#v", first, second)
 	}
 
+}
+func TestDataPreservesCooperativeRestartWireMetadata(t *testing.T) {
+	encoded := []byte(`{"instanceId":"replacement","cooperative":{"operationId":"restart-operation","phase":"resuming","message":"Submitting continuation.","requestedAt":100,"checkpointAt":150},"extra":"preserved"}`)
+	var data Data
+	if err := json.Unmarshal(encoded, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Cooperative == nil || data.Cooperative.OperationID != "restart-operation" ||
+		data.Cooperative.Phase != "resuming" || data.Cooperative.CheckpointAt == nil ||
+		*data.Cooperative.CheckpointAt != 150 {
+		t.Fatalf("cooperative restart metadata was not decoded: %#v", data.Cooperative)
+	}
+	roundTrip, err := json.Marshal(&data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(roundTrip) != string(encoded) {
+		t.Fatalf("raw status payload changed: %s", roundTrip)
+	}
 }

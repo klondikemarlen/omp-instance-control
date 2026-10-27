@@ -198,3 +198,26 @@ test("when older status data omits Send Context, listing keeps JSON and human ou
   assert.match(formatRows(rows), /Send Context: unknown/)
   assert.deepEqual(JSON.parse(JSON.stringify(rows))[0].data, { state: "running" })
 })
+test("when status includes cooperative metadata, listing displays a safe phase and blocker", async () => {
+  // Arrange
+  const client = transport([first], async () => ({
+    ok: true,
+    data: {
+      state: "running",
+      cooperative: {
+        operationId: "restart-operation",
+        phase: "blocked",
+        message: "unsafe job\u001b[31m remains",
+        requestedAt: 100,
+      },
+    },
+  }))
+
+  // Act
+  const rows = await listInstances(client)
+
+  // Assert
+  const formatted = formatRows(rows)
+  assert.match(formatted, /blocked: unsafe job\\u001b\[31m remains/)
+  assert.equal(JSON.parse(JSON.stringify(rows))[0].data.cooperative.phase, "blocked")
+})
