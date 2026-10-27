@@ -296,5 +296,5 @@ func launchRecoverySlot(scope protocol.Scope, selected protocol.RecoverySession)
 	if err != nil {
 		return 1, err
 	}
-	return linux.RestoreSessionSlot(scope, selected.RestoreID, resolveExtension(executable), *selected.Session)
+	return linux.RestoreSessionSlot(scope, selected.RestoreID, resolveExtension(executable), version, *selected.Session)
 }

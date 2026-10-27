@@ -76,10 +76,38 @@ var execWrapperProcess = syscall.Exec
 
 func execWrapperReplacement(
 	launchDir, executable string, scope protocol.Scope, args []string, cwd, sessionFile string,
-	restart *restartRecord, restoreID string, restoreLock *os.File,
+	restart *restartRecord, restoreID string, restoreLock *os.File, nativeTarget *protocol.NativeTarget,
 ) error {
-	if err := usableExecutable(executable); err != nil {
-		return fmt.Errorf("cannot execute installed native wrapper %q: %w", executable, err)
+	execPath := executable
+	var pinnedExecutable *os.File
+	if nativeTarget == nil {
+		if err := usableExecutable(executable); err != nil {
+			return fmt.Errorf("cannot execute installed native wrapper %q: %w", executable, err)
+		}
+	} else {
+		if err := protocol.ValidateNativeTarget(nativeTarget); err != nil {
+			return fmt.Errorf("invalid installed native wrapper target: %w", err)
+		}
+		fd, err := syscall.Open(executable, syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			return fmt.Errorf("cannot open installed native wrapper %q: %w", executable, err)
+		}
+		pinnedExecutable = os.NewFile(uintptr(fd), executable)
+		defer pinnedExecutable.Close()
+		var image syscall.Stat_t
+		if err := syscall.Fstat(fd, &image); err != nil {
+			return fmt.Errorf("cannot inspect installed native wrapper %q: %w", executable, err)
+		}
+		if image.Mode&syscall.S_IFMT != syscall.S_IFREG || image.Mode&0o111 == 0 {
+			return fmt.Errorf("cannot execute installed native wrapper %q: not a regular executable file", executable)
+		}
+		if strconv.FormatUint(uint64(image.Dev), 10) != nativeTarget.Device ||
+			strconv.FormatUint(image.Ino, 10) != nativeTarget.Inode ||
+			strconv.FormatInt(image.Size, 10) != nativeTarget.Size ||
+			strconv.FormatInt(image.Mtim.Sec*1e9+image.Mtim.Nsec, 10) != nativeTarget.ModifiedNs {
+			return fmt.Errorf("cannot execute installed native wrapper %q: installed image changed after verification", executable)
+		}
+		execPath = fmt.Sprintf("/proc/self/fd/%d", fd)
 	}
 	if restoreID != "" && restoreLock == nil {
 		return errors.New("cannot restart the native wrapper without its managed restore lock")
@@ -121,13 +149,13 @@ func execWrapperReplacement(
 		updates["PI_CODING_AGENT_DIR"] = scope.AgentDir
 	}
 	environment := replaceEnvironment(os.Environ(), updates)
-	if err := execWrapperProcess(executable, []string{executable}, environment); err != nil {
+	if err := execWrapperProcess(execPath, []string{executable}, environment); err != nil {
 		return fmt.Errorf("cannot execute installed native wrapper %q: %w", executable, err)
 	}
 	return nil
 }
 
-func resumeWrapper(args []string, extensionPath string) (int, error) {
+func resumeWrapper(args []string, extensionPath, nativeVersion string) (int, error) {
 	if len(args) != 0 {
 		return 1, errors.New("invalid native wrapper restart invocation")
 	}
@@ -139,9 +167,32 @@ func resumeWrapper(args []string, extensionPath string) (int, error) {
 		defer lock.Close()
 	}
 	return launchWithResume(
-		state.Args, extensionPath, state.RestoreID, lock,
+		state.Args, extensionPath, nativeVersion, state.RestoreID, lock,
 		&resumeState{cwd: state.CWD, sessionFile: state.SessionFile, restart: state.Restart},
 	)
+}
+
+type nativeImage struct {
+	Executable string `json:"executable"`
+	Version    string `json:"version"`
+	Device     string `json:"device"`
+	Inode      string `json:"inode"`
+}
+
+func nativeImageMetadata(executable, version string, executableErr error) *nativeImage {
+	if executableErr != nil || executable == "" || version == "" {
+		return nil
+	}
+	var image syscall.Stat_t
+	if err := syscall.Stat("/proc/self/exe", &image); err != nil {
+		return nil
+	}
+	return &nativeImage{
+		Executable: executable,
+		Version:    version,
+		Device:     strconv.FormatUint(uint64(image.Dev), 10),
+		Inode:      strconv.FormatUint(image.Ino, 10),
+	}
 }
 
 func consumeWrapperExecState() (wrapperExecState, *os.File, error) {

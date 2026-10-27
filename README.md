@@ -10,7 +10,7 @@ OMP owns settlement, transcript persistence, and graceful teardown. The native G
 - An interactive terminal for participating sessions; a persisted session for restart/resume.
 - OMP 18.8.7 is the initial verification target. Lifecycle actions use public extension APIs; one read-only private flag-metadata boundary is documented below.
 
-The `ompi` executable is statically linked and does not require Node.js. OMP loads the shipped JavaScript adapter using its own runtime. macOS and Windows are not supported. Resource-only reload, automatic package installation, and background binary-update detection are not implemented.
+The `ompi` executable is statically linked and does not require Node.js. OMP loads the shipped JavaScript adapter using its own runtime. macOS and Windows are not supported. Resource-only reload and automatic package installation are not implemented.
 
 ## Installation
 
@@ -80,7 +80,11 @@ Use `ompi control restart all --no-wait` for acknowledgement-only behavior. Wait
 
 Every `ompi control restart ID_OR_PREFIX|all` and `/ompi restart [ID_OR_PREFIX|all]` replaces each selected terminal's native `ompi` wrapper as well as OMP. After OMP settles and exits successfully, the wrapper executes its installed replacement, reloads the adapter, and resumes the exact current transcript and working directory. The recovery slot and its lock survive native replacement; a fresh control identity identifies the new OMP launch. Bare `/ompi restart` selects only the invoking terminal; explicit IDs and `all` retain their profile/config-root scope.
 
-This is explicit adoption of code already installed on disk, not automatic update detection, live code patching, or package installation. Start one fresh `ompi` launcher after upgrading from a version before 0.11.0: older wrappers cannot acquire the native replacement protocol merely by reloading their adapter. Unsupported targets refuse restart before shutdown rather than falling back to OMP-only restart; a batch retains each target's refusal while independently restarting supported peers. Ordinary unwrapped OMP can control managed peers but cannot restart itself through `ompi`.
+Managed launches from 0.16.0 onward also detect installed-binary changes automatically, checking at startup and every two seconds. A bounded version probe precedes acceptance; OMP still owns the safe activation boundary, so active work, queued submissions, and background deliveries can delay replacement. Atomic package replacements are detected even when the version string stays unchanged. This adopts code already installed on disk; it neither installs packages nor patches live instructions.
+
+`ompi control list` and `/ompi list` distinguish the running native version, installed version, and update state; JSON exposes them under `data.native`. Missing or unusable candidates report failure without shutting down the current session. Each observed file identity is attempted once per running adapter, preventing repeated restart requests for a rejected candidate. A replacement changed after verification is refused before native execution; the saved conversation remains recoverable through `ompi control restore`.
+
+Existing terminals must first adopt a capable 0.16.0 launcher and adapter through a manual scoped restart. Launchers from before 0.11.0 require one fresh `ompi` launch: they cannot acquire native replacement merely by reloading their adapter. Unsupported targets refuse restart before shutdown rather than falling back to OMP-only restart; a batch retains each target's refusal while independently restarting supported peers. Ordinary unwrapped OMP can control managed peers but cannot restart itself through `ompi`.
 
 From OMP with the plugin loaded:
 

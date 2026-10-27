@@ -98,6 +98,38 @@ func TestCreateAndValidateRequests(t *testing.T) {
 	if err := ValidateRequest(Request{Version: Version, InstanceID: instanceID, RequestID: "r", Action: "reload"}); err == nil {
 		t.Fatal("resource-only reload must remain unsupported")
 	}
+	if err := ValidateRequest(Request{
+		Version: Version, InstanceID: instanceID, RequestID: "automatic",
+		Action: "restart-wrapper",
+		NativeTarget: &NativeTarget{
+			Device: "8", Inode: "19", Size: "0", ModifiedNs: "-1",
+		},
+	}); err != nil {
+		t.Fatalf("valid native target was rejected: %v", err)
+	}
+	for _, target := range []*NativeTarget{
+		{Device: "+1", Inode: "19", Size: "20", ModifiedNs: "0"},
+		{Device: "8", Inode: "019", Size: "20", ModifiedNs: "0"},
+		{Device: "8", Inode: "19", Size: "-1", ModifiedNs: "0"},
+		{Device: "8", Inode: "19", Size: "20", ModifiedNs: "+1"},
+		{Device: "18446744073709551616", Inode: "19", Size: "20", ModifiedNs: "0"},
+		{Device: "8", Inode: "19", Size: "20", ModifiedNs: "9223372036854775808"},
+	} {
+		if err := ValidateRequest(Request{
+			Version: Version, InstanceID: instanceID, RequestID: "automatic",
+			Action: "restart-wrapper", NativeTarget: target,
+		}); err == nil {
+			t.Errorf("invalid native target was accepted: %#v", target)
+		}
+	}
+	if err := ValidateRequest(Request{
+		Version: Version, InstanceID: instanceID, RequestID: "manual",
+		Action: "restart", NativeTarget: &NativeTarget{
+			Device: "8", Inode: "19", Size: "20", ModifiedNs: "0",
+		},
+	}); err == nil {
+		t.Fatal("manual restart accepted an automatic native target")
+	}
 }
 
 func TestValidateResponseRequiresCorrelatedStructuredAcknowledgement(t *testing.T) {

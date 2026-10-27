@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.0 - 2026-10-27
+
+### Added
+
+- Detect installed native `ompi` replacements automatically in capable managed terminals and adopt them through OMP-owned settled restart, preserving the conversation, working directory, profile and recovery slot.
+- Show each instance's running native version, installed version and update state in native and in-OMP lists.
+- Refuse missing, unusable or changed replacement images explicitly, with bounded version checks and no automatic relaunch loop.
+
 ## 0.15.0 - 2026-10-26
 
 ### Added

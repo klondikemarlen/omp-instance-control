@@ -37,6 +37,7 @@ type launchRecord struct {
 	ResumeArgs        []string              `json:"resumeArgs"`
 	Owner             protocol.RestoreOwner `json:"owner"`
 	CanRestartWrapper bool                  `json:"canRestartWrapper"`
+	Native            *nativeImage          `json:"native,omitempty"`
 }
 
 type restartRecord struct {
@@ -45,29 +46,30 @@ type restartRecord struct {
 }
 
 type handoffRecord struct {
-	Version        int    `json:"version"`
-	Token          string `json:"token"`
-	OperationID    string `json:"operationId"`
-	InstanceID     string `json:"instanceId"`
-	SessionFile    string `json:"sessionFile"`
-	CWD            string `json:"cwd"`
-	RestartWrapper bool   `json:"restartWrapper,omitempty"`
+	Version        int                    `json:"version"`
+	Token          string                 `json:"token"`
+	OperationID    string                 `json:"operationId"`
+	InstanceID     string                 `json:"instanceId"`
+	SessionFile    string                 `json:"sessionFile"`
+	CWD            string                 `json:"cwd"`
+	RestartWrapper bool                   `json:"restartWrapper,omitempty"`
+	NativeTarget   *protocol.NativeTarget `json:"nativeTarget,omitempty"`
 }
 
 // Launch runs upstream OMP as a foreground child, loading the public control
 // extension. OMP performs settlement and writes a one-shot restart handoff.
-func Launch(args []string, extensionPath string) (int, error) {
+func Launch(args []string, extensionPath, nativeVersion string) (int, error) {
 	if os.Getenv(execStatePathEnv) != "" || os.Getenv(execStateTokenEnv) != "" || os.Getenv(execStateLockEnv) != "" {
-		return resumeWrapper(args, extensionPath)
+		return resumeWrapper(args, extensionPath, nativeVersion)
 	}
-	return launch(args, extensionPath, "", nil)
+	return launch(args, extensionPath, nativeVersion, "", nil)
 }
 
-func launch(args []string, extensionPath, restoreID string, restoreLock *os.File) (int, error) {
-	return launchWithResume(args, extensionPath, restoreID, restoreLock, nil)
+func launch(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File) (int, error) {
+	return launchWithResume(args, extensionPath, nativeVersion, restoreID, restoreLock, nil)
 }
 
-func launchWithResume(args []string, extensionPath, restoreID string, restoreLock *os.File, resume *resumeState) (int, error) {
+func launchWithResume(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState) (int, error) {
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		return runPassthrough(args)
 	}
@@ -157,6 +159,7 @@ func launchWithResume(args []string, extensionPath, restoreID string, restoreLoc
 		executable = "omp"
 	}
 	wrapperExecutable, wrapperPathErr := currentWrapperExecutable()
+	nativeMetadata := nativeImageMetadata(wrapperExecutable, nativeVersion, wrapperPathErr)
 	canRestartWrapper := wrapperPathErr == nil && usableExecutable(wrapperExecutable) == nil
 	var restart *restartRecord
 	var resumeFile string
@@ -189,6 +192,7 @@ func launchWithResume(args []string, extensionPath, restoreID string, restoreLoc
 			ExtensionPath: extensionPath, LastRestart: restart, BuiltinFlags: builtinFlags,
 			RestoreID: restoreID, ResumeArgs: restartArgs, Owner: owner,
 			CanRestartWrapper: canRestartWrapper,
+			Native:            nativeMetadata,
 		}
 		if restartArgsErr != nil && restart == nil {
 			launch.RestartError = restartArgsErr.Error()
@@ -267,7 +271,7 @@ func launchWithResume(args []string, extensionPath, restoreID string, restoreLoc
 			if !canRestartWrapper {
 				return 1, fmt.Errorf("cannot restart the native wrapper: installed executable is unavailable or unusable: %s", wrapperExecutable)
 			}
-			if err := execWrapperReplacement(launchDir, wrapperExecutable, scope, restartArgs, cwd, resumeFile, restart, restoreID, restoreLock); err != nil {
+			if err := execWrapperReplacement(launchDir, wrapperExecutable, scope, restartArgs, cwd, resumeFile, restart, restoreID, restoreLock, handoff.NativeTarget); err != nil {
 				return 1, err
 			}
 			return 1, errors.New("native wrapper replacement returned without executing")
@@ -445,7 +449,7 @@ func validateHandoff(handoff handoffRecord) error {
 	}
 	request := protocol.Request{
 		Version: handoff.Version, InstanceID: handoff.InstanceID,
-		RequestID: handoff.OperationID, Action: action,
+		RequestID: handoff.OperationID, Action: action, NativeTarget: handoff.NativeTarget,
 	}
 	if protocol.ValidateRequest(request) != nil || !filepath.IsAbs(handoff.SessionFile) || !filepath.IsAbs(handoff.CWD) {
 		return errors.New("invalid restart handoff; refusing to resume")

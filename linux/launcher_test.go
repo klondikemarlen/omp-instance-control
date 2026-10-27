@@ -166,6 +166,26 @@ func TestHandoffIdentifierUsesProtocolUTF16Boundary(t *testing.T) {
 		t.Fatal("handoff exceeded the protocol UTF-16 boundary")
 	}
 }
+func TestHandoffNativeTargetRequiresAutomaticWrapperRestart(t *testing.T) {
+	handoff := handoffRecord{
+		Version: 1, OperationID: "automatic",
+		InstanceID: strings.Repeat("a", 32), SessionFile: "/session.jsonl", CWD: "/project",
+		RestartWrapper: true,
+		NativeTarget:   &protocol.NativeTarget{Device: "8", Inode: "19", Size: "20", ModifiedNs: "-1"},
+	}
+	if err := validateHandoff(handoff); err != nil {
+		t.Fatalf("valid automatic native target was rejected: %v", err)
+	}
+	handoff.RestartWrapper = false
+	if err := validateHandoff(handoff); err == nil {
+		t.Fatal("manual restart handoff accepted an automatic native target")
+	}
+	handoff.RestartWrapper = true
+	handoff.NativeTarget.Inode = "019"
+	if err := validateHandoff(handoff); err == nil {
+		t.Fatal("handoff accepted a non-canonical native target")
+	}
+}
 
 type fakeInvocation struct {
 	Args       []string       `json:"args"`
@@ -372,7 +392,7 @@ func TestLaunchFakeOMPResumesWithCurrentCWDAndNoPromptReplay(t *testing.T) {
 		"--profile", "work", "--cwd", "project", "--config", "settings.json",
 		"--system-prompt-template", "prompts/system.txt", "--resume", "old-session",
 		"startup prompt", "--", "literal tail",
-	}, filepath.Join(root, "adapter.js"))
+	}, filepath.Join(root, "adapter.js"), "test")
 	if err != nil || code != 0 {
 		t.Fatalf("Launch returned code=%d err=%v", code, err)
 	}
@@ -414,7 +434,7 @@ func TestLaunchRejectsInvalidHandoffWithoutSecondChild(t *testing.T) {
 	}
 	logPath := filepath.Join(root, "invocations.jsonl")
 	prepareFakeOMP(t, root, logPath, session, cwd, "invalid")
-	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"))
+	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"), "test")
 	if err == nil || code != 1 {
 		t.Fatalf("expected invalid handoff failure, got code=%d err=%v", code, err)
 	}
@@ -436,7 +456,7 @@ func TestUnsafeRecoveryStoreDoesNotBlockOrdinaryLaunch(t *testing.T) {
 	}
 	t.Setenv("OMPI_TEST_EXIT_CODE", "23")
 
-	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"))
+	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"), "test")
 	if err != nil || code != 23 {
 		t.Fatalf("unsafe recovery storage blocked standard OMP execution: code=%d err=%v", code, err)
 	}
@@ -460,7 +480,7 @@ func TestLaunchCleansOwnedRegistrationAfterNonzeroChildExit(t *testing.T) {
 	t.Setenv("OMPI_TEST_REGISTER", "1")
 	t.Setenv("OMPI_TEST_EXIT_CODE", "23")
 
-	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"))
+	code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"), "test")
 	if err != nil || code != 23 {
 		t.Fatalf("Launch returned code=%d err=%v", code, err)
 	}
@@ -489,7 +509,7 @@ func TestLaunchForwardsSignalAndDoesNotRestart(t *testing.T) {
 	}
 	done := make(chan launchResult, 1)
 	go func() {
-		code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"))
+		code, err := Launch([]string{"--no-tools"}, filepath.Join(root, "adapter.js"), "test")
 		done <- launchResult{code: code, err: err}
 	}()
 	deadline := time.Now().Add(5 * time.Second)
@@ -528,7 +548,7 @@ func TestAmbiguousOptionDisablesRestartWithoutChangingFirstLaunch(t *testing.T) 
 	}
 	logPath := filepath.Join(root, "invocations.jsonl")
 	prepareFakeOMP(t, root, logPath, session, cwd, "valid")
-	code, err := Launch([]string{"--custom-flag", "startup prompt"}, filepath.Join(root, "adapter.js"))
+	code, err := Launch([]string{"--custom-flag", "startup prompt"}, filepath.Join(root, "adapter.js"), "test")
 	if err != nil || code != 0 {
 		t.Fatalf("Launch returned code=%d err=%v", code, err)
 	}

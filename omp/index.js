@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto"
 import { realpath, stat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
+import { watchNativeUpdates } from "../linux/native-updates.js"
 import { captureRecoveryCheckpoint } from "../linux/recovery.js"
 import { captureRestoreSnapshot } from "../linux/restore.js"
 import { createTransport, readSendContextMetadata } from "../linux/transport.js"
@@ -12,6 +13,7 @@ import {
   writeRestartHandoff,
 } from "./launcher-context.js"
 import { registerOmpiCommand } from "./command.js"
+import { requestWrapperRestart } from "./restart.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
 const EXIT_REQUESTED_EVENT = "omp-exit-command:exit-requested"
@@ -67,6 +69,7 @@ export default async function instanceControl(pi) {
     }
 
     runtime.exitRequestedSessionId = request.sessionId
+    runtime.nativeUpdates?.close()
   })
 
   function hasMatchingExitRequest(state, ctx) {
@@ -184,6 +187,7 @@ export default async function instanceControl(pi) {
           ...currentRecord,
           canRestart,
           sendContext,
+          native: state.nativeUpdates?.getStatus() ?? null,
         },
       }
     }
@@ -219,7 +223,11 @@ export default async function instanceControl(pi) {
       runtime.restartAcknowledged = false
       runtime.pending = request.requestId
       runtime.pendingAction = request.action
+      runtime.nativeTarget = request.nativeTarget ?? null
       runtime.admission = refresh(ctx)
+    }
+    if (request.nativeTarget) {
+      runtime.nativeTarget = request.nativeTarget
     }
     const admission = runtime.admission
     try {
@@ -228,6 +236,7 @@ export default async function instanceControl(pi) {
       if (runtime.admission === admission) {
         runtime.pending = null
         runtime.pendingAction = null
+        runtime.nativeTarget = null
         runtime.admission = undefined
       }
       throw error
@@ -236,6 +245,7 @@ export default async function instanceControl(pi) {
       if (firstRequest && state.admission === admission && state.pending === request.requestId) {
         state.pending = null
         state.pendingAction = null
+        state.nativeTarget = null
         state.admission = undefined
       }
       rejectRestartAfterExitRequest(state, ctx)
@@ -296,8 +306,28 @@ export default async function instanceControl(pi) {
       await refresh(ctx)
       await refreshCompletions(ctx)
       ctx.ui.setStatus("instance-control", `instance ${runtime.instanceId.slice(0, 8)}`)
+      const state = runtime
+      if (state.launch.native && state.launch.canRestartWrapper === true) {
+        state.nativeUpdates = watchNativeUpdates(state.launch.native, async (candidate) => {
+          if (runtime !== state || state.closing || hasMatchingExitRequest(state, state.ctx)) {
+            throw new ProtocolError("INSTANCE_CLOSING", "This instance is exiting.")
+          }
+
+          await requestWrapperRestart(state, {
+            device: candidate.device,
+            inode: candidate.inode,
+            size: candidate.size,
+            modifiedNs: candidate.modifiedNs,
+          })
+          state.ctx.ui.notify(
+            `Installed native ompi ${candidate.installedVersion} detected; update accepted. OMP owns settlement before relaunch.`,
+            "info"
+          )
+        })
+      }
     } catch (error) {
       if (runtime) {
+        runtime.nativeUpdates?.close()
         await runtime.server?.close()
         await runtime.transport.removeRecord(runtime.instanceId)
         runtime = undefined
@@ -327,15 +357,13 @@ export default async function instanceControl(pi) {
       if (runtime && isMainTerminal(ctx)) {
         const state = runtime
         state.closing = true
+        state.nativeUpdates?.close()
         try {
           if (runtime.pending && !hasMatchingExitRequest(runtime, ctx)) {
-            writeRestartHandoff(
-              runtime.launch,
-              runtime.pending,
-              runtime.instanceId,
-              ctx,
-              runtime.pendingAction === "restart-wrapper"
-            )
+            writeRestartHandoff(runtime.launch, runtime.pending, runtime.instanceId, ctx, {
+              restartWrapper: runtime.pendingAction === "restart-wrapper",
+              nativeTarget: runtime.nativeTarget,
+            })
           }
         } finally {
           const previousWrite = state.recordWrite ?? Promise.resolve()

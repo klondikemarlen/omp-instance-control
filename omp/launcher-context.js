@@ -91,7 +91,13 @@ export async function recordLaunchRegistration(launch, scope, instanceId) {
   })
 }
 
-export function writeRestartHandoff(launch, operationId, instanceId, ctx, restartWrapper = false) {
+export function writeRestartHandoff(
+  launch,
+  operationId,
+  instanceId,
+  ctx,
+  { restartWrapper = false, nativeTarget } = {}
+) {
   if (process.ppid !== launch.pid) {
     throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
   }
@@ -112,8 +118,9 @@ export function writeRestartHandoff(launch, operationId, instanceId, ctx, restar
     instanceId,
     sessionFile,
     cwd: ctx.cwd,
-    ...(restartWrapper ? { restartWrapper: true } : {}),
   }
+  if (restartWrapper) handoff.restartWrapper = true
+  if (nativeTarget) handoff.nativeTarget = nativeTarget
   const temporary = `${launch.handoffPath}.${randomBytes(8).toString("hex")}.tmp`
   writeFileSync(temporary, `${JSON.stringify(handoff)}\n`, { mode: 0o600, flag: "wx" })
   renameSync(temporary, launch.handoffPath)
