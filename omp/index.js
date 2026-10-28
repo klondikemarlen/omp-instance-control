@@ -1082,7 +1082,7 @@ export default async function instanceControl(pi) {
             modifiedNs: candidate.modifiedNs,
           })
           state.ctx.ui.notify(
-            `Installed native ompi ${candidate.installedVersion} detected; update accepted. OMP owns settlement before relaunch.`,
+            `Installed native ompi ${candidate.installedVersion} detected; update accepted.`,
             "info"
           )
         })

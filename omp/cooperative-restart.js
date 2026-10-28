@@ -182,19 +182,14 @@ export function errorMessage(error) {
 
 export function createPreparationPrompt(operationId) {
   return [
-    `ompi accepted restart operation ${operationId}. Prepare to pause this session for restart.`,
-    `Stop starting new work. Reach a genuinely safe boundary for work already in progress; do not stop or claim to preserve arbitrary subprocesses or background jobs.`,
-    `Checkpoint completed work, remaining work, side effects already performed, and relevant job identities. State which jobs or side effects cannot safely survive shutdown, and report any concrete blocker honestly.`,
-    `When ready, call ${COOPERATIVE_CHECKPOINT_TOOL_NAME} with operationId "${operationId}", a useful checkpoint, ready: true, and no blocker. If you cannot safely pause, call it with ready: false and a concrete blocker instead.`,
-    `A checkpoint is not proof that OMP has settled. ompi will request only OMP's public graceful shutdown after a ready checkpoint is saved.`,
+    "Pause for an ompi restart at a safe boundary; do not start new work or stop running jobs.",
+    `Call ${COOPERATIVE_CHECKPOINT_TOOL_NAME} with operationId "${operationId}" and a brief checkpoint: completed/remaining work, performed side effects, job IDs and anything unsafe to interrupt. Set ready: true with no blocker only when safe; otherwise ready: false with a concrete blocker. OMP handles graceful shutdown; checkpointing does not guarantee job survival.`,
   ].join("\n\n")
 }
 
 export function createContinuationPrompt(checkpoint) {
   return [
-    `Continue the original task after cooperative restart operation ${checkpoint.operationId}.`,
-    `Review the conversation and checkpoint below. Do not repeat completed side effects; continue only the unfinished work and verify what is safe to verify.`,
-    `The checkpoint describes agent work only. Do not assume any subprocess or background job survived; inspect or restart such work safely and report uncertainty.`,
+    `Resume unfinished work from the saved checkpoint for ompi restart ${checkpoint.operationId}. Do not repeat completed side effects or assume jobs survived; verify their state before continuing.`,
     "Saved checkpoint:",
     checkpoint.checkpoint,
   ].join("\n\n")
