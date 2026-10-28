@@ -1,3 +1,10 @@
+omp-instance-control (0.17.2~ppa1) resolute; urgency=medium
+
+  * Shorten active restart preparation and continuation instructions.
+  * Preserve brief checkpoints, idle behavior and update version notifications.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 28 Oct 2026 09:17:35 -0700
+
 omp-instance-control (0.17.1~ppa1) resolute; urgency=medium
 
   * Restart idle terminals without preparation or continuation model calls.
