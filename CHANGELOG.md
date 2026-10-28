@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.2 - 2026-10-28
+
+### Changed
+
+- Shorten active-session restart instructions and ask for a brief actionable checkpoint; retain the saved checkpoint in the continuation and keep idle restarts message-free.
+- Keep the installed native version and update-accepted notification without the settlement jargon. Acceptance still does not mean restart has completed.
+
 ## 0.17.1 - 2026-10-28
 
 ### Fixed
