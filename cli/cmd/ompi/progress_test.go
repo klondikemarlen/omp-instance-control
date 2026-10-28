@@ -100,23 +100,3 @@ func TestRestartRendererRedirectedOutputIsTransitionOnly(t *testing.T) {
 		t.Fatalf("redirected output repeated an unchanged target: %q", text)
 	}
 }
-func TestRestartRowShowsCooperativePhaseAndEscapesBlocker(t *testing.T) {
-	row := cli.Row{
-		InstanceID: "aaaaaaaaaaaa",
-		Status:     "blocked",
-		Data: &protocol.Data{Cooperative: &protocol.CooperativeRestart{
-			OperationID: "restart-operation",
-			Phase:       "blocked",
-			Message:     "unsafe job\u001b[31m remains",
-		}},
-	}
-
-	line := restartRow(row, false)
-	if !strings.Contains(line.text, "Blocked") ||
-		!strings.Contains(line.text, "blocked: unsafe job\\u001b[31m remains") {
-		t.Fatalf("restart progress did not safely show cooperative blocker: %q", line.text)
-	}
-	if countRestartRows([]cli.Row{row}).failed != 1 {
-		t.Fatal("blocked restart was not counted as an issue")
-	}
-}

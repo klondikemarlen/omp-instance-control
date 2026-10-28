@@ -100,7 +100,6 @@ func prepareAcceptedRestart(row *Row) {
 		return
 	}
 	row.restartOperationID = *row.Data.OperationID
-	row.restartNeedsContinuation = row.Data.Cooperative != nil
 	row.Status = "waiting"
 }
 
@@ -115,22 +114,6 @@ func hasPendingRestart(rows []Row) bool {
 
 func isPendingRestart(row Row) bool {
 	return row.Status == "waiting" || row.Status == "restarting"
-}
-
-func cooperativeMatches(data *protocol.Data, operationID string) bool {
-	return data != nil && data.Cooperative != nil && data.Cooperative.OperationID == operationID
-}
-func restartOperationID(data *protocol.Data) string {
-	if data == nil {
-		return ""
-	}
-	if data.OperationID != nil && *data.OperationID != "" {
-		return *data.OperationID
-	}
-	if data.Cooperative != nil {
-		return data.Cooperative.OperationID
-	}
-	return ""
 }
 
 type restartCorrelation struct {
@@ -164,8 +147,8 @@ func indexRestartRecords(records []protocol.Record) restartSnapshot {
 
 func observeRestart(ctx context.Context, transport Transport, row Row, snapshot restartSnapshot) Row {
 	operationID := row.restartOperationID
-	if operationID == "" {
-		operationID = restartOperationID(row.Data)
+	if operationID == "" && row.Data != nil && row.Data.OperationID != nil {
+		operationID = *row.Data.OperationID
 	}
 	if operationID == "" {
 		setRestartUnknown(&row, errors.New("restart acknowledgement did not include an operation ID"))
@@ -210,29 +193,6 @@ func observeRestart(ctx context.Context, transport Transport, row Row, snapshot 
 			candidateError = fmt.Errorf("probe replacement %s: live status did not match its discovered restart record", record.InstanceID)
 			continue
 		}
-		if row.restartNeedsContinuation && response.Data.Cooperative == nil {
-			row.Status = "restarting"
-			row.Data = response.Data
-			return row
-		}
-		if response.Data.Cooperative != nil {
-			if response.Data.Cooperative.OperationID != operationID {
-				row.Status = "restarting"
-				row.Data = response.Data
-				return row
-			}
-			if response.Data.Cooperative.Phase == "blocked" {
-				row.Status = "blocked"
-				row.Data = response.Data
-				row.Error = response.Data.Cooperative.Message
-				return row
-			}
-			if response.Data.Cooperative.Phase != "resumed" {
-				row.Status = "restarting"
-				row.Data = response.Data
-				return row
-			}
-		}
 		row.Status = "restarted"
 		row.Data = response.Data
 		row.Error = ""
@@ -274,16 +234,6 @@ func observeRestart(ctx context.Context, transport Transport, row Row, snapshot 
 		return row
 	}
 	row.Status = "waiting"
-	if cooperativeMatches(response.Data, operationID) {
-		row.Data = response.Data
-		switch response.Data.Cooperative.Phase {
-		case "blocked":
-			row.Status = "blocked"
-			row.Error = response.Data.Cooperative.Message
-		case "restarting", "resuming":
-			row.Status = "restarting"
-		}
-	}
 	return row
 }
 
@@ -349,15 +299,7 @@ func restartRowChanged(before, after Row) bool {
 	if before.Data.InstanceID != after.Data.InstanceID || before.Data.CWD != after.Data.CWD {
 		return true
 	}
-	previous := before.Data.Cooperative
-	current := after.Data.Cooperative
-	if previous == current {
-		return false
-	}
-	if previous == nil || current == nil {
-		return true
-	}
-	return previous.OperationID != current.OperationID || previous.Phase != current.Phase || previous.Message != current.Message
+	return false
 }
 
 func notifyRestartProgress(progress func([]Row), rows []Row) {

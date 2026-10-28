@@ -339,19 +339,3 @@ func TestFormatRowsEscapesTerminalControls(t *testing.T) {
 		t.Fatalf("terminal control characters were not escaped: %s", formatted)
 	}
 }
-func TestFormatRowsShowsCooperativePhaseAndEscapesBlocker(t *testing.T) {
-	row := Row{
-		InstanceID: strings.Repeat("a", 32),
-		Status:     "blocked",
-		Data: &protocol.Data{Cooperative: &protocol.CooperativeRestart{
-			OperationID: "restart-operation",
-			Phase:       "blocked",
-			Message:     "unsafe job\u001b[31m remains",
-		}},
-	}
-
-	formatted := FormatRows([]Row{row})
-	if !strings.Contains(formatted, "blocked: unsafe job\\u001b[31m remains") {
-		t.Fatalf("list output did not safely show cooperative blocker: %q", formatted)
-	}
-}

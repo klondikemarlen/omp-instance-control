@@ -50,7 +50,7 @@ function sameRunningImage(left, right) {
   return left.device === right.device && left.inode === right.inode
 }
 
-async function inspectExecutable(executable) {
+export async function readNativeTarget(executable) {
   const info = await stat(executable, { bigint: true })
   if (!info.isFile()) {
     throw new Error("Installed ompi is not a regular file.")
@@ -81,7 +81,7 @@ async function readInstalledVersion(executable) {
   })
 }
 
-export function watchNativeUpdates(native, requestRestart) {
+export function watchNativeUpdates(native, onUpdateAvailable) {
   let status = {
     runningVersion: typeof native?.version === "string" ? native.version : "",
     installedVersion: null,
@@ -97,7 +97,7 @@ export function watchNativeUpdates(native, requestRestart) {
     let key
     try {
       validateNativeMetadata(native)
-      const installedIdentity = await inspectExecutable(native.executable)
+      const installedIdentity = await readNativeTarget(native.executable)
       if (closed) return
 
       if (sameRunningImage(installedIdentity, native)) {
@@ -119,7 +119,7 @@ export function watchNativeUpdates(native, requestRestart) {
       const installedVersion = await readInstalledVersion(native.executable)
       if (closed) return
 
-      const confirmedIdentity = await inspectExecutable(native.executable)
+      const confirmedIdentity = await readNativeTarget(native.executable)
       if (closed) return
       if (!sameCandidate(installedIdentity, confirmedIdentity)) {
         status = {
@@ -132,14 +132,15 @@ export function watchNativeUpdates(native, requestRestart) {
         return
       }
 
-      const outcome = {
+      const availableOutcome = {
         runningVersion: native.version,
         installedVersion,
-        state: "pending",
+        state: "available",
       }
-      candidateOutcomes.set(key, outcome)
+      candidateOutcomes.set(key, availableOutcome)
+      status = availableOutcome
       try {
-        await requestRestart({
+        await onUpdateAvailable({
           executable: native.executable,
           runningVersion: native.version,
           installedVersion,
@@ -150,18 +151,17 @@ export function watchNativeUpdates(native, requestRestart) {
         })
       } catch (error) {
         if (!closed) {
-          const rejectedOutcome = {
+          const failedOutcome = {
             runningVersion: native.version,
             installedVersion,
             state: "failed",
-            message: `Restart request was rejected: ${error.message}`,
+            message: `Update notification failed: ${error.message}`,
           }
-          candidateOutcomes.set(key, rejectedOutcome)
-          status = rejectedOutcome
+          candidateOutcomes.set(key, failedOutcome)
+          status = failedOutcome
         }
         return
       }
-      if (!closed) status = outcome
     } catch (error) {
       if (!closed) {
         const failedOutcome = {

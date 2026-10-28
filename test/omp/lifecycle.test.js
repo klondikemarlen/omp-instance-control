@@ -9,45 +9,9 @@ import { fileURLToPath } from "node:url"
 
 import { createTransport, writePrivateJson } from "../../linux/transport.js"
 import { createRequest, getScope } from "../../protocol/index.js"
-import {
-  createEventBus,
-  createExtensionApi,
-  createResumeFixture,
-  createSdk,
-  waitForPreparation,
-} from "./lifecycle-fixture.js"
+import { createEventBus, createExtensionApi, createSdk } from "./lifecycle-fixture.js"
 
 import instanceControl from "../../omp/index.js"
-
-async function reportReadyCheckpoint(extension, operationId, ctx) {
-  return extension.tools.get("ompi_restart_checkpoint").execute(
-    "checkpoint-call",
-    {
-      operationId,
-      checkpoint:
-        "Completed: no work has been committed yet. Remaining: continue the accepted task after restart.",
-      ready: true,
-    },
-    undefined,
-    undefined,
-    ctx
-  )
-}
-
-async function reportBlockedCheckpoint(extension, operationId, ctx, blocker) {
-  return extension.tools.get("ompi_restart_checkpoint").execute(
-    "checkpoint-call",
-    {
-      operationId,
-      checkpoint: "Completed: current work is recorded. Remaining: wait for the output-owning job.",
-      ready: false,
-      blocker,
-    },
-    undefined,
-    undefined,
-    ctx
-  )
-}
 
 test("when agent-end arrives during shutdown, removed endpoint records stay removed", async () => {
   // Arrange
@@ -248,7 +212,7 @@ test("when status is queried, it exposes loaded Send Context health metadata or 
   }
 })
 
-test("when restart arrives before the first saved response, it waits for a persisted checkpoint and coalesces requests", async () => {
+test("when the first transcript is missing, restart waits for persistence and refuses a changed context", async () => {
   // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-first-"))
   const launchDirectory = path.join(root, "launch")
@@ -307,36 +271,19 @@ test("when restart arrives before the first saved response, it waits for a persi
     const transport = await createTransport(scope)
     const [record] = await transport.readRecords()
     const request = createRequest(record.instanceId, "restart")
+
     // Act
     const accepted = await transport.request(record, request)
-    await waitForPreparation(extension)
     const duplicate = await transport.request(record, createRequest(record.instanceId, "restart"))
     const pending = await transport.request(record, createRequest(record.instanceId, "status"))
-    events.emit("omp-exit-command:exit-requested", { sessionId: "" })
-    events.emit("omp-exit-command:exit-requested", { sessionId: "other-session" })
     const shutdownsBeforePersistence = shutdowns
     await writeFile(sessionFile, '{"type":"session","id":"first-session"}\n', { mode: 0o600 })
     await handlers.get("agent_end")({}, ctx)
     const shutdownsAfterPersistence = shutdowns
     ctx.cwd = path.join(root, "different-working-directory")
-    const wrongContextResult = await reportReadyCheckpoint(extension, request.requestId, ctx)
+    await handlers.get("session_switch")({}, ctx)
     const shutdownsAfterContextChange = shutdowns
-    ctx.cwd = root
-    const blockedResult = await reportBlockedCheckpoint(
-      extension,
-      request.requestId,
-      ctx,
-      "A background job still owns the output file."
-    )
-    const blockedStatus = await transport.request(
-      record,
-      createRequest(record.instanceId, "status")
-    )
-    const shutdownsAfterBlock = shutdowns
-    const checkpointResult = await reportReadyCheckpoint(extension, request.requestId, ctx)
-    const shutdownsAfterCheckpoint = shutdowns
     await handlers.get("session_shutdown")({}, ctx)
-    const handoff = JSON.parse(await readFile(path.join(launchDirectory, "handoff.json"), "utf8"))
 
     // Assert
     assert.equal(accepted.ok, true)
@@ -345,31 +292,9 @@ test("when restart arrives before the first saved response, it waits for a persi
     assert.equal(pending.data.state, "restart-requested")
     assert.equal(pending.data.canRestart, false)
     assert.equal(shutdownsBeforePersistence, 0)
-    assert.equal(shutdownsAfterPersistence, 0)
-    assert.equal(shutdownsAfterContextChange, 0)
-    assert.equal(wrongContextResult.isError, true)
-    assert.equal(shutdownsAfterBlock, 0)
-    assert.equal(blockedStatus.data.cooperative.operationId, request.requestId)
-    assert.equal(blockedStatus.data.cooperative.phase, "blocked")
-    assert.equal(blockedStatus.data.cooperative.message.includes("output file"), true)
-    assert.equal(blockedResult.content[0].text.includes("no shutdown was requested"), true)
-    assert.deepEqual(
-      extension.branch
-        .filter((entry) => entry.data?.kind === "checkpoint")
-        .map((entry) => entry.data.ready),
-      [false, true]
-    )
-    assert.equal(shutdownsAfterCheckpoint, 1)
-    assert.equal(shutdowns, 1)
-    assert.equal(extension.messages.length, 1)
-    assert.equal(extension.messages[0].options.deliverAs, "aside")
-    assert.equal(extension.messages[0].content.includes("ompi_restart_checkpoint"), true)
-    assert.equal(
-      checkpointResult.content[0].text.includes("does not confirm that settlement"),
-      true
-    )
-    assert.equal(handoff.operationId, request.requestId)
-    assert.equal(handoff.restartWrapper, undefined)
+    assert.equal(shutdownsAfterPersistence, 1)
+    assert.equal(shutdownsAfterContextChange, 1)
+    await assert.rejects(readFile(path.join(launchDirectory, "handoff.json")), { code: "ENOENT" })
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
     for (const [key, value] of Object.entries(previous)) {
@@ -389,6 +314,9 @@ test("when wrapper restart is pending, a child-only request cannot downgrade its
   const token = "8".repeat(32)
   const sessionFile = path.join(root, "wrapper-session.jsonl")
   await writeFile(sessionFile, '{"type":"session","id":"wrapper-session"}\n', { mode: 0o600 })
+  const executable = path.join(root, "ompi")
+  await writeFile(executable, "#!/bin/sh\nprintf 'ompi 0.18.0\\n'\n", { mode: 0o700 })
+  const nativeImage = await stat(executable, { bigint: true })
   await writePrivateJson(path.join(launchDirectory, "launch.json"), {
     version: 1,
     token,
@@ -398,6 +326,12 @@ test("when wrapper restart is pending, a child-only request cannot downgrade its
     canRestartWrapper: true,
     lastRestart: null,
     builtinFlags: [],
+    native: {
+      executable,
+      version: "0.18.0",
+      device: nativeImage.dev.toString(),
+      inode: nativeImage.ino.toString(),
+    },
   })
   const environment = {
     HOME: root,
@@ -445,8 +379,6 @@ test("when wrapper restart is pending, a child-only request cannot downgrade its
 
     // Act
     const accepted = await transport.request(record, request)
-    await waitForPreparation(extension)
-    await reportReadyCheckpoint(extension, request.requestId, ctx)
     await shutdownRequested.promise
     const conflicting = await transport.request(record, createRequest(record.instanceId, "restart"))
     await handlers.get("session_shutdown")({}, ctx)
@@ -561,16 +493,16 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
   }
 })
 
-test("when an installed update joins a pending manual restart, coalescing retains its verified image", async () => {
+test("when an installed update appears during manual restart, it only notifies and keeps the accepted image pinned", async () => {
   // Arrange
-  const root = await mkdtemp(path.join(tmpdir(), "ic-auto-"))
+  const root = await mkdtemp(path.join(tmpdir(), "ic-native-notify-"))
   const launchDirectory = path.join(root, "launch")
   await mkdir(launchDirectory, { mode: 0o700 })
   const scope = getScope({ env: { HOME: root } })
   const token = "4".repeat(32)
   const executable = path.join(root, "ompi")
   await writeFile(executable, "#!/bin/sh\nprintf 'ompi 0.16.0\\n'\n", { mode: 0o700 })
-  const image = await stat(executable, { bigint: true })
+  const acceptedImage = await stat(executable, { bigint: true })
   const sessionFile = path.join(root, "session.jsonl")
   await writeFile(sessionFile, '{"type":"session","id":"automatic-session"}\n', { mode: 0o600 })
   await writePrivateJson(path.join(launchDirectory, "launch.json"), {
@@ -585,8 +517,8 @@ test("when an installed update joins a pending manual restart, coalescing retain
     native: {
       executable,
       version: "0.16.0",
-      device: image.dev.toString(),
-      inode: image.ino.toString(),
+      device: acceptedImage.dev.toString(),
+      inode: acceptedImage.ino.toString(),
     },
   })
   const environment = {
@@ -605,6 +537,8 @@ test("when an installed update joins a pending manual restart, coalescing retain
   Object.assign(process.env, environment)
   const events = createEventBus()
   const handlers = new Map()
+  const notifications = []
+  const shutdownRequested = Promise.withResolvers()
   let shutdowns = 0
   const ctx = {
     agent: { kind: "main" },
@@ -616,10 +550,13 @@ test("when an installed update joins a pending manual restart, coalescing retain
     },
     ui: {
       setStatus() {},
-      notify() {},
+      notify(message, level) {
+        notifications.push({ message, level })
+      },
     },
     shutdown() {
       shutdowns += 1
+      shutdownRequested.resolve()
     },
   }
   const extension = createExtensionApi(events, handlers, ctx)
@@ -636,25 +573,25 @@ test("when an installed update joins a pending manual restart, coalescing retain
       record,
       createRequest(record.instanceId, "restart-wrapper")
     )
-    await waitForPreparation(extension)
+    await shutdownRequested.promise
     await rename(replacement, executable)
-    const installed = await stat(executable, { bigint: true })
     const deadline = performance.now() + 10_000
     let status
     do {
       status = await transport.request(record, createRequest(record.instanceId, "status"))
-      if (status.data.native.state === "pending") break
+      if (status.data.native.state === "available") break
       await delay(25)
     } while (performance.now() < deadline)
-    const beforePersistence = shutdowns
-    const duplicate = await transport.request(
-      record,
-      createRequest(record.instanceId, "restart-wrapper")
-    )
-    const beforeCheckpoint = shutdowns
-    await reportReadyCheckpoint(extension, manual.data.operationId, ctx)
-    const afterCheckpoint = shutdowns
-    await handlers.get("agent_end")({}, ctx)
+    const laterImage = await stat(executable, { bigint: true })
+    const duplicate = await transport.request(record, {
+      ...createRequest(record.instanceId, "restart-wrapper"),
+      nativeTarget: {
+        device: laterImage.dev.toString(),
+        inode: laterImage.ino.toString(),
+        size: laterImage.size.toString(),
+        modifiedNs: laterImage.mtimeNs.toString(),
+      },
+    })
     await handlers.get("session_shutdown")({}, ctx)
     const handoff = JSON.parse(await readFile(path.join(launchDirectory, "handoff.json"), "utf8"))
 
@@ -663,21 +600,26 @@ test("when an installed update joins a pending manual restart, coalescing retain
     assert.deepEqual(status.data.native, {
       runningVersion: "0.16.0",
       installedVersion: "0.17.0",
-      state: "pending",
+      state: "available",
     })
-    assert.equal(beforePersistence, 0)
-    assert.equal(beforeCheckpoint, 0)
-    assert.equal(afterCheckpoint, 1)
+    assert.equal(
+      notifications.some(
+        ({ message, level }) =>
+          message === "Installed native ompi 0.17.0 detected; run /ompi restart to apply." &&
+          level === "info"
+      ),
+      true
+    )
     assert.equal(shutdowns, 1)
     assert.equal(duplicate.data.operationId, status.data.operationId)
     assert.equal(manual.data.operationId, status.data.operationId)
     assert.equal(handoff.operationId, status.data.operationId)
     assert.equal(handoff.restartWrapper, true)
     assert.deepEqual(handoff.nativeTarget, {
-      device: installed.dev.toString(),
-      inode: installed.ino.toString(),
-      size: installed.size.toString(),
-      modifiedNs: installed.mtimeNs.toString(),
+      device: acceptedImage.dev.toString(),
+      inode: acceptedImage.ino.toString(),
+      size: acceptedImage.size.toString(),
+      modifiedNs: acceptedImage.mtimeNs.toString(),
     })
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
@@ -686,293 +628,5 @@ test("when an installed update joins a pending manual restart, coalescing retain
       else process.env[key] = value
     }
     await rm(root, { recursive: true, force: true })
-  }
-})
-
-test("when a resumed session matches a ready checkpoint, it submits one correlated continuation", async () => {
-  // Arrange
-  const fixture = await createResumeFixture()
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-    await fixture.handlers.get("session_start")({}, fixture.ctx)
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 1)
-    assert.equal(fixture.extension.messages[0].options.deliverAs, "aside")
-    assert.equal(
-      fixture.extension.messages[0].content.includes("Completed: prepare the result."),
-      true
-    )
-    assert.equal(
-      fixture.extension.messages[0].content.includes("Remaining: finish the verification."),
-      true
-    )
-    assert.equal(status.data.cooperative.operationId, "restart-operation")
-    assert.equal(status.data.cooperative.phase, "resumed")
-    assert.equal(Number.isSafeInteger(status.data.cooperative.resumedAt), true)
-    assert.deepEqual(
-      fixture.extension.branch
-        .filter((entry) => entry.data?.kind === "continuation")
-        .map((entry) => entry.data.stage),
-      ["attempted", "submitted"]
-    )
-    assert.equal(fixture.extension.messages.length, 1)
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when an earlier continuation attempt is ambiguous, a replacement does not send it again", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({
-    priorContinuations: [
-      {
-        stage: "attempted",
-        replacementInstanceId: "crashed-replacement",
-        attemptedAt: 1_002,
-      },
-    ],
-  })
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 0)
-    assert.equal(status.data.cooperative.operationId, "restart-operation")
-    assert.equal(status.data.cooperative.phase, "blocked")
-    assert.equal(status.data.cooperative.message.includes("admission is ambiguous"), true)
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when continuation delivery throws, the replacement publishes a blocked outcome", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({
-    deliverMessage() {
-      throw new Error("host refused continuation")
-    },
-  })
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 1)
-    assert.equal(status.data.cooperative.operationId, "restart-operation")
-    assert.equal(status.data.cooperative.phase, "blocked")
-    assert.equal(status.data.cooperative.message.includes("host refused continuation"), true)
-    assert.deepEqual(
-      fixture.extension.branch
-        .filter((entry) => entry.data?.kind === "continuation")
-        .map((entry) => entry.data.stage),
-      ["attempted", "failed"]
-    )
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when the saved checkpoint reports a blocker, replacement startup does not continue work", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({
-    checkpoint: {
-      ready: false,
-      blocker: "A background command still owns the output file.",
-    },
-  })
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 0)
-    assert.equal(status.data.cooperative.phase, "blocked")
-    assert.equal(status.data.cooperative.message.includes("background command"), true)
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when a saved checkpoint belongs to another launch scope, replacement does not deliver it", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({
-    checkpoint: { scopeId: "another-launch-scope" },
-  })
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 0)
-    assert.equal(status.data.cooperative.phase, "blocked")
-    assert.equal(status.data.cooperative.message.includes("does not match"), true)
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when the transcript records a submitted continuation, a replacement recognizes it without resending", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({
-    priorContinuations: [
-      {
-        stage: "submitted",
-        replacementInstanceId: "earlier-replacement",
-        submittedAt: 1_002,
-      },
-    ],
-  })
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 0)
-    assert.equal(status.data.cooperative.operationId, "restart-operation")
-    assert.equal(status.data.cooperative.phase, "resumed")
-    assert.equal(status.data.cooperative.resumedAt, 1_002)
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when the public session branch API is unavailable, replacement reports blocked continuation", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({ includeBranch: false })
-
-  try {
-    // Act
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-    const rejectedRestart = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "restart")
-    )
-
-    // Assert
-    assert.equal(fixture.extension.messages.length, 0)
-    assert.equal(status.data.cooperative.phase, "blocked")
-    assert.equal(
-      status.data.cooperative.message.includes("session branch API is unavailable"),
-      true
-    )
-    assert.equal(rejectedRestart.ok, false)
-    assert.equal(rejectedRestart.error.code, "COOPERATIVE_RESTART_UNAVAILABLE")
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when a ready checkpoint leaves the active branch before teardown, no restart handoff is written", async () => {
-  // Arrange
-  const fixture = await createResumeFixture()
-  const request = createRequest(fixture.record.instanceId, "restart")
-
-  try {
-    // Act
-    await fixture.transport.request(fixture.record, request)
-    await reportReadyCheckpoint(fixture.extension, request.requestId, fixture.ctx)
-    const checkpointIndex = fixture.extension.branch.findIndex(
-      (entry) => entry.data?.kind === "checkpoint" && entry.data.operationId === request.requestId
-    )
-    fixture.extension.branch.splice(checkpointIndex, 1)
-    await fixture.handlers.get("session_shutdown")({}, fixture.ctx)
-
-    // Assert
-    assert.equal(checkpointIndex >= 0, true)
-    await assert.rejects(
-      readFile(path.join(process.env.OMP_INSTANCE_CONTROL_LAUNCH_DIR, "handoff.json")),
-      { code: "ENOENT" }
-    )
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when the host predates non-interrupting aside support, restart refuses without sending prompts", async () => {
-  // Arrange
-  const fixture = await createResumeFixture({ hostVersion: "18.13.1" })
-
-  try {
-    // Act
-    const response = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "restart")
-    )
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-
-    // Assert
-    assert.equal(response.ok, false)
-    assert.equal(response.error.code, "COOPERATIVE_RESTART_UNAVAILABLE")
-    assert.equal(status.data.canRestart, false)
-    assert.equal(status.data.cooperative.phase, "blocked")
-    assert.match(status.data.cooperative.message, /18\.13\.2/)
-    assert.deepEqual(fixture.extension.messages, [])
-  } finally {
-    await fixture.close()
-  }
-})
-
-test("when OMP settlement exceeds the target, status identifies running work without forcing or cancelling restart", async (t) => {
-  // Arrange
-  const fixture = await createResumeFixture()
-  fixture.ctx.getAsyncJobSnapshot = () => ({ running: [{ type: "bash" }], delivery: { queued: 0 } })
-  const request = createRequest(fixture.record.instanceId, "restart")
-  t.mock.timers.enable({ apis: ["setTimeout"] })
-
-  try {
-    // Act
-    await fixture.transport.request(fixture.record, request)
-    await reportReadyCheckpoint(fixture.extension, request.requestId, fixture.ctx)
-    t.mock.timers.tick(60_001)
-    const status = await fixture.transport.request(
-      fixture.record,
-      createRequest(fixture.record.instanceId, "status")
-    )
-    await fixture.handlers.get("session_shutdown")({}, fixture.ctx)
-    const handoff = JSON.parse(
-      await readFile(path.join(process.env.OMP_INSTANCE_CONTROL_LAUNCH_DIR, "handoff.json"), "utf8")
-    )
-
-    // Assert
-    assert.equal(status.data.cooperative.phase, "restarting")
-    assert.match(status.data.cooperative.message, /1 running OMP async job.*bash/)
-    assert.match(status.data.cooperative.message, /No shutdown was forced/)
-    assert.equal(handoff.operationId, request.requestId)
-  } finally {
-    t.mock.timers.reset()
-    await fixture.close()
   }
 })

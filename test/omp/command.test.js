@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { appendFileSync } from "node:fs"
-import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -638,6 +637,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   await writeFile(sessionFile, '{"type":"session","id":"persisted-session"}\n', { mode: 0o600 })
   const scope = getScope({ cwd: fixture.cwd })
   const entryPath = fileURLToPath(new URL("../../omp/index.js", import.meta.url))
+  const nativeImage = await stat(process.execPath, { bigint: true })
   await writePrivateJson(path.join(launchDirectory, "launch.json"), {
     version: 1,
     token: launchToken,
@@ -647,6 +647,12 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
     canRestartWrapper: true,
     lastRestart: null,
     builtinFlags: [],
+    native: {
+      executable: process.execPath,
+      version: "test",
+      device: nativeImage.dev.toString(),
+      inode: nativeImage.ino.toString(),
+    },
   })
   const launchEnvironment = {
     OMP_INSTANCE_CONTROL_LAUNCH_DIR: launchDirectory,
@@ -660,37 +666,11 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   const events = createEventBus()
   const handlers = new Map()
   const commands = []
-  const branch = []
-  const tools = new Map()
-  const preparation = Promise.withResolvers()
   function createExtensionApi() {
     return {
       events,
-      pi: {
-        ...createSdk(),
-        VERSION: "18.13.2",
-        z: {
-          object: (properties) => properties,
-          string: () => ({
-            optional() {
-              return this
-            },
-          }),
-          boolean: () => ({}),
-        },
-      },
+      pi: createSdk(),
       runtime: { flagValues: new Map() },
-      registerTool(tool) {
-        tools.set(tool.name, tool)
-      },
-      appendEntry(customType, data) {
-        const entry = { type: "custom", customType, data }
-        branch.push(entry)
-        appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`)
-      },
-      sendUserMessage() {
-        preparation.resolve()
-      },
       on(event, handler) {
         const eventHandlers = handlers.get(event) ?? []
         eventHandlers.push(handler)
@@ -708,7 +688,6 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   ctx.sessionManager = {
     getSessionId: () => "persisted-session",
     getSessionFile: () => sessionFile,
-    getBranch: () => branch,
   }
   ctx.shutdown = () => {
     shutdownRequests += 1
@@ -744,25 +723,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
     assert.equal(commands.filter((command) => command.name === "ompi").length, 1)
 
     await commands[0].command.handler(`restart ${records[0].instanceId} --json`, ctx)
-    await Promise.race([
-      preparation.promise,
-      new Promise((_, reject) => {
-        const timer = setTimeout(() => reject(new Error(JSON.stringify(notifications))), 1000)
-        timer.unref()
-      }),
-    ])
     const outcomes = JSON.parse(notifications[0].message)
-    await tools.get("ompi_restart_checkpoint").execute(
-      "checkpoint-call",
-      {
-        operationId: outcomes[0].data.operationId,
-        checkpoint: "Resume this session.",
-        ready: true,
-      },
-      undefined,
-      undefined,
-      ctx
-    )
     assert.equal(outcomes[0].status, "accepted")
     assert.equal(shutdownRequests, 1)
   } finally {

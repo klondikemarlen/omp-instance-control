@@ -3,7 +3,6 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { createRequest } from "../protocol/index.js"
 
 const RESTART_OPERATION_ID = Symbol("restartOperationId")
-const RESTART_NEEDS_CONTINUATION = Symbol("restartNeedsContinuation")
 const RESTART_POLL_INTERVAL_MS = 250
 const INSTANCE_DISAPPEARING_CODES = new Set([
   "ENOENT",
@@ -124,7 +123,6 @@ function prepareAcceptedRestart(row) {
   }
 
   row[RESTART_OPERATION_ID] = operationId
-  row[RESTART_NEEDS_CONTINUATION] = Boolean(row.data?.cooperative)
   row.status = "waiting"
 }
 
@@ -137,7 +135,7 @@ function isPendingRestart(row) {
 }
 
 function restartOperationId(data) {
-  return data?.operationId || data?.cooperative?.operationId || ""
+  return data?.operationId || ""
 }
 
 function indexRestartRecords(records) {
@@ -219,30 +217,6 @@ async function observeRestart(transport, row, snapshot, signal) {
       continue
     }
 
-    const cooperative = response.data?.cooperative
-    if (row[RESTART_NEEDS_CONTINUATION] && !cooperative) {
-      row.status = "restarting"
-      row.data = response.data
-      return row
-    }
-    if (cooperative) {
-      if (cooperative.operationId !== operationId) {
-        row.status = "restarting"
-        row.data = response.data
-        return row
-      }
-      if (cooperative.phase === "blocked") {
-        row.status = "blocked"
-        row.data = response.data
-        row.error = cooperative.message
-        return row
-      }
-      if (cooperative.phase !== "resumed") {
-        row.status = "restarting"
-        row.data = response.data
-        return row
-      }
-    }
     row.status = "restarted"
     row.data = response.data
     delete row.error
@@ -292,16 +266,6 @@ async function observeRestart(transport, row, snapshot, signal) {
   }
 
   row.status = "waiting"
-  const cooperative = response.data.cooperative
-  if (cooperative?.operationId === operationId) {
-    row.data = response.data
-    if (cooperative.phase === "blocked") {
-      row.status = "blocked"
-      row.error = cooperative.message
-    } else if (cooperative.phase === "restarting" || cooperative.phase === "resuming") {
-      row.status = "restarting"
-    }
-  }
   return row
 }
 
@@ -370,10 +334,7 @@ function restartRowChanged(before, after) {
     before.error !== after.error ||
     before.errorCode !== after.errorCode ||
     before.data?.instanceId !== after.data?.instanceId ||
-    before.data?.cwd !== after.data?.cwd ||
-    before.data?.cooperative?.operationId !== after.data?.cooperative?.operationId ||
-    before.data?.cooperative?.phase !== after.data?.cooperative?.phase ||
-    before.data?.cooperative?.message !== after.data?.cooperative?.message
+    before.data?.cwd !== after.data?.cwd
   )
 }
 
