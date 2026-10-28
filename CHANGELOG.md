@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.0 - 2026-10-28
+
+### Changed
+
+- Notify about installed updates without restarting terminals automatically; choose the current terminal, one peer, or an explicit scoped `all` when ready.
+- Let OMP finish active work and queued typed prompts before restart, then reopen the saved conversation for input without model-generated checkpoint, preparation or continuation messages.
+- Preserve accepted native-image identity while waiting for shutdown; refuse a later binary replacement rather than silently changing the pending operation.
+
 ## 0.17.2 - 2026-10-28
 
 ### Changed

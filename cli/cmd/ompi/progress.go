@@ -28,13 +28,6 @@ func restartRow(row cli.Row, showSession bool) progressLine {
 	}
 
 	line := restartStatusText(row.Status) + "  " + displayInstanceID(id)
-	if row.Data != nil && row.Data.Cooperative != nil {
-		cooperative := row.Data.Cooperative
-		line += "  " + safeTerminalText(cooperative.Phase)
-		if cooperative.Message != "" {
-			line += ": " + safeTerminalText(cooperative.Message)
-		}
-	}
 	if row.Data != nil && row.Data.LastRestart != nil && row.Status == "restarted" {
 		line += " -> " + displayInstanceID(row.Data.InstanceID)
 	}

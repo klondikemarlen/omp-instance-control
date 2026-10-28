@@ -177,16 +177,11 @@ func TestGetScopeUsesHomeAndProfileAgentBoundaries(t *testing.T) {
 	}
 
 }
-func TestDataPreservesCooperativeRestartWireMetadata(t *testing.T) {
-	encoded := []byte(`{"instanceId":"replacement","cooperative":{"operationId":"restart-operation","phase":"resuming","message":"Submitting continuation.","requestedAt":100,"checkpointAt":150},"extra":"preserved"}`)
+func TestDataPreservesUnknownWireFields(t *testing.T) {
+	encoded := []byte(`{"instanceId":"replacement","extra":"preserved"}`)
 	var data Data
 	if err := json.Unmarshal(encoded, &data); err != nil {
 		t.Fatal(err)
-	}
-	if data.Cooperative == nil || data.Cooperative.OperationID != "restart-operation" ||
-		data.Cooperative.Phase != "resuming" || data.Cooperative.CheckpointAt == nil ||
-		*data.Cooperative.CheckpointAt != 150 {
-		t.Fatalf("cooperative restart metadata was not decoded: %#v", data.Cooperative)
 	}
 	roundTrip, err := json.Marshal(&data)
 	if err != nil {

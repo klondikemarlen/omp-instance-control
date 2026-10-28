@@ -229,17 +229,6 @@ type NativeMetadata struct {
 	Message          string `json:"message,omitempty"`
 }
 
-// CooperativeRestart describes preparation and continuation progress for one restart operation.
-type CooperativeRestart struct {
-	OperationID  string `json:"operationId"`
-	Mode         string `json:"mode,omitempty"`
-	Phase        string `json:"phase"`
-	Message      string `json:"message"`
-	RequestedAt  int64  `json:"requestedAt"`
-	CheckpointAt *int64 `json:"checkpointAt,omitempty"`
-	ResumedAt    *int64 `json:"resumedAt,omitempty"`
-}
-
 // Data is the structured status or restart result supplied by an OMP process.
 type Data struct {
 	Version         int                  `json:"version,omitempty"`
@@ -253,7 +242,6 @@ type Data struct {
 	State           string               `json:"state,omitempty"`
 	OperationID     *string              `json:"operationId,omitempty"`
 	LastRestart     *Restart             `json:"lastRestart,omitempty"`
-	Cooperative     *CooperativeRestart  `json:"cooperative,omitempty"`
 	CanRestart      bool                 `json:"canRestart"`
 	Message         string               `json:"message,omitempty"`
 	SendContext     *SendContextMetadata `json:"sendContext,omitempty"`
