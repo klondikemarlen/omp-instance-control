@@ -685,12 +685,14 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
   const ctx = createContext(fixture.cwd)
   const notifications = []
   let shutdownRequests = 0
+  const shutdownRequested = Promise.withResolvers()
   ctx.sessionManager = {
     getSessionId: () => "persisted-session",
     getSessionFile: () => sessionFile,
   }
   ctx.shutdown = () => {
     shutdownRequests += 1
+    shutdownRequested.resolve()
   }
   ctx.ui = {
     setStatus() {},
@@ -725,6 +727,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
     await commands[0].command.handler(`restart ${records[0].instanceId} --json`, ctx)
     const outcomes = JSON.parse(notifications[0].message)
     assert.equal(outcomes[0].status, "accepted")
+    await shutdownRequested.promise
     assert.equal(shutdownRequests, 1)
   } finally {
     for (const handler of handlers.get("session_shutdown") ?? []) {
