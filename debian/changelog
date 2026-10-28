@@ -1,3 +1,10 @@
+omp-instance-control (0.17.1~ppa1) resolute; urgency=medium
+
+  * Restart idle terminals without preparation or continuation model calls.
+  * Preserve cooperative checkpoints for active and queued work.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 28 Oct 2026 02:04:30 -0700
+
 omp-instance-control (0.17.0~ppa1) resolute; urgency=medium
 
   * Prepare a cooperative pause and persisted checkpoint before safe restart.

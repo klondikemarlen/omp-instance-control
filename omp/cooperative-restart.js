@@ -162,6 +162,7 @@ export function updateCooperativeStatus(state, phase, message, { checkpointAt, r
     message,
     requestedAt: current?.requestedAt ?? Date.now(),
   }
+  if (current?.mode !== undefined) status.mode = current.mode
   const savedCheckpointAt = checkpointAt ?? current?.checkpointAt
   const savedResumedAt = resumedAt ?? current?.resumedAt
   if (savedCheckpointAt !== undefined) status.checkpointAt = savedCheckpointAt
@@ -240,4 +241,173 @@ export function describePendingAsyncWork(ctx) {
   return details.length > 0
     ? details.join("; ")
     : "OMP reports no running async jobs or queued job result deliveries."
+}
+
+export function isPubliclyIdle(ctx) {
+  if (
+    typeof ctx.isIdle !== "function" ||
+    typeof ctx.hasPendingMessages !== "function" ||
+    typeof ctx.getAsyncJobSnapshot !== "function"
+  ) {
+    return false
+  }
+
+  try {
+    if (ctx.isIdle() !== true || ctx.hasPendingMessages() !== false) return false
+    const snapshot = ctx.getAsyncJobSnapshot()
+    return (
+      snapshot !== null &&
+      typeof snapshot === "object" &&
+      Array.isArray(snapshot.running) &&
+      snapshot.running.length === 0 &&
+      Number.isSafeInteger(snapshot.delivery?.queued) &&
+      snapshot.delivery.queued === 0 &&
+      snapshot.delivery.delivering === false &&
+      Array.isArray(snapshot.delivery.pendingJobIds) &&
+      snapshot.delivery.pendingJobIds.length === 0
+    )
+  } catch {
+    return false
+  }
+}
+
+export async function appendPersistedIdleCheckpoint(pi, ctx, checkpoint, isCurrent) {
+  if (!isPubliclyIdle(ctx) || !isCurrent()) return false
+  await appendPersistedCooperativeEntry(pi, ctx, checkpoint)
+  return isPubliclyIdle(ctx) && isCurrent()
+}
+
+export async function persistIdleCheckpoint(pi, state, isCurrent) {
+  const checkpoint = {
+    entryId: `${state.pending}:idle:${state.instanceId}`,
+    kind: "checkpoint",
+    mode: "idle",
+    operationId: state.pending,
+    previousInstanceId: state.instanceId,
+    instanceId: state.instanceId,
+    sessionId: state.origin.sessionId,
+    sessionFile: state.origin.sessionFile,
+    cwd: state.origin.cwd,
+    scopeId: state.origin.scopeId,
+    requestedAt: state.cooperative.requestedAt,
+    checkpointAt: Date.now(),
+    ready: true,
+    checkpoint: "",
+  }
+  if (!(await appendPersistedIdleCheckpoint(pi, state.ctx, checkpoint, isCurrent))) return null
+  return checkpoint
+}
+
+export function checkpointMatchesOrigin(checkpoint, origin) {
+  const idle = checkpoint.mode === "idle"
+  return (
+    checkpoint.sessionId === origin.sessionId &&
+    checkpoint.sessionFile === origin.sessionFile &&
+    checkpoint.cwd === origin.cwd &&
+    checkpoint.scopeId === origin.scopeId &&
+    (idle
+      ? checkpoint.entryId === `${checkpoint.operationId}:idle:${checkpoint.previousInstanceId}` &&
+        checkpoint.checkpoint === "" &&
+        checkpoint.ready === true
+      : typeof checkpoint.checkpoint === "string" && checkpoint.checkpoint.trim().length > 0) &&
+    Number.isSafeInteger(checkpoint.requestedAt) &&
+    Number.isSafeInteger(checkpoint.checkpointAt)
+  )
+}
+
+export function createIdleResumedStatus(checkpoint) {
+  const resumedAt = Date.now()
+  return {
+    operationId: checkpoint.operationId,
+    mode: "idle",
+    phase: "resumed",
+    message: "The correlated idle session was reopened; no model continuation was requested.",
+    requestedAt: checkpoint.requestedAt,
+    checkpointAt: checkpoint.checkpointAt,
+    resumedAt,
+  }
+}
+
+export function hasReadyCheckpoint(state, ctx) {
+  return getCooperativeEntries(ctx).some(
+    (entry) =>
+      entry?.entryId === state.checkpointEntryId &&
+      entry.operationId === state.pending &&
+      entry.ready === true
+  )
+}
+
+export function getCooperativeApiError(pi, ctx, cooperativeError) {
+  if (cooperativeError) return cooperativeError
+  if (
+    typeof pi.sendUserMessage !== "function" ||
+    typeof pi.appendEntry !== "function" ||
+    typeof ctx.sessionManager.getBranch !== "function" ||
+    typeof ctx.shutdown !== "function"
+  ) {
+    return "OMP is missing a public API required for cooperative restart."
+  }
+  return null
+}
+
+export function createBlockedCooperativeStatus(checkpoint, message) {
+  return {
+    operationId: checkpoint.operationId,
+    ...(checkpoint.mode === "idle" ? { mode: "idle" } : {}),
+    phase: "blocked",
+    message,
+    requestedAt: Number.isSafeInteger(checkpoint.requestedAt) ? checkpoint.requestedAt : Date.now(),
+    ...(Number.isSafeInteger(checkpoint.checkpointAt)
+      ? { checkpointAt: checkpoint.checkpointAt }
+      : {}),
+  }
+}
+
+export function resetIdleCheckpointForPreparation(state, message) {
+  state.checkpointReady = false
+  state.preparationSent = false
+  state.checkpointEntryId = undefined
+  state.cooperative = {
+    operationId: state.pending,
+    phase: "preparing",
+    message,
+    requestedAt: state.cooperative.requestedAt,
+  }
+}
+
+export function markCooperativePreparationBlocked(state, message, canBlock, publish, notify) {
+  if (!canBlock()) return
+  closeRestartTimer(state)
+  updateCooperativeStatus(state, "blocked", message)
+  void publish().catch(notify)
+}
+
+export function sendCooperativePreparation(pi, state, isCurrent, markBlocked) {
+  state.restartTimer = setTimeout(() => {
+    if (
+      !isCurrent() ||
+      state.closing ||
+      state.checkpointReady ||
+      state.cooperative?.phase !== "preparing"
+    ) {
+      return
+    }
+    markBlocked(
+      `No ${COOPERATIVE_CHECKPOINT_TOOL_NAME} checkpoint report arrived within about 60 seconds. The accepted restart remains pending at the checkpoint phase. ${describePendingAsyncWork(state.ctx)}`
+    )
+  }, 60_000)
+  state.restartTimer.unref?.()
+
+  try {
+    const delivery = pi.sendUserMessage(createPreparationPrompt(state.pending), {
+      deliverAs: "aside",
+    })
+    if (delivery && typeof delivery.then === "function") {
+      Promise.resolve(delivery).catch((error) => {
+        markBlocked(`OMP reported a preparation-message delivery failure: ${errorMessage(error)}`)
+      })
+    }
+  } catch (error) {
+    markBlocked(`OMP could not deliver the preparation message: ${errorMessage(error)}`)
+  }
 }

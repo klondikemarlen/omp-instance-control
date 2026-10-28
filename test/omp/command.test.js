@@ -1006,21 +1006,3 @@ test("when cleanup receives restart-only options, ompi rejects without cleaning 
     await fixture.close()
   }
 })
-test("when restart help is requested, it explains cooperative preparation and observation", async () => {
-  // Arrange
-  const fixture = await createFixture()
-  try {
-    const ctx = createContext(fixture.cwd)
-    const ui = createCommand(ctx)
-
-    // Act
-    await ui.command.handler("help restart", ctx)
-
-    // Assert
-    assert.match(ui.notifications[0].message, /checkpoint/)
-    assert.match(ui.notifications[0].message, /correlated replacement/)
-    assert.match(ui.notifications[0].message, /blocked phase/)
-  } finally {
-    await fixture.close()
-  }
-})

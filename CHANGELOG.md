@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.1 - 2026-10-28
+
+### Fixed
+
+- Restart idle managed terminals without starting preparation or continuation model turns, including when a provider is unavailable. Active and queued work retains cooperative checkpointing and OMP-owned settlement.
+
 ## 0.17.0 - 2026-10-27
 
 ### Added

@@ -309,6 +309,121 @@ test("when a cooperative replacement is resuming, observation waits for continua
   assert.equal(rows[0].data.cooperative.phase, "resumed")
 })
 
+test("when an idle cooperative restart is acknowledged, observation waits for correlated idle resume", async () => {
+  // Arrange
+  const original = makeRecord(ORIGINAL_ID, 42)
+  const replacement = makeRecord(REPLACEMENT_ID, 43, {
+    operationId: OPERATION_ID,
+    previousInstanceId: original.instanceId,
+  })
+  let probes = 0
+  const transport = {
+    async readRecords() {
+      return [replacement]
+    },
+    async request(_record, request) {
+      assert.equal(request.action, "status")
+      probes += 1
+      const data = liveStatus(replacement)
+      if (probes > 1) {
+        data.cooperative = {
+          operationId: OPERATION_ID,
+          mode: "idle",
+          phase: probes === 2 ? "resuming" : "resumed",
+          message: "Session reopened for input.",
+          requestedAt: 100,
+        }
+      }
+      return { ok: true, data }
+    },
+  }
+  const accepted = acceptedRow(original)
+  accepted.data.cooperative = {
+    operationId: OPERATION_ID,
+    mode: "idle",
+    phase: "restarting",
+  }
+
+  // Act
+  const rows = await waitForRestarts(transport, [accepted])
+
+  // Assert
+  assert.equal(probes, 3)
+  assert.equal(rows[0].status, "restarted")
+  assert.equal(rows[0].data.cooperative.mode, "idle")
+  assert.equal(rows[0].data.cooperative.phase, "resumed")
+})
+
+test("when idle and active restarts share a batch, idle completes while active still resumes", async () => {
+  // Arrange
+  const idleOriginal = makeRecord(ORIGINAL_ID, 42)
+  const activeOriginal = makeRecord("c".repeat(32), 44)
+  const idleReplacement = makeRecord(REPLACEMENT_ID, 43, {
+    operationId: OPERATION_ID,
+    previousInstanceId: idleOriginal.instanceId,
+  })
+  const activeReplacement = makeRecord("d".repeat(32), 45, {
+    operationId: "active-operation",
+    previousInstanceId: activeOriginal.instanceId,
+  })
+  let activeProbes = 0
+  const transport = {
+    async readRecords() {
+      return [idleReplacement, activeReplacement]
+    },
+    async request(record) {
+      const cooperative = {
+        phase: "resuming",
+        message: "Continuation status.",
+      }
+      let operationId = "active-operation"
+      if (record.instanceId === idleReplacement.instanceId) {
+        operationId = OPERATION_ID
+        cooperative.mode = "idle"
+        cooperative.phase = "resumed"
+        cooperative.message = "Session reopened for input."
+      } else {
+        activeProbes += 1
+        if (activeProbes > 1) cooperative.phase = "resumed"
+      }
+      cooperative.operationId = operationId
+      return {
+        ok: true,
+        data: {
+          ...liveStatus(record),
+          cooperative,
+        },
+      }
+    },
+  }
+  const idleAccepted = acceptedRow(idleOriginal)
+  idleAccepted.data.cooperative = {
+    operationId: OPERATION_ID,
+    mode: "idle",
+    phase: "restarting",
+  }
+  const activeAccepted = acceptedRow(activeOriginal, "active-operation")
+  activeAccepted.data.cooperative = {
+    operationId: "active-operation",
+    phase: "preparing",
+  }
+  const progress = []
+
+  // Act
+  const rows = await waitForRestarts(transport, [idleAccepted, activeAccepted], {
+    onProgress(current) {
+      progress.push(current.map((row) => row.status))
+    },
+  })
+
+  // Assert
+  assert.deepEqual(progress[1], ["restarted", "restarting"])
+  assert.equal(rows[0].status, "restarted")
+  assert.equal(rows[0].data.cooperative.mode, "idle")
+  assert.equal(rows[1].status, "restarted")
+  assert.ok(activeProbes > 1)
+})
+
 test("when cooperative preparation is blocked, observation reports blocked without restarting", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)

@@ -232,6 +232,7 @@ type NativeMetadata struct {
 // CooperativeRestart describes preparation and continuation progress for one restart operation.
 type CooperativeRestart struct {
 	OperationID  string `json:"operationId"`
+	Mode         string `json:"mode,omitempty"`
 	Phase        string `json:"phase"`
 	Message      string `json:"message"`
 	RequestedAt  int64  `json:"requestedAt"`
