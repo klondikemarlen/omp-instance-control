@@ -477,6 +477,132 @@ func TestWaitForRestartsWaitsForCooperativeContinuation(t *testing.T) {
 	}
 }
 
+func TestWaitForRestartsCompletesIdleReplacementWithoutContinuation(t *testing.T) {
+	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	operationID := "restart-operation"
+	candidate := replacementRecord("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 11, operationID, original.InstanceID)
+	probes := 0
+	accepted := acceptedRestartRow(original, operationID)
+	accepted.Data.Cooperative = &protocol.CooperativeRestart{
+		OperationID: operationID,
+		Mode:        "idle",
+		Phase:       "restarting",
+	}
+	transport := restartWaitTransport{
+		readRecords: func() ([]protocol.Record, error) {
+			return []protocol.Record{candidate}, nil
+		},
+		request: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+			if record.InstanceID != candidate.InstanceID || request.Action != "status" {
+				t.Fatalf("unexpected idle restart observation request: record=%q action=%q", record.InstanceID, request.Action)
+			}
+			probes++
+			data := &protocol.Data{
+				InstanceID: candidate.InstanceID,
+				PID:        candidate.PID,
+				LastRestart: &protocol.Restart{
+					OperationID:        operationID,
+					PreviousInstanceID: original.InstanceID,
+				},
+			}
+			if probes > 1 {
+				phase := "resuming"
+				if probes > 2 {
+					phase = "resumed"
+				}
+				data.Cooperative = &protocol.CooperativeRestart{
+					OperationID: operationID,
+					Mode:        "idle",
+					Phase:       phase,
+					Message:     "Session reopened for input.",
+					RequestedAt: 100,
+				}
+			}
+			return statusResponse(request, data), nil
+		},
+	}
+
+	rows, err := WaitForRestarts(context.Background(), transport, []Row{accepted}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probes != 3 || len(rows) != 1 || rows[0].Status != "restarted" {
+		t.Fatalf("idle observer completed before correlated resumed phase: probes=%d rows=%#v", probes, rows)
+	}
+	if rows[0].Data.Cooperative == nil || rows[0].Data.Cooperative.Mode != "idle" || rows[0].Data.Cooperative.Phase != "resumed" {
+		t.Fatalf("completion did not retain idle resumed metadata: %#v", rows[0].Data)
+	}
+}
+
+func TestWaitForRestartsCompletesIdleRowWhileActiveRowResumes(t *testing.T) {
+	idleOriginal := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	activeOriginal := clientRecord("cccccccccccccccccccccccccccccccc")
+	idleOperationID := "idle-operation"
+	activeOperationID := "active-operation"
+	idleCandidate := replacementRecord("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 11, idleOperationID, idleOriginal.InstanceID)
+	activeCandidate := replacementRecord("dddddddddddddddddddddddddddddddd", 13, activeOperationID, activeOriginal.InstanceID)
+	activeProbes := 0
+	idleAccepted := acceptedRestartRow(idleOriginal, idleOperationID)
+	idleAccepted.Data.Cooperative = &protocol.CooperativeRestart{OperationID: idleOperationID, Mode: "idle", Phase: "restarting"}
+	activeAccepted := acceptedRestartRow(activeOriginal, activeOperationID)
+	activeAccepted.Data.Cooperative = &protocol.CooperativeRestart{OperationID: activeOperationID, Phase: "preparing"}
+	transport := restartWaitTransport{
+		readRecords: func() ([]protocol.Record, error) {
+			return []protocol.Record{idleCandidate, activeCandidate}, nil
+		},
+		request: func(record protocol.Record, request protocol.Request) (protocol.Response, error) {
+			operationID := idleOperationID
+			previousInstanceID := idleOriginal.InstanceID
+			mode := "idle"
+			phase := "resumed"
+			if record.InstanceID == activeCandidate.InstanceID {
+				operationID = activeOperationID
+				previousInstanceID = activeOriginal.InstanceID
+				mode = ""
+				activeProbes++
+				phase = "resuming"
+				if activeProbes > 1 {
+					phase = "resumed"
+				}
+			}
+			return statusResponse(request, &protocol.Data{
+				InstanceID: record.InstanceID,
+				PID:        record.PID,
+				LastRestart: &protocol.Restart{
+					OperationID:        operationID,
+					PreviousInstanceID: previousInstanceID,
+				},
+				Cooperative: &protocol.CooperativeRestart{
+					OperationID: operationID,
+					Mode:        mode,
+					Phase:       phase,
+				},
+			}), nil
+		},
+	}
+	var progress [][]string
+
+	rows, err := WaitForRestarts(context.Background(), transport, []Row{idleAccepted, activeAccepted}, func(rows []Row) {
+		statuses := make([]string, len(rows))
+		for index, row := range rows {
+			statuses[index] = row.Status
+		}
+		progress = append(progress, statuses)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(progress) < 2 || progress[1][0] != "restarted" || progress[1][1] != "restarting" {
+		t.Fatalf("idle row did not complete independently of active continuation: progress=%#v", progress)
+	}
+	if rows[0].Status != "restarted" || rows[0].Data.Cooperative.Mode != "idle" {
+		t.Fatalf("idle row = %#v", rows[0])
+	}
+	if rows[1].Status != "restarted" || activeProbes < 2 {
+		t.Fatalf("active row did not remain observed through resumed: probes=%d row=%#v", activeProbes, rows[1])
+	}
+}
+
 func TestWaitForRestartsReportsCooperativeBlock(t *testing.T) {
 	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	operationID := "restart-operation"

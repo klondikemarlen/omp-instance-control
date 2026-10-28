@@ -15,17 +15,25 @@ import {
 import { registerOmpiCommand } from "./command.js"
 import {
   appendPersistedCooperativeEntry,
-  COOPERATIVE_CHECKPOINT_TOOL_NAME,
+  checkpointMatchesOrigin,
   closeRestartTimer,
+  createBlockedCooperativeStatus,
   createContinuationPrompt,
-  createPreparationPrompt,
+  createIdleResumedStatus,
   describePendingAsyncWork,
   errorMessage,
   createToolTextResult,
+  getCooperativeApiError,
   getCooperativeEntries,
+  hasReadyCheckpoint,
   isOriginContext,
+  isPubliclyIdle,
+  markCooperativePreparationBlocked,
   MINIMUM_COOPERATIVE_HOST_VERSION,
+  persistIdleCheckpoint,
+  resetIdleCheckpointForPreparation,
   registerCooperativeCheckpointTool,
+  sendCooperativePreparation,
   sessionPersistence,
   supportsNonInterruptingAside,
   updateCooperativeStatus,
@@ -34,7 +42,6 @@ import { requestWrapperRestart } from "./restart.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
 const EXIT_REQUESTED_EVENT = "omp-exit-command:exit-requested"
-
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
 }
@@ -74,6 +81,7 @@ export default async function instanceControl(pi) {
   }
 
   let runtime
+  const cooperativeApiError = (ctx) => getCooperativeApiError(pi, ctx, cooperativeError)
   const refreshCompletions = registerOmpiCommand(pi, { getRuntime: () => runtime })
   const releaseExitRequestListener = pi.events.on(EXIT_REQUESTED_EVENT, (request) => {
     if (
@@ -311,6 +319,15 @@ export default async function instanceControl(pi) {
       await publishCooperativeStatus(state)
       return
     }
+    if (state.cooperative?.mode === "idle" && !isPubliclyIdle(activeContext)) {
+      resetIdleCheckpointForPreparation(
+        state,
+        "Work arrived while idle state was being persisted; switching to cooperative preparation."
+      )
+      await publishCooperativeStatus(state)
+      await startCooperativePreparation(state)
+      return
+    }
 
     state.shutdownRequested = true
     closeRestartTimer(state)
@@ -343,45 +360,22 @@ export default async function instanceControl(pi) {
     }
   }
 
-  function hasReadyCheckpoint(state, ctx) {
-    return getCooperativeEntries(ctx).some(
-      (entry) =>
-        entry?.entryId === state.checkpointEntryId &&
-        entry.operationId === state.pending &&
-        entry.ready === true
+  const markPreparationBlocked = (state, message) =>
+    markCooperativePreparationBlocked(
+      state,
+      message,
+      () =>
+        runtime === state &&
+        !state.closing &&
+        !state.checkpointReady &&
+        !hasMatchingExitRequest(state, state.ctx),
+      () => publishCooperativeStatus(state),
+      (error) =>
+        state.ctx.ui.notify(
+          `Instance control status update failed: ${errorMessage(error)}`,
+          "error"
+        )
     )
-  }
-
-  function cooperativeApiError(ctx) {
-    if (cooperativeError) return cooperativeError
-    if (
-      typeof pi.sendUserMessage !== "function" ||
-      typeof pi.appendEntry !== "function" ||
-      typeof ctx.sessionManager.getBranch !== "function" ||
-      typeof ctx.shutdown !== "function"
-    ) {
-      return "OMP is missing a public API required for cooperative restart."
-    }
-
-    return null
-  }
-
-  function markPreparationBlocked(state, message) {
-    if (
-      runtime !== state ||
-      state.closing ||
-      state.checkpointReady ||
-      hasMatchingExitRequest(state, state.ctx)
-    ) {
-      return
-    }
-
-    closeRestartTimer(state)
-    updateCooperativeStatus(state, "blocked", message)
-    void publishCooperativeStatus(state).catch((error) => {
-      state.ctx.ui.notify(`Instance control status update failed: ${errorMessage(error)}`, "error")
-    })
-  }
 
   async function executeRestartCheckpoint(_toolCallId, params, _signal, _onUpdate, ctx) {
     const state = runtime
@@ -570,58 +564,56 @@ export default async function instanceControl(pi) {
       )
       return
     }
-
     state.preparationSent = true
-    state.restartTimer = setTimeout(() => {
-      if (
-        runtime !== state ||
-        state.closing ||
-        state.checkpointReady ||
-        state.cooperative?.phase !== "preparing"
-      ) {
-        return
-      }
-      const blocker = describePendingAsyncWork(state.ctx)
-      markPreparationBlocked(
-        state,
-        `No ${COOPERATIVE_CHECKPOINT_TOOL_NAME} checkpoint report arrived within about 60 seconds. The accepted restart remains pending at the checkpoint phase. ${blocker}`
-      )
-    }, 60_000)
-    state.restartTimer.unref?.()
-
+    let idleCheckpoint
     try {
-      const delivery = pi.sendUserMessage(createPreparationPrompt(state.pending), {
-        deliverAs: "aside",
-      })
-      if (delivery && typeof delivery.then === "function") {
-        Promise.resolve(delivery).catch((error) => {
-          markPreparationBlocked(
-            state,
-            `OMP reported a preparation-message delivery failure: ${errorMessage(error)}`
-          )
-        })
-      }
+      idleCheckpoint = await persistIdleCheckpoint(
+        pi,
+        state,
+        () =>
+          runtime === state &&
+          !state.closing &&
+          isOriginContext(state, state.ctx) &&
+          !hasMatchingExitRequest(state, state.ctx)
+      )
     } catch (error) {
       markPreparationBlocked(
         state,
-        `OMP could not deliver the preparation message: ${errorMessage(error)}`
+        `The idle checkpoint could not be persisted; no model message was sent: ${errorMessage(error)}`
       )
+      return
     }
+    if (runtime !== state || state.closing) return
+    if (idleCheckpoint) {
+      state.checkpointEntryId = idleCheckpoint.entryId
+      state.checkpointReady = true
+      state.cooperative = {
+        operationId: state.pending,
+        mode: "idle",
+        phase: "restarting",
+        message: "The terminal is idle with no pending OMP work; no model message was sent.",
+        requestedAt: idleCheckpoint.requestedAt,
+        checkpointAt: idleCheckpoint.checkpointAt,
+      }
+      await refresh(state.ctx)
+      return
+    }
+    if (hasMatchingExitRequest(state, state.ctx)) return
+    if (!isOriginContext(state, state.ctx))
+      return markPreparationBlocked(
+        state,
+        "Context changed during idle admission; no message was sent."
+      )
+    sendCooperativePreparation(
+      pi,
+      state,
+      () => runtime === state && !hasMatchingExitRequest(state, state.ctx),
+      (message) => markPreparationBlocked(state, message)
+    )
   }
 
   async function blockReplacement(state, checkpoint, message) {
-    const status = {
-      operationId: checkpoint.operationId,
-      phase: "blocked",
-      message,
-      requestedAt: Number.isSafeInteger(checkpoint.requestedAt)
-        ? checkpoint.requestedAt
-        : Date.now(),
-    }
-    if (Number.isSafeInteger(checkpoint.checkpointAt)) {
-      status.checkpointAt = checkpoint.checkpointAt
-    }
-    state.cooperative = status
+    state.cooperative = createBlockedCooperativeStatus(checkpoint, message)
     await publishCooperativeStatus(state)
   }
 
@@ -686,15 +678,8 @@ export default async function instanceControl(pi) {
     if (correlatedCheckpoints.length === 0) return
 
     const checkpoint = correlatedCheckpoints[correlatedCheckpoints.length - 1]
-    const checkpointContextMatches =
-      checkpoint.sessionId === state.origin.sessionId &&
-      checkpoint.sessionFile === state.origin.sessionFile &&
-      checkpoint.cwd === state.origin.cwd &&
-      checkpoint.scopeId === state.origin.scopeId &&
-      typeof checkpoint.checkpoint === "string" &&
-      checkpoint.checkpoint.trim().length > 0 &&
-      Number.isSafeInteger(checkpoint.requestedAt) &&
-      Number.isSafeInteger(checkpoint.checkpointAt)
+    const idleCheckpoint = checkpoint.mode === "idle"
+    const checkpointContextMatches = checkpointMatchesOrigin(checkpoint, state.origin)
 
     if (!checkpointContextMatches) {
       await blockReplacement(
@@ -712,7 +697,19 @@ export default async function instanceControl(pi) {
       )
       return
     }
-
+    if (idleCheckpoint) {
+      if (hasMatchingExitRequest(state, ctx)) {
+        await blockReplacement(
+          state,
+          checkpoint,
+          "An explicit exit was requested; automatic restart continuation was suppressed."
+        )
+        return
+      }
+      state.cooperative = createIdleResumedStatus(checkpoint)
+      await publishCooperativeStatus(state)
+      return
+    }
     const priorDelivery = entries.findLast(
       (entry) =>
         entry?.kind === "continuation" &&
@@ -1002,7 +999,7 @@ export default async function instanceControl(pi) {
       data: {
         state: "accepted",
         operationId: runtime.pending,
-        message: "Restart accepted; preparation is sent through OMP's non-interrupting aside path.",
+        message: "Restart accepted; checking idle state before any cooperative preparation.",
         cooperative: runtime.cooperative,
       },
       afterReply: async () => {

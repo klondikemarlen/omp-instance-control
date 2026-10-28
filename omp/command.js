@@ -860,8 +860,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
               "Every target replaces its native ompi wrapper and OMP using the installed code.",
               "With no target, select only this terminal. Ctrl-C stops watching, not accepted requests.",
-              "Restart normally asks the agent to checkpoint, then resumes with a continuation after correlated replacement.",
-              "A blocked phase reports why safe preparation or continuation could not proceed; Ctrl-C stops watching only.",
+              "Idle sessions restart with zero model turns and reopen for input; active work uses cooperative checkpoint and continuation messages.",
+              "OMP owns settlement, including queued work. Explicit exit still suppresses relaunch; Ctrl-C stops watching only.",
             ],
             cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
             restore: [
