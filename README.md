@@ -244,7 +244,9 @@ Run `dev sign` in your terminal to sign the current prepared upload. It selects 
 ```bash
 dev package
 dev sign
-dput ssh-ppa:klondikemarlen/omp-instance-control build/debian/omp-instance-control_0.15.0~ppa1_source.changes
+source=$(dpkg-parsechangelog --show-field Source)
+version=$(dpkg-parsechangelog --show-field Version)
+dput ssh-ppa:klondikemarlen/omp-instance-control "build/debian/${source}_${version}_source.changes"
 ```
 
 SFTP uses your local username unless a `dput` login is configured; set it to your Launchpad account when the names differ.
