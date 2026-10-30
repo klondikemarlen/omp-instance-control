@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.1 - 2026-10-30
+
+### Fixed
+
+- Show concise cleanup totals instead of listing every retained PID; keep removal and failure details visible and complete safety reasons in JSON.
+
 ## 0.18.0 - 2026-10-28
 
 ### Changed
