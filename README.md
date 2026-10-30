@@ -143,7 +143,7 @@ OMP owns settlement, transcript persistence, teardown, and terminal release. The
 
 ### Recovering Sessions After Reboot
 
-Managed `ompi` sessions are captured automatically once their transcript exists. No restore name is required. Recovery checkpoints retain the active managed slots outside the runtime directory; the default menu prefers the latest checkpoint from a previous boot, otherwise the latest current-boot checkpoint.
+Managed `ompi` sessions are captured automatically once their transcript exists. No restore name is required. Recovery checkpoints retain the active managed slots outside the runtime directory. The default menu prefers the latest previous-boot set, but an empty older boot does not hide current-boot recovery data. A latest empty current-boot set remains empty after normal exit; recovery does not search older sets to resurrect closed sessions.
 
 After your terminal restores its Bash tabs, run this in each tab:
 
@@ -151,7 +151,7 @@ After your terminal restores its Bash tabs, run this in each tab:
 ompi control restore
 ```
 
-Select a slot and confirm its exact session ID and working directory. `ompi control restore --list` lists candidates; add `--json` for structured output. Use `--slot FULL_SLOT_ID` to select directly and `--profile work` explicitly for another OMP profile. Recovery runs only in the terminal where you invoke it; it does not open terminal windows or modify shell startup.
+Select a slot and confirm its exact session ID and working directory. `ompi control restore list` lists candidates; add `--json` for structured output. Use `ompi control restore slot FULL_SLOT_ID` to select directly and `--profile work` explicitly for another OMP profile. Recovery runs only in the terminal where you invoke it; it does not open terminal windows or modify shell startup.
 
 Optional names remain available:
 
@@ -159,15 +159,15 @@ Optional names remain available:
 /ompi restore save payments-main
 ```
 
-From another terminal, use `ompi control restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved. `ompi control restore payments-main` selects that slot directly. A name stays bound to its evolving wrapper slot, not to its original project directory or a frozen transcript bookmark. Saving an existing name again is refused.
+From another terminal, use `ompi control restore save payments-main --instance FULL_INSTANCE_ID`. Names use up to 64 letters, digits, dots, underscores, or hyphens, starting with a letter or digit; `save` is reserved. `ompi control restore payments-main` selects that slot directly. For names matching an operation word, use `ompi control restore name history` or `/ompi restore name history`. A name stays bound to its evolving wrapper slot, not to its original project directory or a frozen transcript bookmark. Saving an existing name again is refused.
 
-`ompi control restore --checkpoint` saves a manual membership checkpoint. `--history` lists retained checkpoints; `--from CHECKPOINT_ID` restricts selection to that checkpoint. A checkpoint freezes membership, not transcript contents: each slot follows its latest safely captured session and cwd through switches, branches, and controlled restarts. A normal exit removes the closing slot from active membership, including when the resulting checkpoint is empty. The newest ten checkpoints are retained, plus the newest previous-boot checkpoint when it falls outside that set, for at most eleven.
+`ompi control restore checkpoint` saves a manual membership checkpoint. `ompi control restore history` lists retained checkpoints; `ompi control restore from CHECKPOINT_ID` restricts selection to that checkpoint. `list` and `export` accept `--from CHECKPOINT_ID`; `list` and `history` accept `--json`. Operations are words, not flags: the old `--history`, `--list`, `--checkpoint`, `--slot`, `--export`, and `--import-legacy` spellings are no longer accepted. A checkpoint freezes membership, not transcript contents: each slot follows its latest safely captured session and cwd through switches, branches, and controlled restarts. Unchanged automatic membership reuses the latest same-boot checkpoint, including concurrent captures; actual membership/session/cwd changes and manual captures create new history. Normal exit excludes the closing slot, including when the resulting checkpoint is empty. The newest ten checkpoints are retained, plus the newest previous-boot checkpoint when it falls outside that set, for at most eleven.
 
 Private state lives under the selected agent directory at `instance-control/restore/`, outside `XDG_RUNTIME_DIR`. Exact transcript paths and safe launch options are retained without copying transcripts or replaying startup prompts. Missing or not-yet-written transcripts stay quietly unavailable and invalidate predecessor snapshots; recovery never silently opens an older conversation. Unsafe paths, a live launcher or OMP child, uncertain ownership, or a concurrent restore holding the slot lock refuse launch.
 
 Recovery requires trusted ancestors that are not group- or world-writable. If an ordinary launch cannot prepare that store safely, it reports recovery as unavailable and continues without a recoverable slot; standard OMP invocation and existing restart eligibility are unchanged. Correct only the reported owned directory's permissions, then start a fresh launcher. For example, `chmod go-w ~/.omp` removes group/other write access from an owned, group-writable OMP config root; the wrapper never changes those permissions for you.
 
-`/ompi restore` provides the same recovery operations inside OMP. Selection displays a quoted shell command before confirmation and graceful exit: copy it, wait for your shell, then paste it. No nested OMP terminal is started. Both command surfaces complete optional saved names; type `-` to see advanced recovery options or use `help restore`. Generated managed restore commands require native `ompi` 0.12.0 or newer for the `control` namespace.
+`/ompi restore` provides the same recovery operations inside OMP. Selection displays a quoted shell command before confirmation and graceful exit: copy it, wait for your shell, then paste it. No nested OMP terminal is started. Both command surfaces complete operation words and optional saved names; type `-` to see relevant modifiers or use `help restore`. Generated managed restore commands require native `ompi` 0.19.0 or newer for word-based restore syntax.
 
 Ptyxis restores layout, profile, and cwd, but does not supply a durable per-tab identity or save custom command argv in its [50.1 session format](https://sources.debian.org/data/main/p/ptyxis/50.1-1/src/ptyxis-session.c). This explicit menu does not change Ptyxis profiles or Bash startup. Verification covers real Ptyxis close/reopen on an isolated headless display and loss of the isolated runtime directory, not an OS reboot of the workstation.
 
@@ -175,15 +175,15 @@ Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 ca
 
 ### Migrating Legacy Recovery Snapshots
 
-`ompi control restore --import-legacy` imports the old helper's `~/.local/state/omp-session-resume-helper/snapshots/*.txt` and `active-sessions.txt`, leaving the originals untouched. Supply a path to import one snapshot. Only the helper's strictly quoted command format is parsed; shell text is never evaluated. Transcript IDs must resolve uniquely to an owned file within the selected profile's session tree. Unsupported, missing, or ambiguous entries are reported.
+`ompi control restore import-legacy` imports the old helper's `~/.local/state/omp-session-resume-helper/snapshots/*.txt` and `active-sessions.txt`, leaving the originals untouched. Supply a path to import one snapshot. Only the helper's strictly quoted command format is parsed; shell text is never evaluated. Transcript IDs must resolve uniquely to an owned file within the selected profile's session tree. Unsupported, missing, or ambiguous entries are reported.
 
-Imports appear in `ompi control restore --history` as legacy checkpoints, not default automatic recovery. They cannot acquire invented managed-slot ownership or launch automatically. Inspect one with `ompi control restore --list --from CHECKPOINT_ID` and export manual commands with:
+Imports appear in `ompi control restore history` as legacy checkpoints, not default automatic recovery. They cannot acquire invented managed-slot ownership or launch automatically. Inspect one with `ompi control restore list --from CHECKPOINT_ID` and export manual commands with:
 
 ```bash
-ompi control restore --export --from CHECKPOINT_ID
+ompi control restore export --from CHECKPOINT_ID
 ```
 
-Managed exports use `ompi control restore --slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot.
+Managed exports use `ompi control restore slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot.
 
 Version 0.10.1 also recognizes OMP's [256-byte title slot](https://github.com/can1357/oh-my-pi/blob/main/docs/session.md#file-format) before the session header. If 0.10.0 reported existing transcripts as missing, re-import their legacy source after upgrading; the corrected import does not overwrite older immutable checkpoints. Re-importing a source already retained by the same reader revision reuses its checkpoint. Pruned imports can be recreated and remain subject to the bounded history policy.
 

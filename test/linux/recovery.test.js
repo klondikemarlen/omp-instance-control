@@ -12,10 +12,17 @@ import {
 } from "../../linux/recovery.js"
 import { saveRestoreName, writeRestoreSnapshot } from "../../linux/restore.js"
 import { getScope } from "../../protocol/index.js"
+import { createTransport } from "../../linux/transport.js"
 
 async function createFixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "ic-recovery-"))
   t.after(() => rm(root, { recursive: true, force: true }))
+  const previousRuntime = process.env.XDG_RUNTIME_DIR
+  process.env.XDG_RUNTIME_DIR = path.join(root, "r")
+  t.after(() => {
+    if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR
+    else process.env.XDG_RUNTIME_DIR = previousRuntime
+  })
   const scope = getScope({
     cwd: root,
     env: {
@@ -114,4 +121,137 @@ test("when a checkpoint contains a now-unavailable named slot, listing preserves
   assert.equal(sessions[0].restoreId, restoreId)
   assert.equal(sessions[0].name, "work")
   assert.match(sessions[0].unavailable, /No current persisted session snapshot/)
+})
+
+for (const { condition, previousMembers, currentMembers, expectedMembers } of [
+  {
+    condition: "an empty previous boot precedes current sessions",
+    previousMembers: false,
+    currentMembers: true,
+    expectedMembers: true,
+  },
+  {
+    condition: "normal exit empties current membership",
+    previousMembers: true,
+    currentMembers: false,
+    expectedMembers: false,
+  },
+  {
+    condition: "both boots have empty membership",
+    previousMembers: false,
+    currentMembers: false,
+    expectedMembers: false,
+  },
+]) {
+  test(`when ${condition}, default recovery preserves the latest useful set without resurrection`, async (t) => {
+    // Arrange
+    const { root, scope } = await createFixture(t)
+    const restoreId = "a".repeat(32)
+    const sessionFile = path.join(root, "conversation.jsonl")
+    await writeFile(sessionFile, "persisted conversation\n", { mode: 0o600 })
+    const owner = { bootId: "00000000-0000-0000-0000-000000000000", pid: 999999, startTime: "1" }
+    const snapshot = {
+      version: 1,
+      restoreId,
+      scope,
+      sessionFile,
+      sessionId: "current-conversation",
+      cwd: root,
+      resumeArgs: [],
+      owner,
+      agentOwner: owner,
+      updatedAt: new Date().toISOString(),
+    }
+    await writeRestoreSnapshot(scope, snapshot)
+    const entry = { restoreId, sessionId: snapshot.sessionId, cwd: root }
+    const previous = {
+      version: 1,
+      checkpointId: "b".repeat(32),
+      scope,
+      bootId: "00000000-0000-0000-0000-000000000000",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      reason: "automatic",
+      entries: previousMembers ? [entry] : [],
+    }
+    await writeRecoveryCheckpoint(scope, previous)
+    await writeRecoveryCheckpoint(scope, {
+      ...previous,
+      checkpointId: "c".repeat(32),
+      bootId: (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(),
+      createdAt: "2026-01-02T00:00:00.000Z",
+      entries: currentMembers ? [entry] : [],
+    })
+
+    // Act
+    const sessions = await listRecoverySessions(scope)
+    const explicitPrevious = await listRecoverySessions(scope, {
+      checkpointId: previous.checkpointId,
+    })
+
+    // Assert
+    assert.deepEqual(sessions, expectedMembers ? [{ restoreId, session: snapshot }] : [])
+    assert.deepEqual(explicitPrevious, previousMembers ? [{ restoreId, session: snapshot }] : [])
+  })
+}
+
+test("when automatic captures race, history retains one transition and manual captures remain distinct", async (t) => {
+  // Arrange
+  const { root, scope } = await createFixture(t)
+  const restoreId = "a".repeat(32)
+  const sessionFile = path.join(root, "conversation.jsonl")
+  await writeFile(sessionFile, "persisted conversation\n", { mode: 0o600 })
+  const owner = { bootId: "00000000-0000-0000-0000-000000000000", pid: 999999, startTime: "1" }
+  const snapshot = {
+    version: 1,
+    restoreId,
+    scope,
+    sessionFile,
+    sessionId: "current-conversation",
+    cwd: root,
+    resumeArgs: [],
+    owner,
+    agentOwner: owner,
+    updatedAt: new Date().toISOString(),
+  }
+  await writeRestoreSnapshot(scope, snapshot)
+  const transport = await createTransport(scope)
+  await transport.writeRecord({
+    version: 1,
+    instanceId: "d".repeat(32),
+    scope: scope.id,
+    pid: process.pid,
+    cwd: root,
+    sessionId: snapshot.sessionId,
+    sessionFile,
+    launcherManaged: true,
+    state: "running",
+    operationId: null,
+    lastRestart: null,
+    restoreId,
+  })
+
+  // Act
+  const captures = await Promise.all(
+    Array.from({ length: 12 }, () => captureRecoveryCheckpoint(scope))
+  )
+  const emptied = await captureRecoveryCheckpoint(scope, { excludeRestoreId: restoreId })
+  const returned = await captureRecoveryCheckpoint(scope)
+  const manual = await captureRecoveryCheckpoint(scope, { reason: "manual" })
+  const history = await listRecoveryCheckpoints(scope)
+
+  // Assert
+  assert.deepEqual(captures, Array(12).fill(captures[0]))
+  assert.notEqual(manual.checkpointId, captures[0].checkpointId)
+  assert.deepEqual(emptied.entries, [])
+  assert.deepEqual(returned.entries, [{ restoreId, sessionId: snapshot.sessionId, cwd: root }])
+  assert.notEqual(returned.checkpointId, captures[0].checkpointId)
+  assert.deepEqual(
+    new Set(history.map((entry) => entry.checkpointId)),
+    new Set([
+      manual.checkpointId,
+      captures[0].checkpointId,
+      emptied.checkpointId,
+      returned.checkpointId,
+    ])
+  )
 })

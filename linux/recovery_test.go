@@ -396,15 +396,105 @@ func TestRecoveryCheckpointPublicationIsPrivateAndImmutable(t *testing.T) {
 	}
 }
 
-func TestDefaultRecoveryCheckpointPrefersDifferentBootExceptLegacy(t *testing.T) {
-	checkpoints := []protocol.RecoveryCheckpoint{
-		{CheckpointID: strings.Repeat("a", 32), BootID: "00000000-0000-4000-8000-000000000001", Reason: "manual"},
-		{CheckpointID: strings.Repeat("b", 32), BootID: "00000000-0000-4000-8000-000000000000", Reason: "legacy"},
-		{CheckpointID: strings.Repeat("c", 32), BootID: "00000000-0000-4000-8000-000000000000", Reason: "automatic"},
+func TestDefaultRecoveryCheckpointPreservesMeaningfulEmptySets(t *testing.T) {
+	currentBoot := "00000000-0000-4000-8000-000000000000"
+	oldBoot := "00000000-0000-4000-8000-000000000001"
+	member := []protocol.RecoveryCheckpointEntry{{RestoreID: strings.Repeat("d", 32)}}
+	for _, scenario := range []struct {
+		name              string
+		current, previous []protocol.RecoveryCheckpointEntry
+		expected          string
+	}{
+		{"empty previous boot does not mask current sessions", member, nil, "current"},
+		{"previous boot sessions remain recoverable", member, member, "previous"},
+		{"normal exit does not resurrect previous sessions", nil, member, "current"},
+		{"all empty stays empty", nil, nil, "current"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			checkpoints := []protocol.RecoveryCheckpoint{
+				{CheckpointID: "current", BootID: currentBoot, Reason: "automatic", Entries: scenario.current},
+				{CheckpointID: "legacy", BootID: "legacy", Reason: "legacy", Entries: member},
+				{CheckpointID: "previous", BootID: oldBoot, Reason: "automatic", Entries: scenario.previous},
+				{CheckpointID: "older", BootID: oldBoot, Reason: "automatic", Entries: member},
+			}
+			selected := defaultRecoveryCheckpoint(checkpoints, currentBoot)
+			if selected == nil || selected.CheckpointID != scenario.expected {
+				t.Fatalf("selected %#v, want %s", selected, scenario.expected)
+			}
+		})
 	}
-	selected := defaultRecoveryCheckpoint(checkpoints, "00000000-0000-4000-8000-000000000000")
-	if selected == nil || selected.CheckpointID != strings.Repeat("a", 32) {
-		t.Fatalf("default recovery checkpoint = %#v", selected)
+}
+
+func TestAutomaticRecoveryCheckpointDeduplicatesMembershipOnly(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(root, "runtime"))
+	scope, _ := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	first, err := CaptureRecoveryCheckpoint(scope, "automatic", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := CaptureRecoveryCheckpoint(scope, "automatic", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.CheckpointID != first.CheckpointID {
+		t.Fatalf("unchanged automatic capture created checkpoint %s after %s", second.CheckpointID, first.CheckpointID)
+	}
+	manual, err := CaptureRecoveryCheckpoint(scope, "manual", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manual.CheckpointID == first.CheckpointID {
+		t.Fatal("manual capture was deduplicated")
+	}
+}
+func TestListRecoverySessionsDoesNotLetEmptyPreviousBootMaskCurrentSessions(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(root, "runtime"))
+	scope, session := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	directories, err := ensureRestoreDirectories(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBoot, err := readBootID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := protocol.RecoveryCheckpoint{
+		Version: 1, CheckpointID: strings.Repeat("b", 32), Scope: scope,
+		BootID:    "00000000-0000-4000-8000-000000000001",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: "automatic",
+		Entries: []protocol.RecoveryCheckpointEntry{},
+	}
+	current := old
+	current.CheckpointID = strings.Repeat("c", 32)
+	current.BootID = currentBoot
+	current.CreatedAt = time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)
+	current.Entries = []protocol.RecoveryCheckpointEntry{{RestoreID: session.RestoreID, SessionID: session.SessionID, CWD: session.CWD}}
+	for _, checkpoint := range []protocol.RecoveryCheckpoint{old, current} {
+		if err := publishImmutableRecoveryCheckpoint(directories, checkpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	candidates, err := ListRecoverySessions(scope, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].RestoreID != session.RestoreID {
+		t.Fatalf("empty previous boot hid current recovery candidates: %#v", candidates)
+	}
+	selected, err := ListRecoverySessions(scope, old.CheckpointID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 0 {
+		t.Fatalf("explicit empty checkpoint exposed unrelated recovery candidates: %#v", selected)
 	}
 }
 
@@ -438,5 +528,40 @@ func TestConcurrentRecoveryCapturesRetainBoundedReadableHistory(t *testing.T) {
 	}
 	if len(checkpoints) != 10 {
 		t.Fatalf("concurrent captures retained %d checkpoints, want 10", len(checkpoints))
+	}
+}
+
+func TestConcurrentAutomaticCapturesPublishOneMembershipTransition(t *testing.T) {
+	scope, _ := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(filepath.Dir(scope.AgentDir), "runtime"))
+	const workers = 12
+	results := make(chan protocol.RecoveryCheckpoint, workers)
+	failures := make(chan error, workers)
+	for range workers {
+		go func() {
+			checkpoint, err := CaptureRecoveryCheckpoint(scope, "automatic", "")
+			results <- checkpoint
+			failures <- err
+		}()
+	}
+	var identity string
+	for range workers {
+		checkpoint := <-results
+		if err := <-failures; err != nil {
+			t.Fatal(err)
+		}
+		if identity == "" {
+			identity = checkpoint.CheckpointID
+		}
+		if checkpoint.CheckpointID != identity {
+			t.Fatalf("unchanged concurrent membership created different checkpoints: %s, %s", identity, checkpoint.CheckpointID)
+		}
+	}
+	history, err := ListRecoveryCheckpoints(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].CheckpointID != identity {
+		t.Fatalf("concurrent captures filled history: %#v", history)
 	}
 }

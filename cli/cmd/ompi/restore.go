@@ -16,14 +16,15 @@ import (
 
 const restoreHelp = `Usage:
   ompi control restore [NAME] [--profile NAME]
-  ompi control restore --slot ID [--profile NAME]
+  ompi control restore name NAME [--profile NAME]
   ompi control restore save NAME --instance ID [--profile NAME]
-  ompi control restore --list [--json] [--from CHECKPOINT] [--profile NAME]
-  ompi control restore --checkpoint [--profile NAME]
-  ompi control restore --history [--json] [--profile NAME]
-  ompi control restore --export [--from CHECKPOINT] [--profile NAME]
-  ompi control restore --import-legacy [PATH] [--profile NAME]
-  ompi control restore --from CHECKPOINT [--profile NAME]
+  ompi control restore slot ID [--profile NAME]
+  ompi control restore list [--json] [--from ID] [--profile NAME]
+  ompi control restore checkpoint [--profile NAME]
+  ompi control restore history [--json] [--profile NAME]
+  ompi control restore export [--from ID] [--profile NAME]
+  ompi control restore import-legacy [PATH] [--profile NAME]
+  ompi control restore from ID [--profile NAME]
   ompi control restore --help | --version
 
 Recovery automatically captures persisted managed ompi slots. Names are optional.
@@ -33,20 +34,22 @@ Restore uses this terminal only; no terminal windows are opened automatically.
 `
 
 type restoreOptions struct {
-	profile      string
-	instance     string
-	slot         string
-	from         string
-	list         bool
-	json         bool
-	checkpoint   bool
-	history      bool
-	export       bool
-	importLegacy bool
-	importPath   string
-	help         bool
-	version      bool
-	positionals  []string
+	profile       string
+	instance      string
+	slot          string
+	from          string
+	list          bool
+	json          bool
+	checkpoint    bool
+	history       bool
+	export        bool
+	importLegacy  bool
+	importPath    string
+	name          bool
+	fromOperation bool
+	help          bool
+	version       bool
+	positionals   []string
 }
 
 func runRestore(args []string) (int, error) {
@@ -65,34 +68,40 @@ func runRestore(args []string) (int, error) {
 		fmt.Print(restoreHelp)
 		return 0, nil
 	}
-	if err := validateRestoreOptions(options); err != nil {
-		return 0, usageError(err.Error())
-	}
 	scope, err := protocol.GetScope(options.profile, "")
 	if err != nil {
 		return 1, err
 	}
-	if len(options.positionals) > 0 && options.positionals[0] == "save" {
+	if options.instance != "" {
 		return saveNamedSession(scope, options.positionals[1], options.instance)
 	}
-
-	if len(options.positionals) == 0 {
-		return runRecovery(scope, options)
+	if options.name {
+		return restoreNamedSession(scope, options.positionals[1])
 	}
+	if len(options.positionals) == 1 {
+		switch options.positionals[0] {
+		case "list", "history", "checkpoint", "export", "import-legacy", "slot", "from":
+		default:
+			return restoreNamedSession(scope, options.positionals[0])
+		}
+	}
+	return runRecovery(scope, options)
+}
 
+func restoreNamedSession(scope protocol.Scope, name string) (int, error) {
 	sessions, err := linux.ListSavedSessions(scope)
 	if err != nil {
 		return 1, err
 	}
 	var selected protocol.NamedSession
 	for _, session := range sessions {
-		if session.Name == options.positionals[0] {
+		if session.Name == name {
 			selected = session
 			break
 		}
 	}
 	if selected.Name == "" {
-		return 1, fmt.Errorf("no saved session named %q in this scope", safeTerminalText(options.positionals[0]))
+		return 1, fmt.Errorf("no saved session named %q in this scope", safeTerminalText(name))
 	}
 	if err := requireRestoreAvailable(selected); err != nil {
 		return 1, err
@@ -105,7 +114,6 @@ func runRestore(args []string) (int, error) {
 		fmt.Println("Restore cancelled.")
 		return 0, nil
 	}
-
 	executable, err := os.Executable()
 	if err != nil {
 		return 1, err
@@ -127,64 +135,35 @@ func parseRestoreOptions(args []string) (restoreOptions, error) {
 		argument := args[index]
 		switch {
 		case argument == "--profile":
-			value, next, err := restoreOptionValue(args, index, "--profile")
-			if err != nil {
-				return restoreOptions{}, err
-			}
-			options.profile = value
-			index = next
-		case strings.HasPrefix(argument, "--profile="):
-			options.profile = strings.TrimPrefix(argument, "--profile=")
-		case argument == "--instance":
-			value, next, err := restoreOptionValue(args, index, "--instance")
-			if err != nil {
-				return restoreOptions{}, err
-			}
-			options.instance = value
-			index = next
-		case strings.HasPrefix(argument, "--instance="):
-			options.instance = strings.TrimPrefix(argument, "--instance=")
-		case argument == "--slot" || argument == "--from":
 			value, next, err := restoreOptionValue(args, index, argument)
 			if err != nil {
 				return restoreOptions{}, err
 			}
-			if value == "" {
-				return restoreOptions{}, fmt.Errorf("%s requires a value", argument)
+			options.profile, index = value, next
+		case strings.HasPrefix(argument, "--profile="):
+			options.profile = strings.TrimPrefix(argument, "--profile=")
+		case argument == "--instance":
+			value, next, err := restoreOptionValue(args, index, argument)
+			if err != nil {
+				return restoreOptions{}, err
 			}
-			if argument == "--slot" {
-				options.slot = value
-			} else {
-				options.from = value
+			options.instance, index = value, next
+		case strings.HasPrefix(argument, "--instance="):
+			options.instance = strings.TrimPrefix(argument, "--instance=")
+			if options.instance == "" {
+				return restoreOptions{}, errors.New("--instance requires a value")
 			}
-			index = next
-		case strings.HasPrefix(argument, "--slot="):
-			options.slot = strings.TrimPrefix(argument, "--slot=")
-			if options.slot == "" {
-				return restoreOptions{}, errors.New("--slot requires a value")
+		case argument == "--from":
+			value, next, err := restoreOptionValue(args, index, argument)
+			if err != nil {
+				return restoreOptions{}, err
 			}
+			options.from, index = value, next
 		case strings.HasPrefix(argument, "--from="):
 			options.from = strings.TrimPrefix(argument, "--from=")
 			if options.from == "" {
 				return restoreOptions{}, errors.New("--from requires a value")
 			}
-		case argument == "--checkpoint":
-			options.checkpoint = true
-		case argument == "--history":
-			options.history = true
-		case argument == "--export":
-			options.export = true
-		case argument == "--import-legacy":
-			options.importLegacy = true
-			if index+1 < len(args) && !strings.HasPrefix(args[index+1], "-") {
-				index++
-				options.importPath = args[index]
-			}
-		case strings.HasPrefix(argument, "--import-legacy="):
-			options.importLegacy = true
-			options.importPath = strings.TrimPrefix(argument, "--import-legacy=")
-		case argument == "--list":
-			options.list = true
 		case argument == "--json":
 			options.json = true
 		case argument == "--help" || argument == "-h":
@@ -197,6 +176,66 @@ func parseRestoreOptions(args []string) (restoreOptions, error) {
 			options.positionals = append(options.positionals, argument)
 		}
 	}
+	options, err := normalizeRestoreWords(options)
+	if err != nil {
+		return restoreOptions{}, err
+	}
+	return options, validateRestoreOptions(options)
+}
+
+func normalizeRestoreWords(options restoreOptions) (restoreOptions, error) {
+	words := options.positionals
+	if len(words) == 0 {
+		return options, nil
+	}
+	switch words[0] {
+	case "name":
+		if len(words) != 2 {
+			return restoreOptions{}, errors.New("use 'ompi control restore name NAME'")
+		}
+		options.name = true
+	case "save":
+		if len(words) != 2 {
+			return restoreOptions{}, errors.New("use 'ompi control restore save NAME --instance ID'")
+		}
+	case "list", "history", "checkpoint", "export":
+		if len(words) != 1 {
+			return restoreOptions{}, fmt.Errorf("restore %s does not accept extra words", words[0])
+		}
+		switch words[0] {
+		case "list":
+			options.list = true
+		case "history":
+			options.history = true
+		case "checkpoint":
+			options.checkpoint = true
+		case "export":
+			options.export = true
+		}
+	case "import-legacy":
+		options.importLegacy = true
+		if len(words) > 2 {
+			return restoreOptions{}, errors.New("use 'ompi control restore import-legacy [PATH]'")
+		}
+		if len(words) == 2 {
+			options.importPath = words[1]
+		}
+		options.positionals = words[:1]
+	case "slot", "from":
+		if len(words) != 2 || protocol.ValidateInstanceID(words[1]) != nil {
+			return restoreOptions{}, fmt.Errorf("use 'ompi control restore %s FULL_ID'", words[0])
+		}
+		if options.from != "" {
+			return restoreOptions{}, errors.New("--from is only valid with list or export")
+		}
+		if words[0] == "slot" {
+			options.slot = words[1]
+		} else {
+			options.from = words[1]
+			options.fromOperation = true
+		}
+		options.positionals = words[:1]
+	}
 	return options, nil
 }
 
@@ -204,36 +243,49 @@ func restoreOptionValue(args []string, index int, option string) (string, int, e
 	if index+1 >= len(args) || strings.HasPrefix(args[index+1], "-") {
 		return "", index, fmt.Errorf("%s requires a value", option)
 	}
+	if args[index+1] == "" && option != "--profile" {
+		return "", index, fmt.Errorf("%s requires a value", option)
+	}
 	return args[index+1], index + 1, nil
 }
 
 func validateRestoreOptions(options restoreOptions) error {
-	if options.help {
+	if options.help || options.version {
 		return nil
 	}
 	if err := validateRecoveryOptions(options); err != nil {
 		return err
 	}
-	if len(options.positionals) == 0 {
-		if options.instance != "" {
-			return errors.New("--instance is only valid with 'save NAME'")
+	if options.from != "" {
+		if err := protocol.ValidateInstanceID(options.from); err != nil {
+			return fmt.Errorf("invalid --from checkpoint: %w", err)
 		}
-		return nil
 	}
-	if options.positionals[0] == "save" {
-		if len(options.positionals) != 2 || options.instance == "" {
-			return errors.New("use 'ompi control restore save NAME --instance ID'")
+	if options.slot != "" {
+		if err := protocol.ValidateInstanceID(options.slot); err != nil {
+			return fmt.Errorf("invalid slot ID: %w", err)
+		}
+	}
+	if options.name {
+		return protocol.ValidateRestoreName(options.positionals[1])
+	}
+	if options.instance != "" {
+		if len(options.positionals) != 2 || options.positionals[0] != "save" {
+			return errors.New("--instance is only valid with 'save NAME'")
 		}
 		if err := protocol.ValidateRestoreName(options.positionals[1]); err != nil {
 			return err
 		}
-		if err := protocol.ValidateInstanceID(options.instance); err != nil {
-			return fmt.Errorf("invalid --instance ID: %w", err)
-		}
+		return protocol.ValidateInstanceID(options.instance)
+	}
+	if len(options.positionals) == 0 || options.list || options.history || options.checkpoint || options.export || options.importLegacy || options.slot != "" || options.from != "" {
 		return nil
 	}
-	if len(options.positionals) != 1 || options.instance != "" {
-		return errors.New("restore accepts one saved name; --instance is only valid with save")
+	if options.positionals[0] == "save" {
+		return errors.New("use 'ompi control restore save NAME --instance ID'")
+	}
+	if len(options.positionals) > 1 {
+		return errors.New("restore accepts one saved name; use an operation word for recovery")
 	}
 	return protocol.ValidateRestoreName(options.positionals[0])
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
 
-func TestParseRestoreSaveOptionsAfterName(t *testing.T) {
+func TestParseRestoreWordsAndScopedModifiers(t *testing.T) {
 	instanceID := strings.Repeat("a", 32)
 	options, err := parseRestoreOptions([]string{"save", "work", "--instance", instanceID, "--profile", "Work"})
 	if err != nil {
@@ -21,18 +21,31 @@ func TestParseRestoreSaveOptionsAfterName(t *testing.T) {
 		options.instance != instanceID || options.profile != "Work" {
 		t.Fatalf("parsed restore options = %#v", options)
 	}
-}
 
-func TestParseRestoreListJSONOptions(t *testing.T) {
-	options, err := parseRestoreOptions([]string{"--list", "--json", "--profile", "Work"})
+	options, err = parseRestoreOptions([]string{"list", "--json", "--from", instanceID, "--profile", "Work"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := validateRestoreOptions(options); err != nil {
 		t.Fatal(err)
 	}
-	if !options.list || !options.json || options.profile != "Work" {
+	if !options.list || !options.json || options.from != instanceID || options.profile != "Work" {
 		t.Fatalf("parsed restore options = %#v", options)
+	}
+}
+
+func TestNamedRestoreOperationCollisionRequiresNameVerb(t *testing.T) {
+	for _, name := range []string{"list", "history", "slot"} {
+		options, err := parseRestoreOptions([]string{"name", name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateRestoreOptions(options); err != nil {
+			t.Fatal(err)
+		}
+		if !options.name || options.positionals[1] != name {
+			t.Fatalf("named restore was not preserved: %#v", options)
+		}
 	}
 }
 

@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { constants } from "node:fs"
 import { access, link, lstat, open, readFile, readdir, unlink } from "node:fs/promises"
 import path from "node:path"
@@ -268,6 +268,7 @@ export async function captureRecoveryCheckpoint(
       entries.push({ restoreId, sessionId: snapshot.sessionId, cwd: snapshot.cwd })
     }
   }
+  entries.sort((left, right) => left.restoreId.localeCompare(right.restoreId))
   const bootId =
     reason === "legacy"
       ? "legacy"
@@ -282,7 +283,39 @@ export async function captureRecoveryCheckpoint(
     reason,
     entries,
   }
-  await writeRecoveryCheckpoint(scope, checkpoint)
+  const checkpoints = await listRecoveryCheckpoints(scope)
+  const previous = checkpoints.find((item) => item.reason !== "legacy" && item.bootId === bootId)
+  if (reason === "automatic") {
+    if (
+      previous &&
+      previous.entries.length === entries.length &&
+      previous.entries.every(
+        (entry, index) =>
+          entry.restoreId === entries[index].restoreId &&
+          entry.sessionId === entries[index].sessionId &&
+          entry.cwd === entries[index].cwd
+      )
+    )
+      return previous
+    const digest = createHash("sha256")
+    for (const field of [bootId, previous?.checkpointId ?? ""]) digest.update(field).update("\0")
+    for (const entry of entries) {
+      for (const field of [entry.restoreId, entry.sessionId, entry.cwd]) {
+        digest.update(field).update("\0")
+      }
+    }
+    checkpoint.checkpointId = digest.digest("hex").slice(0, 32)
+  }
+  try {
+    await writeRecoveryCheckpoint(scope, checkpoint)
+  } catch (error) {
+    if (reason !== "automatic" || error.code !== "EEXIST") throw error
+    return readCheckpoint(
+      path.join(checkpointDirectory(scope), `${checkpoint.checkpointId}.json`),
+      scope,
+      checkpoint.checkpointId
+    )
+  }
   if (reason !== "legacy") await pruneRecoveryCheckpoints(scope, checkpoint)
   return checkpoint
 }
@@ -322,9 +355,14 @@ export async function listRecoverySessions(scope, { checkpointId } = {}) {
     ? checkpoints
     : checkpoints.filter((item) => item.reason !== "legacy")
   const currentBoot = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim()
-  const checkpoint = checkpointId
-    ? selected[0]
-    : (selected.find((item) => item.bootId !== currentBoot) ?? selected[0])
+  const current = selected.find((item) => item.bootId === currentBoot)
+  const previous = selected.find((item) => item.bootId !== currentBoot)
+  let checkpoint = checkpointId ? selected[0] : current
+  if (!checkpointId && current?.entries.length !== 0 && previous?.entries.length) {
+    checkpoint = previous
+  } else if (!checkpointId && !current) {
+    checkpoint = previous
+  }
   const named = await listSavedSessions(scope)
   const namesById = new Map()
   for (const item of named) {
@@ -333,11 +371,7 @@ export async function listRecoverySessions(scope, { checkpointId } = {}) {
   }
   const defaultMode = checkpointId === undefined
   const membership = checkpoint?.entries ?? []
-  const candidates = membership.length
-    ? membership
-    : checkpoint
-      ? []
-      : await discoverSnapshots(scope)
+  const candidates = checkpoint ? membership : await discoverSnapshots(scope)
   const displayed = defaultMode
     ? [...candidates, ...named.map((item) => ({ restoreId: item.restoreId }))]
     : candidates
