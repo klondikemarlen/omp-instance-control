@@ -176,6 +176,9 @@ func parseRestoreOptions(args []string) (restoreOptions, error) {
 			options.positionals = append(options.positionals, argument)
 		}
 	}
+	if options.help || options.version {
+		return options, nil
+	}
 	options, err := normalizeRestoreWords(options)
 	if err != nil {
 		return restoreOptions{}, err

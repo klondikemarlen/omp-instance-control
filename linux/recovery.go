@@ -129,19 +129,27 @@ func CaptureRecoveryCheckpoint(scope protocol.Scope, reason, excludeRestoreID st
 	}
 	checkpoint := protocol.RecoveryCheckpoint{
 		Version: 1, CheckpointID: "", Scope: scope, BootID: bootID,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: reason,
+		Reason:  reason,
 		Entries: entries,
 	}
 	parentID := ""
+	createdAt := time.Now().UTC()
 	if previous := latestRecoveryCheckpoint(checkpoints, bootID); previous != nil {
 		parentID = previous.CheckpointID
 		if reason == "automatic" && equalRecoveryMembership(previous.Entries, checkpoint.Entries) {
 			return *previous, nil
 		}
+		previousTime, _ := time.Parse(time.RFC3339Nano, previous.CreatedAt)
+		if !createdAt.After(previousTime) {
+			createdAt = previousTime.Add(time.Nanosecond)
+		}
 	}
+	checkpoint.CreatedAt = createdAt.Format(time.RFC3339Nano)
 	for range 4 {
-		checkpointID := automaticRecoveryCheckpointID(bootID, parentID, entries)
-		if reason == "manual" {
+		checkpointID := ""
+		if reason == "automatic" {
+			checkpointID = automaticRecoveryCheckpointID(bootID, parentID, entries)
+		} else {
 			checkpointID, err = randomRecoveryID()
 			if err != nil {
 				return protocol.RecoveryCheckpoint{}, err

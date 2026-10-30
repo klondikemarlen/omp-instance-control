@@ -565,3 +565,42 @@ func TestConcurrentAutomaticCapturesPublishOneMembershipTransition(t *testing.T)
 		t.Fatalf("concurrent captures filled history: %#v", history)
 	}
 }
+
+func TestClosingRecoveryTransitionStaysAfterAFuturePredecessor(t *testing.T) {
+	scope, session := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(filepath.Dir(scope.AgentDir), "runtime"))
+	directories, err := ensureRestoreDirectories(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootID, err := readBootID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := protocol.RecoveryCheckpoint{
+		Version: 1, CheckpointID: strings.Repeat("b", 32), Scope: scope, BootID: bootID,
+		CreatedAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano), Reason: "manual",
+		Entries: []protocol.RecoveryCheckpointEntry{{RestoreID: session.RestoreID, SessionID: session.SessionID, CWD: session.CWD}},
+	}
+	if err := publishImmutableRecoveryCheckpoint(directories, previous); err != nil {
+		t.Fatal(err)
+	}
+	closing, err := CaptureRecoveryCheckpoint(scope, "automatic", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := ListRecoverySessions(scope, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("closing transition exposed previous sessions: %#v", sessions)
+	}
+	history, err := ListRecoveryCheckpoints(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 || history[0].CheckpointID != closing.CheckpointID {
+		t.Fatalf("closing transition is not authoritative: %#v", history)
+	}
+}

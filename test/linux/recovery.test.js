@@ -255,3 +255,53 @@ test("when automatic captures race, history retains one transition and manual ca
     ])
   )
 })
+
+test("when the previous capture is ahead of the clock, a closing transition stays authoritative", async (t) => {
+  // Arrange
+  const { root, scope } = await createFixture(t)
+  const previous = {
+    version: 1,
+    checkpointId: "a".repeat(32),
+    scope,
+    bootId: (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(),
+    createdAt: new Date(Date.now() + 60_000).toISOString(),
+    reason: "manual",
+    entries: [{ restoreId: "b".repeat(32), sessionId: "closed-conversation", cwd: root }],
+  }
+  await writeRecoveryCheckpoint(scope, previous)
+
+  // Act
+  const closing = await captureRecoveryCheckpoint(scope)
+  const sessions = await listRecoverySessions(scope)
+
+  // Assert
+  assert.deepEqual(sessions, [])
+  assert.deepEqual(await listRecoveryCheckpoints(scope), [closing, previous])
+})
+
+test("when native timestamps differ below a millisecond, history selects the newest nanoseconds", async (t) => {
+  // Arrange
+  const { scope } = await createFixture(t)
+  const older = {
+    version: 1,
+    checkpointId: "f".repeat(32),
+    scope,
+    bootId: (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim(),
+    createdAt: "2026-01-01T00:00:00.123000001Z",
+    reason: "manual",
+    entries: [],
+  }
+  const newer = {
+    ...older,
+    checkpointId: "a".repeat(32),
+    createdAt: "2026-01-01T00:00:00.123000002Z",
+  }
+  await writeRecoveryCheckpoint(scope, older)
+  await writeRecoveryCheckpoint(scope, newer)
+
+  // Act
+  const history = await listRecoveryCheckpoints(scope)
+
+  // Assert
+  assert.deepEqual(history, [newer, older])
+})

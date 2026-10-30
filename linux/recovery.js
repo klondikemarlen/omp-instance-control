@@ -179,6 +179,10 @@ async function readCheckpoint(file, scope, id) {
   }
 }
 
+function timestampFraction(timestamp) {
+  return (timestamp.match(/\.(\d+)/)?.[1] ?? "").padEnd(9, "0").slice(0, 9)
+}
+
 export async function listRecoveryCheckpoints(scope) {
   const directory = checkpointDirectory(scope)
   await ensurePrivateDirectory(directory)
@@ -198,6 +202,7 @@ export async function listRecoveryCheckpoints(scope) {
   return checkpoints.sort(
     (first, second) =>
       Date.parse(second.createdAt) - Date.parse(first.createdAt) ||
+      timestampFraction(second.createdAt).localeCompare(timestampFraction(first.createdAt)) ||
       second.checkpointId.localeCompare(first.checkpointId)
   )
 }
@@ -279,12 +284,14 @@ export async function captureRecoveryCheckpoint(
     checkpointId: randomBytes(16).toString("hex"),
     scope: scopePayload(scope),
     bootId,
-    createdAt: new Date().toISOString(),
     reason,
     entries,
   }
   const checkpoints = await listRecoveryCheckpoints(scope)
   const previous = checkpoints.find((item) => item.reason !== "legacy" && item.bootId === bootId)
+  checkpoint.createdAt = new Date(
+    Math.max(Date.now(), previous ? Date.parse(previous.createdAt) + 1 : 0)
+  ).toISOString()
   if (reason === "automatic") {
     if (
       previous &&
