@@ -696,7 +696,7 @@ function cleanupSummary(results) {
   for (const result of results) {
     counts.set(result.status, (counts.get(result.status) ?? 0) + 1)
   }
-  return [...counts].map(([status, count]) => `${count} ${status}`).join(", ")
+  return `Cleanup: ${counts.get("removed") ?? 0} removed, ${counts.get("preserved") ?? 0} retained, ${counts.get("failed") ?? 0} failed.`
 }
 
 function notifyCleanup(ctx, results, json) {
@@ -708,12 +708,18 @@ function notifyCleanup(ctx, results, json) {
 
   const lines = [cleanupSummary(results)]
   for (const result of results) {
+    if (result.status === "preserved") continue
     const line = `${result.instanceId.slice(0, 12)} ${result.status}: ${result.reason}`
     lines.push(
       line.replace(
         /[\u0000-\u001f\u007f-\u009f]/g,
         (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
       )
+    )
+  }
+  if (results.some((result) => result.status === "preserved")) {
+    lines.push(
+      "Retained registrations have live or uncertain owners; --json shows safety reasons. Cleanup does not stop terminals or cancel restarts."
     )
   }
   ctx.ui.notify(lines.join("\n"), hasFailure ? "warning" : "info")

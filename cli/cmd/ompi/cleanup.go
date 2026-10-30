@@ -17,8 +17,25 @@ func printCleanupResults(results []linux.CleanupResult, jsonOutput bool) int {
 	} else if len(results) == 0 {
 		fmt.Println("No registrations in this scope.")
 	} else {
+		var removed, retained, failed int
 		for _, result := range results {
-			fmt.Printf("%.12s %s %s\n", safeTerminalText(result.InstanceID), result.Status, safeTerminalText(result.Reason))
+			switch result.Status {
+			case "removed":
+				removed++
+			case "preserved":
+				retained++
+			case "failed":
+				failed++
+			}
+		}
+		fmt.Printf("Cleanup: %d removed, %d retained, %d failed.\n", removed, retained, failed)
+		for _, result := range results {
+			if result.Status != "preserved" {
+				fmt.Printf("%.12s %s %s\n", safeTerminalText(result.InstanceID), result.Status, safeTerminalText(result.Reason))
+			}
+		}
+		if retained > 0 {
+			fmt.Println("Retained registrations have live or uncertain owners; --json shows safety reasons. Cleanup does not stop terminals or cancel restarts.")
 		}
 	}
 	for _, result := range results {
