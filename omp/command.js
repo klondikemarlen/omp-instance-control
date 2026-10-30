@@ -709,6 +709,7 @@ function notifyCleanup(ctx, results, json) {
   const lines = [cleanupSummary(results)]
   for (const result of results) {
     if (result.status === "preserved") continue
+
     const line = `${result.instanceId.slice(0, 12)} ${result.status}: ${result.reason}`
     lines.push(
       line.replace(
