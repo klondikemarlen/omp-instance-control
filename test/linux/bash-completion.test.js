@@ -77,18 +77,18 @@ for (const { condition, words, expected } of [
     expected: [],
   },
   {
-    condition: "a recovery operation was supplied inline",
-    words: ["ompi", "control", "restore", "--checkpoint=true", "--"],
+    condition: "a checkpoint operation is selected",
+    words: ["ompi", "control", "restore", "checkpoint", "--"],
     expected: ["--profile"],
   },
   {
     condition: "recovery listing already consumes JSON",
-    words: ["ompi", "control", "restore", "--list", "--json", "--"],
+    words: ["ompi", "control", "restore", "list", "--json", "--"],
     expected: ["--from", "--profile"],
   },
   {
     condition: "a recovery operation is complete",
-    words: ["ompi", "control", "restore", "--checkpoint", ""],
+    words: ["ompi", "control", "restore", "checkpoint", ""],
     expected: [],
   },
 ]) {

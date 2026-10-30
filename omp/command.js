@@ -16,16 +16,16 @@ const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
 const ROOT_COMPLETIONS = ["help", "version", "list", "restart", "cleanup", "restore", "take-over"]
 const LIST_COMPLETIONS = ["--profile", "--json"]
-const RESTORE_COMPLETIONS = [
+const RESTORE_OPERATIONS = [
+  "list",
+  "history",
+  "checkpoint",
+  "export",
+  "import-legacy",
+  "slot",
+  "from",
   "save",
-  "--list",
-  "--checkpoint",
-  "--history",
-  "--from",
-  "--slot",
-  "--export",
-  "--import-legacy",
-  "--profile",
+  "name",
 ]
 const RESTORE_LIST_COMPLETIONS = ["--json", "--from", "--profile"]
 const RESTORE_SAVE_COMPLETIONS = ["--instance", "--profile"]
@@ -37,16 +37,7 @@ function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
 }
 
-const BOOLEAN_OPTIONS = new Set([
-  "list",
-  "json",
-  "no-wait",
-  "checkpoint",
-  "history",
-  "export",
-  "help",
-  "version",
-])
+const BOOLEAN_OPTIONS = new Set(["json", "no-wait", "help", "version"])
 const TRUE_VALUES = new Set(["1", "t", "T", "TRUE", "true", "True"])
 const FALSE_VALUES = new Set(["0", "f", "F", "FALSE", "false", "False"])
 
@@ -67,12 +58,12 @@ function normalizeBooleanArguments(args) {
       normalizedArgs.push(token)
       continue
     }
-    if (["--instance", "--profile", "--from", "--slot", "--import-legacy"].includes(token)) {
+    if (["--instance", "--profile", "--from"].includes(token)) {
       normalizedArgs.push(token)
       if (tokens[index + 1] !== undefined && !tokens[index + 1].startsWith("--")) {
         normalizedArgs.push(tokens[index + 1])
         index += 1
-      } else if (token === "--import-legacy") normalizedArgs.push("")
+      }
       continue
     }
 
@@ -108,13 +99,7 @@ function parseOmpiArguments(args) {
     args: normalized.args,
     options: {
       instance: { type: "string" },
-      slot: { type: "string" },
       from: { type: "string" },
-      "import-legacy": { type: "string" },
-      list: { type: "boolean" },
-      checkpoint: { type: "boolean" },
-      history: { type: "boolean" },
-      export: { type: "boolean" },
       profile: { type: "string" },
       json: { type: "boolean" },
       "no-wait": { type: "boolean" },
@@ -177,7 +162,7 @@ function parseOmpiArguments(args) {
           token.name !== "version"
       )
     ) {
-      throw new Error("Usage: /ompi restore [NAME|save NAME|--list] [options]")
+      throw new Error("Usage: /ompi restore [NAME|COMMAND] [options]")
     }
     if (parsed.values.help) {
       return { action: "help", helpTarget: "restore", values: parsed.values, present }
@@ -186,115 +171,47 @@ function parseOmpiArguments(args) {
       return { action: "version", values: parsed.values, present }
     }
 
-    const restoreArguments = positionals.slice(1)
-    const recoveryFlags = ["checkpoint", "history", "export", "import-legacy", "slot"]
-    const selectedRecoveryFlags = recoveryFlags.filter((flag) => present.has(flag))
-    if (selectedRecoveryFlags.length > 1) throw new Error("Choose exactly one recovery operation.")
-    if (present.has("from") && !selectedRecoveryFlags.length && !present.has("list")) {
-      if (!/^[a-f0-9]{32}$/.test(parsed.values.from ?? ""))
-        throw new Error("--from requires a full 32-character checkpoint ID.")
-      if (
-        restoreArguments.length ||
-        [...present].some((flag) => !["from", "profile", "help", "version"].includes(flag))
-      ) {
-        throw new Error(
-          "--from selection cannot be combined with a saved name or another recovery operation."
-        )
-      }
-      return { action: "restore", operation: "recovery-from", values: parsed.values, present }
+    const [word, ...arguments_] = positionals.slice(1)
+    const operation = RESTORE_OPERATIONS.includes(word) ? word : word ? "named" : "menu"
+    const allowed = new Set(["profile", "help", "version"])
+    if (operation === "save") allowed.add("instance")
+    if (["list", "history"].includes(operation)) allowed.add("json")
+    if (["list", "export"].includes(operation)) allowed.add("from")
+    if ([...present].some((option) => !allowed.has(option))) {
+      throw new Error(`Invalid options for /ompi restore ${word ?? ""}.`)
     }
-    if (selectedRecoveryFlags.length) {
-      const operation = selectedRecoveryFlags[0]
-      const allowed = new Set(["profile", "from", "json", "help", "version", operation])
-      if (
-        [...present].some((flag) => !allowed.has(flag)) ||
-        restoreArguments.length ||
-        parsed.values.instance !== undefined
-      ) {
-        throw new Error(`Invalid options for /ompi restore --${operation}.`)
-      }
-      if (present.has("json") && operation !== "history") {
-        throw new Error("--json applies only to recovery history or list.")
-      }
-      if (present.has("from") && operation !== "export") {
-        throw new Error("--from applies only to recovery selection, list, or export.")
-      }
-      if (operation === "slot" && !/^[a-f0-9]{32}$/.test(parsed.values.slot ?? ""))
-        throw new Error("--slot requires a full 32-character restore ID.")
-      return {
-        action: "restore",
-        operation: `recovery-${operation}`,
-        values: parsed.values,
-        present,
-      }
+    if (present.has("from") && !/^[a-f0-9]{32}$/.test(parsed.values.from ?? "")) {
+      throw new Error("--from requires a full 32-character checkpoint ID.")
     }
-    if ((present.has("from") || present.has("json")) && !present.has("list"))
-      throw new Error("--from and --json require --list, --history, or --export.")
-    if (restoreArguments[0] === "save") {
-      if (
-        restoreArguments.length !== 2 ||
-        [...present].some((name) => !["instance", "profile", "help", "version"].includes(name))
-      ) {
-        throw new Error("Usage: /ompi restore save NAME [--instance FULL_ID] [--profile NAME]")
-      }
-      validateRestoreName(restoreArguments[1])
+    const requiresArgument = ["save", "name", "slot", "from"].includes(operation)
+    const maximumArguments = requiresArgument || operation === "import-legacy" ? 1 : 0
+    if (arguments_.length > maximumArguments || (requiresArgument && arguments_.length !== 1)) {
+      throw new Error(`Invalid arguments for /ompi restore ${word ?? ""}.`)
+    }
+    if (["save", "name", "named"].includes(operation)) {
+      const name = operation === "named" ? word : arguments_[0]
+      validateRestoreName(name)
       if (present.has("instance") && !/^[a-f0-9]{32}$/.test(parsed.values.instance ?? "")) {
         throw new Error("--instance must be a full 32-character lowercase instance ID.")
       }
       return {
         action: "restore",
-        operation: "save",
-        name: restoreArguments[1],
+        operation: operation === "save" ? "save" : "named",
+        name,
         values: parsed.values,
         present,
       }
     }
-
-    if (present.has("list") && present.has("from")) {
-      if (!/^[a-f0-9]{32}$/.test(parsed.values.from ?? ""))
-        throw new Error("--from requires a full 32-character checkpoint ID.")
-      if (
-        restoreArguments.length ||
-        [...present].some(
-          (flag) => !["list", "from", "json", "profile", "help", "version"].includes(flag)
-        )
-      )
-        throw new Error("Invalid options for recovery list.")
-      return { action: "restore", operation: "recovery-list", values: parsed.values, present }
-    }
-    if (present.has("list")) {
-      if (
-        parsed.values.list !== true ||
-        restoreArguments.length !== 0 ||
-        parsed.values.instance !== undefined ||
-        [...present].some((name) => !["list", "json", "profile", "help", "version"].includes(name))
-      ) {
-        throw new Error("Usage: /ompi restore --list [--json] [--profile NAME]")
+    if (operation === "slot" || operation === "from") {
+      if (!/^[a-f0-9]{32}$/.test(arguments_[0])) {
+        throw new Error(`${operation} requires a full 32-character lowercase ID.`)
       }
-      return {
-        action: "restore",
-        operation: "list",
-        values: parsed.values,
-        present,
-      }
+      parsed.values[operation] = arguments_[0]
     }
-
-    if (
-      restoreArguments.length > 1 ||
-      parsed.values.instance !== undefined ||
-      present.has("json") ||
-      (parsed.values.json && parsed.values.list !== true)
-    ) {
-      throw new Error("Usage: /ompi restore [NAME] [--profile NAME]")
-    }
-    if ([...present].some((name) => !["profile", "help", "version"].includes(name))) {
-      throw new Error("Usage: /ompi restore [NAME] [--profile NAME]")
-    }
-    if (restoreArguments[0]) validateRestoreName(restoreArguments[0])
+    if (operation === "import-legacy") parsed.values["import-legacy"] = arguments_[0]
     return {
       action: "restore",
-      operation: restoreArguments[0] ? "named" : "menu",
-      name: restoreArguments[0],
+      operation: operation === "menu" ? "menu" : `recovery-${operation}`,
       values: parsed.values,
       present,
     }
@@ -438,7 +355,7 @@ function scopeRecoveryIds(recoveryIds, tokens, defaultScope) {
 }
 
 function completionContext(tokens) {
-  const valueOptions = new Set(["profile", "instance", "from", "slot", "import-legacy"])
+  const valueOptions = new Set(["profile", "instance", "from"])
   const options = new Set()
   const positionals = []
   let pendingValue
@@ -475,19 +392,20 @@ function getRestoreCompletions(
   recoveryIds
 ) {
   const { options, positionals, pendingValue } = context
-  const operations = ["list", "checkpoint", "history", "export", "import-legacy", "slot"]
-  const selected = operations.filter((operation) => options.has(operation))
-  if (selected.length > 1) return []
-  const operation = selected[0]
-  if (options.has("from") && operation && !["list", "export"].includes(operation)) return []
-
-  const save = positionals[0] === "save"
-  const named = positionals.length > 0 && !save
-  if ((save || named) && (operation || options.has("from"))) return []
-  if (positionals.length > (save ? 2 : 1)) return []
+  const [word] = positionals
+  const operation = RESTORE_OPERATIONS.includes(word) ? word : word ? "named" : "menu"
+  let candidates = ["--profile"]
+  if (operation === "save") candidates = RESTORE_SAVE_COMPLETIONS
+  if (operation === "list") candidates = RESTORE_LIST_COMPLETIONS
+  if (operation === "history") candidates = RESTORE_HISTORY_COMPLETIONS
+  if (operation === "export") candidates = ["--from", "--profile"]
+  if ([...options].some((option) => !candidates.includes(`--${option}`))) return []
+  const needsArgument = ["save", "name", "slot", "from"].includes(operation)
+  const maximumWords = needsArgument || operation === "import-legacy" ? 2 : 1
+  if (positionals.length > maximumWords) return []
 
   if (pendingValue === "instance" || tokenPrefix.startsWith("--instance=")) {
-    if (!save) return []
+    if (operation !== "save" || positionals.length !== 2) return []
     const prefix = tokenPrefix.startsWith("--instance=") ? "--instance=" : ""
     return completionValues(
       [...scopeRestoreInstanceIds(completionIds, completedTokens, defaultScope)].map((id) =>
@@ -497,60 +415,53 @@ function getRestoreCompletions(
       tokenPrefix
     )
   }
-  for (const selector of ["from", "slot"]) {
-    const prefix = `--${selector}=`
-    if (pendingValue !== selector && !tokenPrefix.startsWith(prefix)) continue
-    if (save || named) return []
-    if (selector === "from" && operation && !["list", "export"].includes(operation)) return []
-    if (selector === "slot" && (options.has("from") || (operation && operation !== "slot")))
-      return []
-
-    const ids = scopeRecoveryIds(recoveryIds, completedTokens, defaultScope)
-    const values = selector === "from" ? ids.checkpoints : ids.slots
-    const inline = tokenPrefix.startsWith(prefix)
+  if (pendingValue === "from" || tokenPrefix.startsWith("--from=")) {
+    if (!["list", "export"].includes(operation)) return []
+    const inline = tokenPrefix.startsWith("--from=") ? "--from=" : ""
     return completionValues(
-      values.map((id) => completionItem(inline ? `${prefix}${id}` : id)),
+      scopeRecoveryIds(recoveryIds, completedTokens, defaultScope).checkpoints.map((id) =>
+        completionItem(`${inline}${id}`)
+      ),
       completedTokens,
       tokenPrefix
     )
   }
-  if (pendingValue === "import-legacy" && !tokenPrefix.startsWith("-")) return []
-
-  let candidates = RESTORE_COMPLETIONS
-  if (save) {
-    candidates = RESTORE_SAVE_COMPLETIONS
-  } else if (named || ["checkpoint", "import-legacy", "slot"].includes(operation)) {
-    candidates = ["--profile"]
-  } else if (operation === "list") {
-    candidates = RESTORE_LIST_COMPLETIONS
-  } else if (operation === "history") {
-    candidates = RESTORE_HISTORY_COMPLETIONS
-  } else if (operation === "export") {
-    candidates = ["--from", "--profile"]
-  } else if (options.has("from")) {
-    candidates = ["--list", "--export", "--profile"]
-  } else if (options.has("json")) {
-    candidates = ["--list", "--history", "--profile"]
-  }
-  if (tokenPrefix.startsWith("-")) {
+  if (pendingValue) return []
+  if (needsArgument && positionals.length === 1) {
+    if (operation === "slot" || operation === "from") {
+      const ids = scopeRecoveryIds(recoveryIds, completedTokens, defaultScope)
+      return completionValues(
+        (operation === "slot" ? ids.slots : ids.checkpoints).map((id) => completionItem(id)),
+        completedTokens,
+        tokenPrefix
+      )
+    }
+    if (operation !== "name") return []
+  } else if (tokenPrefix.startsWith("-")) {
     return completionValues(
       candidates
-        .filter((option) => option.startsWith("--") && !options.has(option.slice(2)))
+        .filter((option) => !options.has(option.slice(2)))
         .map((value) => completionItem(value)),
       completedTokens,
       tokenPrefix
     )
+  } else if (operation !== "menu") {
+    return []
   }
-  if (positionals.length || operation || options.has("from") || options.has("json")) return []
-
   const names = scopeSavedNames(completionNames, completedTokens, defaultScope).map(
     ({ name, unavailable }) =>
       completionItem(
-        name,
+        operation === "menu" && RESTORE_OPERATIONS.includes(name) ? `name ${name}` : name,
         unavailable ? `${name} (unavailable: ${safeTerminalText(unavailable)})` : name
       )
   )
-  return completionValues([completionItem("save"), ...names], completedTokens, tokenPrefix)
+  return completionValues(
+    operation === "menu"
+      ? [...RESTORE_OPERATIONS.map((value) => completionItem(value)), ...names]
+      : names,
+    completedTokens,
+    tokenPrefix
+  )
 }
 
 function getArgumentCompletions(
@@ -874,13 +785,14 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
             restore: [
               "Usage: /ompi restore [NAME] [--profile NAME]",
               "/ompi restore save NAME [--instance ID] [--profile NAME]",
-              "/ompi restore --list [--json] [--from CHECKPOINT]",
-              "/ompi restore --history [--json]",
-              "/ompi restore --checkpoint",
-              "/ompi restore --slot ID",
-              "/ompi restore --from CHECKPOINT",
-              "/ompi restore --export [--from CHECKPOINT]",
-              "/ompi restore --import-legacy [PATH]",
+              "/ompi restore name NAME",
+              "/ompi restore list [--json] [--from CHECKPOINT]",
+              "/ompi restore history [--json]",
+              "/ompi restore checkpoint",
+              "/ompi restore slot ID",
+              "/ompi restore from CHECKPOINT",
+              "/ompi restore export [--from CHECKPOINT]",
+              "/ompi restore import-legacy [PATH]",
               "All recovery operations accept --profile NAME.",
               "Selection prepares a command to copy before graceful exit; paste it at the shell.",
             ],

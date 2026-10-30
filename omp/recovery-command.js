@@ -297,22 +297,6 @@ export function createRestoreCommand(pi, { getRuntime, refreshCompletionIds }) {
       await refreshCompletionIds(ctx, values.profile)
       return
     }
-    if (operation === "list") {
-      const saved = await listRecoverySessions(scope)
-      ctx.ui.notify(
-        values.json
-          ? JSON.stringify(saved)
-          : saved
-              .map(
-                (item) =>
-                  `${item.name ?? item.restoreId ?? "legacy"} — ${item.session?.cwd ?? item.unavailable ?? "legacy export only"}`
-              )
-              .join("\n") || "No recovery candidates.",
-        "info"
-      )
-      await refreshCompletionIds(ctx, values.profile)
-      return
-    }
     await restoreSavedSession(ctx, name, scope)
     return
   }

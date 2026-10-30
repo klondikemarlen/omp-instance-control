@@ -2,10 +2,12 @@ package linux
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -120,21 +122,43 @@ func CaptureRecoveryCheckpoint(scope protocol.Scope, reason, excludeRestoreID st
 		})
 		acceptedRestoreIDs[restoreID] = struct{}{}
 	}
+	sort.Slice(entries, func(left, right int) bool { return entries[left].RestoreID < entries[right].RestoreID })
+	checkpoints, err := ListRecoveryCheckpoints(scope)
+	if err != nil {
+		return protocol.RecoveryCheckpoint{}, err
+	}
 	checkpoint := protocol.RecoveryCheckpoint{
 		Version: 1, CheckpointID: "", Scope: scope, BootID: bootID,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Reason: reason,
 		Entries: entries,
 	}
+	parentID := ""
+	if previous := latestRecoveryCheckpoint(checkpoints, bootID); previous != nil {
+		parentID = previous.CheckpointID
+		if reason == "automatic" && equalRecoveryMembership(previous.Entries, checkpoint.Entries) {
+			return *previous, nil
+		}
+	}
 	for range 4 {
-		checkpointID, err := randomRecoveryID()
-		if err != nil {
-			return protocol.RecoveryCheckpoint{}, err
+		checkpointID := automaticRecoveryCheckpointID(bootID, parentID, entries)
+		if reason == "manual" {
+			checkpointID, err = randomRecoveryID()
+			if err != nil {
+				return protocol.RecoveryCheckpoint{}, err
+			}
 		}
 		checkpoint.CheckpointID = checkpointID
 		if err := validateRecoveryCheckpoint(checkpoint, scope, checkpointID); err != nil {
 			return protocol.RecoveryCheckpoint{}, err
 		}
 		err = publishImmutableRecoveryCheckpoint(directories, checkpoint)
+		if errors.Is(err, os.ErrExist) && reason == "automatic" {
+			published, readErr := readRecoveryCheckpoint(directories, scope, checkpointID)
+			if errors.Is(readErr, os.ErrNotExist) {
+				continue
+			}
+			return published, readErr
+		}
 		if errors.Is(err, os.ErrExist) {
 			continue
 		}
@@ -147,6 +171,45 @@ func CaptureRecoveryCheckpoint(scope protocol.Scope, reason, excludeRestoreID st
 		return checkpoint, nil
 	}
 	return protocol.RecoveryCheckpoint{}, errors.New("could not allocate a unique recovery checkpoint ID")
+}
+
+// Identical concurrent transitions share one immutable publication; returning to
+// earlier membership still creates a new checkpoint because the parent differs.
+func automaticRecoveryCheckpointID(bootID, parentID string, entries []protocol.RecoveryCheckpointEntry) string {
+	digest := sha256.New()
+	writeField := func(value string) {
+		_, _ = io.WriteString(digest, value)
+		_, _ = digest.Write([]byte{0})
+	}
+	writeField(bootID)
+	writeField(parentID)
+	for _, entry := range entries {
+		writeField(entry.RestoreID)
+		writeField(entry.SessionID)
+		writeField(entry.CWD)
+	}
+	return hex.EncodeToString(digest.Sum(nil)[:16])
+}
+
+func equalRecoveryMembership(left, right []protocol.RecoveryCheckpointEntry) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func latestRecoveryCheckpoint(checkpoints []protocol.RecoveryCheckpoint, bootID string) *protocol.RecoveryCheckpoint {
+	for index := range checkpoints {
+		if checkpoints[index].Reason != "legacy" && checkpoints[index].BootID == bootID {
+			return &checkpoints[index]
+		}
+	}
+	return nil
 }
 
 // ListRecoverySessions returns default recovery candidates or one checkpoint's membership.
@@ -321,7 +384,7 @@ func ExportRecoveryCommands(scope protocol.Scope, sessions []protocol.RecoverySe
 		if err := validateExportPath(session.SessionFile); err != nil {
 			return "", fmt.Errorf("cannot export unsafe recovery session file: %w", err)
 		}
-		arguments := fmt.Sprintf("control restore --slot %s --profile=%s", shellQuote(candidate.RestoreID), shellQuote(scope.Profile))
+		arguments := fmt.Sprintf("control restore slot %s --profile=%s", shellQuote(candidate.RestoreID), shellQuote(scope.Profile))
 		output.WriteString("# Managed recovery slot; ownership and its current snapshot are rechecked by ompi.\n")
 		output.WriteString(recoveryExportCommand(scope, session.CWD, arguments))
 		output.WriteByte('\n')
@@ -669,17 +732,21 @@ func pruneRecoveryCheckpoints(scope protocol.Scope, currentBootID string) error 
 }
 
 func defaultRecoveryCheckpoint(checkpoints []protocol.RecoveryCheckpoint, currentBootID string) *protocol.RecoveryCheckpoint {
-	for index := range checkpoints {
-		if checkpoints[index].Reason != "legacy" && checkpoints[index].BootID != currentBootID {
-			return &checkpoints[index]
-		}
+	current := latestRecoveryCheckpoint(checkpoints, currentBootID)
+	if current != nil && len(current.Entries) == 0 {
+		return current
 	}
 	for index := range checkpoints {
-		if checkpoints[index].Reason != "legacy" && checkpoints[index].BootID == currentBootID {
-			return &checkpoints[index]
+		previous := &checkpoints[index]
+		if previous.Reason == "legacy" || previous.BootID == currentBootID {
+			continue
 		}
+		if len(previous.Entries) > 0 || current == nil {
+			return previous
+		}
+		break
 	}
-	return nil
+	return current
 }
 
 func readRecoveryNameCandidates(directories restoreDirectories, scope protocol.Scope) ([]recoveryNameCandidate, error) {

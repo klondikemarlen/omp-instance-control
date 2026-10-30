@@ -253,16 +253,16 @@ test("when completion reaches consumed or conflicting choices, only valid next o
       ["restart all --json=true --profile", "restart all --json=true --no-wait"],
     ],
     ["restart all -- ", []],
-    ["restore --checkpoint=true --history", []],
-    ["restore --checkpoint=true --from=", []],
+    ["restore checkpoint --history", []],
+    ["restore checkpoint --from=", []],
     [
-      "restore --list --from=" + "a".repeat(32) + " --",
+      "restore list --from=" + "a".repeat(32) + " --",
       [
-        "restore --list --from=" + "a".repeat(32) + " --json",
-        "restore --list --from=" + "a".repeat(32) + " --profile",
+        "restore list --from=" + "a".repeat(32) + " --json",
+        "restore list --from=" + "a".repeat(32) + " --profile",
       ],
     ],
-    ["restore --checkpoint -- ", []],
+    ["restore checkpoint -- ", []],
   ]
 
   // Act

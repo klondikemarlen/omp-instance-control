@@ -23,31 +23,23 @@ func validateRecoveryOptions(options restoreOptions) error {
 		}
 	}
 	if operations > 1 {
-		return errors.New("choose one recovery operation: --list, --history, --checkpoint, --export, or --import-legacy")
+		return errors.New("choose one recovery operation: list, history, checkpoint, export, or import-legacy")
 	}
 	if options.json && !options.list && !options.history {
-		return errors.New("--json is only valid with --list or --history")
+		return errors.New("--json is only valid with list or history")
 	}
-	if len(options.positionals) > 0 && (operations != 0 || options.from != "" || options.slot != "") {
-		return errors.New("a saved name cannot be combined with recovery operation flags")
+	if options.from != "" && !options.fromOperation && !options.list && !options.export {
+		return errors.New("--from is only valid with list or export")
 	}
-	if options.instance != "" && (operations != 0 || options.from != "" || options.slot != "") {
-		return errors.New("--instance is only valid with 'save NAME'")
+	if options.slot != "" && (operations != 0 || options.from != "" || len(options.positionals) != 1 || options.positionals[0] != "slot") {
+		return errors.New("slot ID cannot be combined with another recovery operation")
 	}
-	if options.from != "" {
-		if err := protocol.ValidateInstanceID(options.from); err != nil {
-			return fmt.Errorf("invalid --from checkpoint: %w", err)
-		}
-		if options.history || options.checkpoint || options.importLegacy || options.slot != "" {
-			return errors.New("--from is only valid when choosing, listing, or exporting checkpoint members")
-		}
+	if options.name && (operations != 0 || options.from != "" || options.slot != "" || options.instance != "" || options.json) {
+		return errors.New("name NAME cannot be combined with recovery modifiers")
 	}
-	if options.slot != "" {
-		if err := protocol.ValidateInstanceID(options.slot); err != nil {
-			return fmt.Errorf("invalid --slot: %w", err)
-		}
-		if operations != 0 {
-			return errors.New("--slot selects one managed session and cannot be combined with a recovery operation")
+	if len(options.positionals) == 2 && options.positionals[0] == "save" {
+		if operations != 0 || options.from != "" || options.slot != "" || options.json {
+			return errors.New("save NAME cannot be combined with recovery modifiers")
 		}
 	}
 	return nil
@@ -130,10 +122,10 @@ func runRecovery(scope protocol.Scope, options restoreOptions) (int, error) {
 		}
 	}
 	if len(sessions) == 0 {
-		return 1, errors.New("no recoverable managed sessions in this scope; history is available with 'ompi control restore --history'")
+		return 1, errors.New("no recoverable managed sessions in this scope; history is available with 'ompi control restore history'")
 	}
 	if !hasRestoreTerminal(os.Stdin) || !hasRestoreTerminal(os.Stdout) {
-		return 1, errors.New("interactive recovery requires a terminal; use --list, --export, a saved name, or --slot ID")
+		return 1, errors.New("interactive recovery requires a terminal; use 'list', 'export', 'name NAME', or 'slot ID'")
 	}
 	selected, confirmed, err := chooseRecoverySession(bufio.NewReader(os.Stdin), os.Stdout, sessions)
 	if err != nil {
