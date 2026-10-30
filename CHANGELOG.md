@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.19.0 - 2026-10-30
+
+### Changed
+
+- Use word-based restore operations in Bash and `/ompi`: `list`, `history`, `checkpoint`, `slot`, `from`, `export`, and `import-legacy` replace operation flags. Relevant modifiers remain options; `name NAME` preserves saved names matching an operation.
+
+### Fixed
+
+- Recover current-boot sessions when an empty older-boot checkpoint would otherwise hide them, while preserving intentional empty sets and exact checkpoint selection.
+- Reuse unchanged automatic recovery membership, including concurrent captures, without dropping real membership transitions or manual checkpoints.
+
 ## 0.18.1 - 2026-10-30
 
 ### Fixed
