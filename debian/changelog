@@ -1,3 +1,10 @@
+omp-instance-control (0.18.1~ppa1) resolute; urgency=medium
+
+  * Summarize cleanup removals, retained registrations and failures.
+  * Preserve complete JSON safety diagnostics without listing every live PID.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 30 Oct 2026 08:17:51 -0700
+
 omp-instance-control (0.18.0~ppa1) resolute; urgency=medium
 
   * Notify about installed updates without unsolicited terminal restarts.
