@@ -252,7 +252,7 @@ test("when restart acknowledgements fail or remain unknown, observation does not
 
   // Act
   const acknowledgements = await restartInstances(transport, { all: true })
-  const rows = await waitForRestarts(transport, acknowledgements)
+  await waitForRestarts(transport, acknowledgements)
 
   // Assert
   assert.deepEqual(actions, [
