@@ -7,6 +7,7 @@ import { getScope } from "../protocol/index.js"
 
 import { assertRestoreOwnersNotLive, validateRestoreName } from "./restore.js"
 
+// eslint-disable-next-line no-control-regex -- Reject terminal controls before shell quoting.
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u
 
 function requireSafeString(value, label) {

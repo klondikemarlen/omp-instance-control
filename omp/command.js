@@ -593,6 +593,7 @@ function notifyRows(ctx, rows, json) {
 
 function safeTerminalText(value) {
   return String(value).replace(
+    // eslint-disable-next-line no-control-regex -- Escape untrusted terminal control bytes.
     /[\u0000-\u001f\u007f-\u009f]/g,
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
   )
@@ -624,6 +625,7 @@ function notifyCleanup(ctx, results, json) {
     const line = `${result.instanceId.slice(0, 12)} ${result.status}: ${result.reason}`
     lines.push(
       line.replace(
+        // eslint-disable-next-line no-control-regex -- Escape untrusted terminal control bytes.
         /[\u0000-\u001f\u007f-\u009f]/g,
         (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
       )

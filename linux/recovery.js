@@ -65,6 +65,7 @@ function safeText(value, maximum = 512) {
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= maximum &&
+    // eslint-disable-next-line no-control-regex -- Reject terminal controls in recovery metadata.
     !/[\u0000-\u001f\u007f-\u009f]/u.test(value)
   )
 }
