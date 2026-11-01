@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import { constants } from "node:fs"
 import { access, link, lstat, open, readFile, readdir, unlink } from "node:fs/promises"
 import path from "node:path"
@@ -65,6 +65,7 @@ function safeText(value, maximum = 512) {
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= maximum &&
+    // eslint-disable-next-line no-control-regex -- Reject terminal controls in recovery metadata.
     !/[\u0000-\u001f\u007f-\u009f]/u.test(value)
   )
 }
@@ -179,6 +180,10 @@ async function readCheckpoint(file, scope, id) {
   }
 }
 
+function timestampFraction(timestamp) {
+  return (timestamp.match(/\.(\d+)/)?.[1] ?? "").padEnd(9, "0").slice(0, 9)
+}
+
 export async function listRecoveryCheckpoints(scope) {
   const directory = checkpointDirectory(scope)
   await ensurePrivateDirectory(directory)
@@ -198,6 +203,7 @@ export async function listRecoveryCheckpoints(scope) {
   return checkpoints.sort(
     (first, second) =>
       Date.parse(second.createdAt) - Date.parse(first.createdAt) ||
+      timestampFraction(second.createdAt).localeCompare(timestampFraction(first.createdAt)) ||
       second.checkpointId.localeCompare(first.checkpointId)
   )
 }
@@ -268,6 +274,7 @@ export async function captureRecoveryCheckpoint(
       entries.push({ restoreId, sessionId: snapshot.sessionId, cwd: snapshot.cwd })
     }
   }
+  entries.sort((left, right) => left.restoreId.localeCompare(right.restoreId))
   const bootId =
     reason === "legacy"
       ? "legacy"
@@ -278,11 +285,45 @@ export async function captureRecoveryCheckpoint(
     checkpointId: randomBytes(16).toString("hex"),
     scope: scopePayload(scope),
     bootId,
-    createdAt: new Date().toISOString(),
     reason,
     entries,
   }
-  await writeRecoveryCheckpoint(scope, checkpoint)
+  const checkpoints = await listRecoveryCheckpoints(scope)
+  const previous = checkpoints.find((item) => item.reason !== "legacy" && item.bootId === bootId)
+  checkpoint.createdAt = new Date(
+    Math.max(Date.now(), previous ? Date.parse(previous.createdAt) + 1 : 0)
+  ).toISOString()
+  if (reason === "automatic") {
+    if (
+      previous &&
+      previous.entries.length === entries.length &&
+      previous.entries.every(
+        (entry, index) =>
+          entry.restoreId === entries[index].restoreId &&
+          entry.sessionId === entries[index].sessionId &&
+          entry.cwd === entries[index].cwd
+      )
+    )
+      return previous
+    const digest = createHash("sha256")
+    for (const field of [bootId, previous?.checkpointId ?? ""]) digest.update(field).update("\0")
+    for (const entry of entries) {
+      for (const field of [entry.restoreId, entry.sessionId, entry.cwd]) {
+        digest.update(field).update("\0")
+      }
+    }
+    checkpoint.checkpointId = digest.digest("hex").slice(0, 32)
+  }
+  try {
+    await writeRecoveryCheckpoint(scope, checkpoint)
+  } catch (error) {
+    if (reason !== "automatic" || error.code !== "EEXIST") throw error
+    return readCheckpoint(
+      path.join(checkpointDirectory(scope), `${checkpoint.checkpointId}.json`),
+      scope,
+      checkpoint.checkpointId
+    )
+  }
   if (reason !== "legacy") await pruneRecoveryCheckpoints(scope, checkpoint)
   return checkpoint
 }
@@ -322,9 +363,14 @@ export async function listRecoverySessions(scope, { checkpointId } = {}) {
     ? checkpoints
     : checkpoints.filter((item) => item.reason !== "legacy")
   const currentBoot = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim()
-  const checkpoint = checkpointId
-    ? selected[0]
-    : (selected.find((item) => item.bootId !== currentBoot) ?? selected[0])
+  const current = selected.find((item) => item.bootId === currentBoot)
+  const previous = selected.find((item) => item.bootId !== currentBoot)
+  let checkpoint = checkpointId ? selected[0] : current
+  if (!checkpointId && current?.entries.length !== 0 && previous?.entries.length) {
+    checkpoint = previous
+  } else if (!checkpointId && !current) {
+    checkpoint = previous
+  }
   const named = await listSavedSessions(scope)
   const namesById = new Map()
   for (const item of named) {
@@ -333,11 +379,7 @@ export async function listRecoverySessions(scope, { checkpointId } = {}) {
   }
   const defaultMode = checkpointId === undefined
   const membership = checkpoint?.entries ?? []
-  const candidates = membership.length
-    ? membership
-    : checkpoint
-      ? []
-      : await discoverSnapshots(scope)
+  const candidates = checkpoint ? membership : await discoverSnapshots(scope)
   const displayed = defaultMode
     ? [...candidates, ...named.map((item) => ({ restoreId: item.restoreId }))]
     : candidates

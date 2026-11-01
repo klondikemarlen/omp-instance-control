@@ -8,37 +8,16 @@ import (
 	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
 
-func TestRecoveryOptionsRejectConflictingActionsBeforeSideEffects(t *testing.T) {
+func TestRecoveryOptionsRejectConflictingWordsBeforeSideEffects(t *testing.T) {
 	for _, args := range [][]string{
-		{"--checkpoint", "--history"},
-		{"--import-legacy", "--export"},
-		{"--slot", strings.Repeat("a", 32), "--list"},
-		{"--checkpoint", "--json"},
-		{"--from", strings.Repeat("a", 32), "--history"},
-		{"--from", strings.Repeat("a", 32), "--slot", strings.Repeat("b", 32)},
-		{"work", "--export"},
-		{"save", "work", "--instance", strings.Repeat("a", 32), "--checkpoint"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			options, err := parseRestoreOptions(args)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := validateRestoreOptions(options); err == nil {
-				t.Fatalf("conflicting recovery actions were accepted: %#v", options)
-			}
-		})
-	}
-}
-
-func TestRecoveryIdentifiersCannotSelectPathsOrEmptyValues(t *testing.T) {
-	for _, args := range [][]string{
-		{"--slot="},
-		{"--from="},
-		{"--slot", ""},
-		{"--from", ""},
-		{"--slot", "../../other-session"},
-		{"--from", "checkpoint.json"},
+		{"checkpoint", "history"},
+		{"slot", strings.Repeat("a", 32), "list"},
+		{"checkpoint", "--json"},
+		{"history", "--from", strings.Repeat("a", 32)},
+		{"slot", strings.Repeat("a", 32), "--from", strings.Repeat("b", 32)},
+		{"work", "export"},
+		{"save", "work", "--instance", strings.Repeat("a", 32), "checkpoint"},
+		{"export", "--json"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			options, err := parseRestoreOptions(args)
@@ -46,15 +25,41 @@ func TestRecoveryIdentifiersCannotSelectPathsOrEmptyValues(t *testing.T) {
 				err = validateRestoreOptions(options)
 			}
 			if err == nil {
-				t.Fatalf("unsafe recovery selector was accepted: %#v", options)
+				t.Fatalf("conflicting recovery actions were accepted: %#v", options)
 			}
 		})
 	}
 }
 
-func TestCheckpointListPreservesItsExplicitSelectionAndScope(t *testing.T) {
+func TestObsoleteOperationFlagsAreRejected(t *testing.T) {
+	for _, args := range [][]string{
+		{"--list"}, {"--history"}, {"--checkpoint"}, {"--slot", strings.Repeat("a", 32)},
+		{"--export"}, {"--import-legacy"}, {"--from", strings.Repeat("a", 32)},
+	} {
+		if _, err := parseRestoreOptions(args); err == nil {
+			t.Fatalf("obsolete flag was accepted: %v", args)
+		}
+	}
+}
+
+func TestRecoveryIdentifiersCannotSelectPathsOrEmptyValues(t *testing.T) {
+	for _, args := range [][]string{
+		{"slot", ""}, {"slot", "../../other-session"}, {"from", "checkpoint.json"},
+		{"list", "--from="}, {"export", "--from", ""},
+	} {
+		options, err := parseRestoreOptions(args)
+		if err == nil {
+			err = validateRestoreOptions(options)
+		}
+		if err == nil {
+			t.Fatalf("unsafe recovery selector was accepted: %#v", options)
+		}
+	}
+}
+
+func TestCheckpointListPreservesExplicitSelectionAndScope(t *testing.T) {
 	checkpointID := strings.Repeat("c", 32)
-	options, err := parseRestoreOptions([]string{"--list", "--json", "--from", checkpointID, "--profile", "work"})
+	options, err := parseRestoreOptions([]string{"list", "--json", "--from", checkpointID, "--profile", "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,15 +71,15 @@ func TestCheckpointListPreservesItsExplicitSelectionAndScope(t *testing.T) {
 	}
 }
 
-func TestLegacyImportPathIsNotTreatedAsASavedName(t *testing.T) {
-	options, err := parseRestoreOptions([]string{"--import-legacy", "/private/recovery snapshot.txt", "--profile=work"})
+func TestLegacyImportPathIsNotTreatedAsSavedName(t *testing.T) {
+	options, err := parseRestoreOptions([]string{"import-legacy", "/private/recovery snapshot.txt", "--profile=work"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := validateRestoreOptions(options); err != nil {
 		t.Fatal(err)
 	}
-	if !options.importLegacy || options.importPath != "/private/recovery snapshot.txt" || options.profile != "work" || len(options.positionals) != 0 {
+	if !options.importLegacy || options.importPath != "/private/recovery snapshot.txt" || options.profile != "work" || len(options.positionals) != 1 {
 		t.Fatalf("legacy path changed meaning: %#v", options)
 	}
 }

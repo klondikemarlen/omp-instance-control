@@ -11,7 +11,7 @@ if [[ $# -ne 0 ]]; then
   exit 2
 fi
 
-repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repository=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository"
 source=$(dpkg-parsechangelog --show-field Source)
 version=$(dpkg-parsechangelog --show-field Version)

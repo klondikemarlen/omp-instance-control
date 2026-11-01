@@ -1,3 +1,11 @@
+omp-instance-control (0.19.0~ppa1) resolute; urgency=medium
+
+  * Recover current sessions when an older boot has an empty checkpoint.
+  * Coalesce unchanged automatic recovery membership across concurrent captures.
+  * Use word-based restore operations and preserve explicit named selection.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 30 Oct 2026 08:40:55 -0700
+
 omp-instance-control (0.18.1~ppa1) resolute; urgency=medium
 
   * Summarize cleanup removals, retained registrations and failures.

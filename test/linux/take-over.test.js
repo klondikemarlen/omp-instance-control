@@ -21,7 +21,7 @@ const scopeEnvironmentKeys = [
   "XDG_RUNTIME_DIR",
 ]
 
-async function createSandbox(t, { cwdName, sessionName, executableName, version = "0.12.0" } = {}) {
+async function createSandbox(t, { cwdName, sessionName, executableName, version = "0.19.0" } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "ompi-takeover-"))
   const cwd = path.join(root, cwdName ?? "worktree")
   const sessionFile = path.join(root, sessionName ?? "session.jsonl")
@@ -91,7 +91,7 @@ test("when preparing a named restore, the command uses control restore and quote
   const invocation = await runCommand(command, sandbox.resultFile)
 
   // Assert
-  assert.deepEqual(invocation.argv, ["control", "restore", name, "--profile=default"])
+  assert.deepEqual(invocation.argv, ["control", "restore", "name", name, "--profile=default"])
 })
 
 test("when preparing a slot restore, the command checks control version and uses control restore", async (t) => {
@@ -109,23 +109,17 @@ test("when preparing a slot restore, the command checks control version and uses
   const invocation = await runCommand(command, sandbox.resultFile)
 
   // Assert
-  assert.deepEqual(invocation.argv, [
-    "control",
-    "restore",
-    "--slot",
-    restoreId,
-    "--profile=default",
-  ])
+  assert.deepEqual(invocation.argv, ["control", "restore", "slot", restoreId, "--profile=default"])
 })
 
-for (const version of ["0.10.9", "0.11.0", "0.12.0-rc.1"]) {
+for (const version of ["0.10.9", "0.11.0", "0.18.1", "0.19.0-rc.1"]) {
   test(`when native ompi is ${version}, named and slot restore refuse before generating commands`, async (t) => {
     // Arrange
     const sandbox = await createSandbox(t, { version })
     const session = await createRestoreSession(sandbox)
 
     // Act / Assert
-    const unsupportedVersion = /0\.12\.0/
+    const unsupportedVersion = /0\.19\.0/
     await assert.rejects(
       prepareSlotRestoreCommand(session.scope, "a".repeat(32), session, {
         env: { HOME: sandbox.root },

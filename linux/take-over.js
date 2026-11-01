@@ -7,6 +7,7 @@ import { getScope } from "../protocol/index.js"
 
 import { assertRestoreOwnersNotLive, validateRestoreName } from "./restore.js"
 
+// eslint-disable-next-line no-control-regex -- Reject terminal controls before shell quoting.
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u
 
 function requireSafeString(value, label) {
@@ -121,17 +122,17 @@ async function requireControlRestoreVersion(executable, scope, env) {
   )
   if (!version) {
     throw new Error(
-      "Native ompi 0.12.0 or newer is required; no verifiable controller version was reported."
+      "Native ompi 0.19.0 or newer is required; no verifiable controller version was reported."
     )
   }
   const [major, minor, patch] = version.slice(1, 4).map(Number)
   const supported =
     major > 0 ||
-    (major === 0 && minor > 12) ||
-    (major === 0 && minor === 12 && patch >= 0 && version[4] === undefined)
+    (major === 0 && minor > 19) ||
+    (major === 0 && minor === 19 && patch >= 0 && version[4] === undefined)
   if (!supported)
     throw new Error(
-      `Native ${version[0]} does not support control restore; version 0.12.0 or newer is required.`
+      `Native ${version[0]} does not support word-based restore; version 0.19.0 or newer is required.`
     )
 }
 
@@ -232,7 +233,7 @@ export async function prepareNamedRestoreCommand(
   await requireControlRestoreVersion(absoluteExecutable, scope, env)
   const environment = recoveryEnvironmentArguments(scope)
 
-  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
+  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore name ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
 }
 
 export async function prepareSlotRestoreCommand(
@@ -270,7 +271,7 @@ export async function prepareSlotRestoreCommand(
   const absoluteExecutable = await resolveExecutable(env, executable)
   await requireControlRestoreVersion(absoluteExecutable, scope, env)
   const environment = recoveryEnvironmentArguments(scope)
-  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore --slot ${shellQuote(restoreId, "Restore identity")} --profile=${shellQuote(scope.profile, "Profile")}`
+  return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore slot ${shellQuote(restoreId, "Restore identity")} --profile=${shellQuote(scope.profile, "Profile")}`
 }
 
 export async function prepareLegacyRecoveryExportCommand(

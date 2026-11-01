@@ -80,7 +80,7 @@ async function createFixture({ relativeAgentDirectory = false } = {}) {
   const ompiExecutable = path.join(binDirectory, "ompi")
   await writeFile(
     ompiExecutable,
-    '#!/bin/sh\nif [ "$1" = control ] && [ "$2" = --version ]; then printf "ompi 0.12.0\\n"; exit 0; fi\nexit 2\n',
+    '#!/bin/sh\nif [ "$1" = control ] && [ "$2" = --version ]; then printf "ompi 0.19.0\\n"; exit 0; fi\nexit 2\n',
     { mode: 0o700 }
   )
   await chmod(ompiExecutable, 0o700)
@@ -227,7 +227,7 @@ test("when saving a live managed instance, the exact binding is listed and compl
         return level === "error" && message.includes("cannot be overwritten")
       })
     )
-    await command.handler("restore --list --json", context.ctx)
+    await command.handler("restore list --json", context.ctx)
     assert.ok(context.notifications.some(({ message }) => message.includes('"name":"work"')))
     assert.equal((await listSavedSessions(fixture.scope)).length, 1)
   } finally {
@@ -284,7 +284,7 @@ test("when a named slot has no current snapshot, it stays listed but cannot shut
     const command = registerCommand(undefined, context.entries)
 
     // Act
-    await command.handler("restore --list --json", context.ctx)
+    await command.handler("restore list --json", context.ctx)
 
     // Assert
     assert.ok(context.notifications.some(({ message }) => message.includes('"unavailable":')))
@@ -315,7 +315,7 @@ test("when an unmanaged OMP session has a different cwd, restore lookup uses lau
     const command = registerCommand(undefined, context.entries)
 
     // Act
-    await command.handler("restore --list --json", context.ctx)
+    await command.handler("restore list --json", context.ctx)
 
     // Assert
     assert.ok(context.notifications.some(({ message }) => message.includes('"name":"work"')))
@@ -359,21 +359,21 @@ test("when restoring a managed slot outside checkpoint membership, OMP prepares 
     const executable = path.join(fixture.root, "bin", "ompi")
     await writeFile(
       executable,
-      '#!/bin/sh\nif [ "$1" = control ] && [ "$2" = --version ]; then printf "ompi 0.12.0\\n"; exit 0; fi\nexit 2\n',
+      '#!/bin/sh\nif [ "$1" = control ] && [ "$2" = --version ]; then printf "ompi 0.19.0\\n"; exit 0; fi\nexit 2\n',
       { mode: 0o700 }
     )
     const context = createContext(fixture.cwd, { confirm: async () => true })
     const command = registerCommand(undefined, context.entries)
 
     // Act
-    await command.handler(`restore --slot ${fixture.restoreId}`, context.ctx)
+    await command.handler(`restore slot ${fixture.restoreId}`, context.ctx)
 
     // Assert
     assert.equal(context.confirmCalls, 1)
     assert.equal(context.shutdowns, 1)
     const restoreEntry = context.entries.find((entry) => entry.customType === "ompi-restore")
     assert.ok(restoreEntry)
-    assert.ok(restoreEntry.data.command.includes(`control restore --slot '${fixture.restoreId}'`))
+    assert.ok(restoreEntry.data.command.includes(`control restore slot '${fixture.restoreId}'`))
     assert.ok(restoreEntry.data.command.includes(`PI_CONFIG_DIR='${fixture.scope.configRoot}'`))
     assert.ok(restoreEntry.data.command.includes(`PI_CODING_AGENT_DIR='${fixture.scope.agentDir}'`))
     assert.ok(!restoreEntry.data.command.includes("XDG_RUNTIME_DIR"))
@@ -391,8 +391,8 @@ test("when listing recovery, list accepts JSON and checkpoint filters", async ()
     const command = registerCommand(undefined, context.entries)
 
     // Act
-    await command.handler("restore --list --json", context.ctx)
-    await command.handler(`restore --list --from ${checkpoint.checkpointId} --json`, context.ctx)
+    await command.handler("restore list --json", context.ctx)
+    await command.handler(`restore list --from ${checkpoint.checkpointId} --json`, context.ctx)
 
     // Assert
     assert.deepEqual(
@@ -417,7 +417,7 @@ test("when a named-profile child selects default recovery, its anchored agent di
     const command = registerCommand({ launch: { scope: namedScope } }, context.entries)
 
     // Act
-    await command.handler("restore --list --profile default --json", context.ctx)
+    await command.handler("restore list --profile default --json", context.ctx)
 
     // Assert
     const listed = JSON.parse(context.notifications.at(-1).message)
@@ -441,6 +441,30 @@ test("when a saved name is combined with checkpoint selection, recovery rejects 
 
     // Assert
     assert.equal(context.notifications.at(-1).level, "error")
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when a saved name equals a restore operation, the explicit name verb preserves its destination", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    await fixture.saveName("history")
+    const context = createContext(fixture.cwd, { confirm: async () => true })
+    const command = registerCommand(undefined, context.entries)
+
+    // Act
+    await command.handler("restore name history", context.ctx)
+
+    // Assert
+    assert.equal(context.shutdowns, 1)
+    assert.equal(context.selectCalls, 0)
+    assert.equal(context.confirmCalls, 1)
+    assert.deepEqual(
+      context.entries.map(({ data }) => data.name),
+      ["history"]
+    )
   } finally {
     await fixture.close()
   }

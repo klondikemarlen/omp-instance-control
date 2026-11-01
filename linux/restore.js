@@ -11,7 +11,9 @@ const BOOT_ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/
 const MAX_JSON_BYTES = 1024 * 1024
 const MAX_RESUME_ARGS = 256
 const MAX_RESUME_ARG_BYTES = 64 * 1024
+// eslint-disable-next-line no-control-regex -- Reject NUL bytes in filesystem inputs.
 const NUL_CHARACTER = /\u0000/u
+// eslint-disable-next-line no-control-regex -- Reject terminal controls in stored metadata.
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u
 let cachedBootId
 let cachedAgentOwner
@@ -188,7 +190,7 @@ async function readBoundedPrivateJson(file, expectedSize = MAX_JSON_BYTES) {
     try {
       return JSON.parse(bytes.subarray(0, bytesRead).toString("utf8"))
     } catch (error) {
-      throw new Error(`Invalid private restore JSON in ${file}: ${error.message}`)
+      throw new Error(`Invalid private restore JSON in ${file}: ${error.message}`, { cause: error })
     }
   } finally {
     await handle.close()
@@ -301,9 +303,10 @@ async function invalidateFailedCapture(scope, restoreId, captureError) {
   try {
     await invalidateRestoreSnapshot(scope, restoreId)
   } catch (invalidationError) {
-    throw new Error(
+    throw new AggregateError(
+      [captureError, invalidationError],
       `${captureError.message}; previous restore snapshot could not be safely invalidated: ${invalidationError.message}`,
-      { cause: captureError }
+      { cause: invalidationError }
     )
   }
   throw captureError
@@ -391,7 +394,9 @@ export async function saveRestoreName(scope, name, restoreId, { expectedSnapshot
     await link(temporary, file)
   } catch (error) {
     if (error.code === "EEXIST") {
-      throw new Error(`Restore name '${name}' already exists and cannot be overwritten.`)
+      throw new Error(`Restore name '${name}' already exists and cannot be overwritten.`, {
+        cause: error,
+      })
     }
     throw error
   } finally {
@@ -449,7 +454,9 @@ async function readProcessStartTime(pid, role) {
     contents = await readFile(`/proc/${pid}/stat`, "utf8")
   } catch (error) {
     if (error.code === "ENOENT" || error.code === "ESRCH") return null
-    throw new Error(`Unable to verify saved session ${role} process: ${error.message}`)
+    throw new Error(`Unable to verify saved session ${role} process: ${error.message}`, {
+      cause: error,
+    })
   }
   const closingParenthesis = contents.lastIndexOf(")")
   if (closingParenthesis < 0) {
@@ -472,7 +479,9 @@ async function assertOwnerNotLive(owner, role) {
   try {
     bootId = await readBootId()
   } catch (error) {
-    throw new Error(`Unable to verify saved session ${role} boot identity: ${error.message}`)
+    throw new Error(`Unable to verify saved session ${role} boot identity: ${error.message}`, {
+      cause: error,
+    })
   }
   if (owner.bootId !== bootId) return
 

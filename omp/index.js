@@ -166,6 +166,7 @@ export default async function instanceControl(pi) {
       })
     } catch (error) {
       const safeMessage = errorMessage(error).replace(
+        // eslint-disable-next-line no-control-regex -- Escape untrusted terminal control bytes.
         /[\u0000-\u001f\u007f-\u009f]/g,
         (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
       )

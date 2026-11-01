@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repository=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 shared_dev="$HOME/.omp/plugins/node_modules/marlens-skills-rules-and-tools/bin/dev"
 
 if [[ ! -x "$shared_dev" ]]; then

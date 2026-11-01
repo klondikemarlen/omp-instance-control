@@ -55,6 +55,7 @@ function sameSnapshot(first, second) {
 
 function safeTerminalText(value) {
   return String(value).replace(
+    // eslint-disable-next-line no-control-regex -- Escape untrusted terminal control bytes.
     /[\u0000-\u001f\u007f-\u009f]/g,
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
   )
@@ -167,13 +168,13 @@ export function createRestoreCommand(pi, { getRuntime, refreshCompletionIds }) {
       return
     }
     if (operation === "menu" || operation === "recovery-slot" || operation === "recovery-from") {
-      let candidates = []
       let selected
       if (operation === "recovery-slot") {
         const session = await readRestoreSnapshot(scope, values.slot)
         if (!session) throw new Error(`Restore slot ${values.slot} is unavailable.`)
         selected = { restoreId: values.slot, session }
       } else {
+        let candidates
         if (operation === "recovery-from") {
           candidates = await listRecoverySessions(scope, { checkpointId: values.from })
         } else {
@@ -294,22 +295,6 @@ export function createRestoreCommand(pi, { getRuntime, refreshCompletionIds }) {
           ctx.ui.notify(output, "info")
         }
       }
-      await refreshCompletionIds(ctx, values.profile)
-      return
-    }
-    if (operation === "list") {
-      const saved = await listRecoverySessions(scope)
-      ctx.ui.notify(
-        values.json
-          ? JSON.stringify(saved)
-          : saved
-              .map(
-                (item) =>
-                  `${item.name ?? item.restoreId ?? "legacy"} — ${item.session?.cwd ?? item.unavailable ?? "legacy export only"}`
-              )
-              .join("\n") || "No recovery candidates.",
-        "info"
-      )
       await refreshCompletionIds(ctx, values.profile)
       return
     }
