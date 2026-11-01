@@ -7,6 +7,7 @@ _ompi_omp_completion()
         command -v omp >/dev/null 2>&1 || return 0
         local omp_registration
         omp_registration=$(complete -p omp 2>/dev/null) || omp_registration=""
+        # shellcheck source=/dev/null
         source <(command omp completions bash 2>/dev/null)
         # The delegated catalog registers omp too; only ompi belongs to us.
         if [[ -n $omp_registration ]]; then
@@ -23,17 +24,19 @@ _ompi_omp_completion()
 
 _ompi_control_completion()
 {
+    # _comp_initialize populates prev through Bash dynamic scope; keep it local.
+    # shellcheck disable=SC2034
     local cur prev words cword
     _comp_initialize -n = || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        COMPREPLY=( $(compgen -W 'list restart restore cleanup help version' -- "$cur") )
+        mapfile -t COMPREPLY < <(compgen -W 'list restart restore cleanup help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            COMPREPLY=( $(compgen -W 'list restart restore cleanup version' -- "$cur") )
+            mapfile -t COMPREPLY < <(compgen -W 'list restart restore cleanup version' -- "$cur")
         fi
         return 0
     fi
@@ -121,37 +124,37 @@ _ompi_control_completion()
         if [[ -n $selector_prefix || $pending == --from ]]; then
             [[ $operation == list || $operation == export ]] || return 0
         fi
-        local position saved_name identity remainder
+        local position _saved_name identity _remainder
         local -a identities=()
         if [[ $selector == from ]]; then
-            while read -r position identity remainder; do
+            while read -r position identity _remainder; do
                 [[ $position =~ ^[0-9]+\)$ && $identity =~ ^[a-f0-9]{32}$ ]] || continue
                 identities+=("$selector_prefix$identity")
             done < <(command ompi control restore history "${profile_arguments[@]}" 2>/dev/null)
         else
-            while read -r position saved_name identity remainder; do
+            while read -r position _saved_name identity _remainder; do
                 [[ $position =~ ^[0-9]+\)$ && $identity =~ ^[a-f0-9]{32}$ ]] || continue
                 identities+=("$identity")
             done < <(command ompi control restore list "${profile_arguments[@]}" 2>/dev/null)
         fi
-        COMPREPLY=( $(compgen -W "${identities[*]}" -- "$cur") )
+        mapfile -t COMPREPLY < <(compgen -W "${identities[*]}" -- "$cur")
         return 0
     fi
     [[ -n $pending ]] && return 0
     if [[ $cur != -* ]]; then
         if [[ $action == restart && ${#positionals[@]} == 0 ]]; then
-            COMPREPLY=( $(compgen -W 'all' -- "$cur") )
+            mapfile -t COMPREPLY < <(compgen -W 'all' -- "$cur")
         elif [[ $action == restore && ( ${#positionals[@]} == 0 || ( $operation == name && ${#positionals[@]} == 1 ) ) ]]; then
-            local position saved_name remainder
+            local position saved_name _remainder
             local verbs='list history checkpoint export import-legacy slot from save name'
             local -a names=()
-            [[ -z $operation ]] && names=($verbs)
-            while read -r position saved_name remainder; do
+            [[ -z $operation ]] && read -r -a names <<< "$verbs"
+            while read -r position saved_name _remainder; do
                 [[ $position =~ ^[0-9]+\)$ && $saved_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || continue
                 [[ -z $operation && " $verbs " == *" $saved_name "* ]] && continue
                 names+=("$saved_name")
             done < <(command ompi control restore list "${profile_arguments[@]}" 2>/dev/null)
-            COMPREPLY=( $(compgen -W "${names[*]}" -- "$cur") )
+            mapfile -t COMPREPLY < <(compgen -W "${names[*]}" -- "$cur")
         elif [[ $action == restore && $operation == import-legacy && ${#positionals[@]} == 1 ]]; then
             _comp_compgen_filedir
         fi
@@ -163,12 +166,14 @@ _ompi_control_completion()
     for option in $options; do
         [[ -n ${used[$option]} ]] || available+=("$option")
     done
-    COMPREPLY=( $(compgen -W "${available[*]}" -- "$cur") )
+    mapfile -t COMPREPLY < <(compgen -W "${available[*]}" -- "$cur")
     return 0
 }
 
 _ompi()
 {
+    # _comp_initialize populates prev through Bash dynamic scope; keep it local.
+    # shellcheck disable=SC2034
     local cur prev words cword
     _comp_initialize -n = || return
     if (( cword == 1 )); then
