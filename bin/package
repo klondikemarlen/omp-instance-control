@@ -19,7 +19,7 @@ case "$mode" in
     ;;
 esac
 
-repository=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repository=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository"
 
 if [[ -n $(git status --porcelain) ]]; then
