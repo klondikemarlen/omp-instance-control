@@ -227,7 +227,7 @@ Resource refresh is not loaded-extension re-evaluation or executable upgrade. Do
 
 ## Development and Release
 
-Install Go 1.25+ and Node.js 22+ for development:
+Install Go 1.25+, Node.js 22.13+, and ShellCheck 0.11+ for development. On Ubuntu, install ShellCheck with `sudo apt install shellcheck`; JavaScript tools are pinned in `package-lock.json`.
 
 ```bash
 npm ci
@@ -238,6 +238,8 @@ npm run check
 git diff --check
 ./dist/ompi control help
 ```
+
+`npm run check` includes Go vet, JavaScript linting with ESLint's recommended rules, Bash linting with ShellCheck, and formatting checks. Run `npm run lint` for both linters alone; warnings fail the check. Coverage includes host/client code, integration tests, shell commands, and Bash completion. Intentional control-byte regexes and dynamic completion inputs have local, explained exceptions.
 
 `make build` produces `dist/ompi` without cgo or runtime dependencies. The installed wrapper resolves its adapter relative to the real executable, not the working directory.
 
