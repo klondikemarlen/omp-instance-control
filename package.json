@@ -34,7 +34,10 @@
     "build": "make build",
     "test": "go test ./... && node --test",
     "format": "gofmt -w cli linux protocol test && prettier --write .",
-    "check": "go vet ./... && prettier --check . && test -z \"$(gofmt -l cli linux protocol test)\""
+    "lint": "npm run lint:js && npm run lint:shell",
+    "lint:js": "eslint . --max-warnings 0",
+    "lint:shell": "shellcheck --shell=bash bin/* linux/bash-completion/ompi",
+    "check": "go vet ./... && npm run lint && prettier --check . && test -z \"$(gofmt -l cli linux protocol test)\""
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
