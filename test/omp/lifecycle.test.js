@@ -630,3 +630,164 @@ test("when an installed update appears during manual restart, it only notifies a
     await rm(root, { recursive: true, force: true })
   }
 })
+
+async function createRestartDirectoryFixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "ic-cwd-"))
+  const cwd = path.join(root, "project")
+  const moved = path.join(root, "moved")
+  const launchDirectory = path.join(root, "launch")
+  await mkdir(cwd, { mode: 0o700 })
+  await mkdir(launchDirectory, { mode: 0o700 })
+  const scope = getScope({ env: { HOME: root } })
+  const token = "5".repeat(32)
+  const sessionFile = path.join(root, "session.jsonl")
+  await writeFile(sessionFile, '{"type":"session","id":"cwd-session"}\n', { mode: 0o600 })
+  await writePrivateJson(path.join(launchDirectory, "launch.json"), {
+    version: 1,
+    token,
+    pid: process.ppid,
+    scope,
+    extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
+    canRestartWrapper: true,
+    lastRestart: null,
+    builtinFlags: [],
+  })
+  const environment = {
+    HOME: root,
+    PI_CONFIG_DIR: path.join(root, ".omp"),
+    PI_CODING_AGENT_DIR: path.join(root, ".omp", "agent"),
+    OMP_PROFILE: "",
+    PI_PROFILE: "",
+    XDG_RUNTIME_DIR: root,
+    OMP_INSTANCE_CONTROL_LAUNCH_DIR: launchDirectory,
+    OMP_INSTANCE_CONTROL_LAUNCH_TOKEN: token,
+  }
+  const previous = Object.fromEntries(
+    Object.keys(environment).map((key) => [key, process.env[key]])
+  )
+  Object.assign(process.env, environment)
+  const handlers = new Map()
+  const notifications = []
+  const shutdownRequested = Promise.withResolvers()
+  let shutdowns = 0
+  const ctx = {
+    agent: { kind: "main" },
+    mode: "tui",
+    cwd,
+    sessionManager: {
+      getSessionId: () => "cwd-session",
+      getSessionFile: () => sessionFile,
+    },
+    ui: {
+      setStatus() {},
+      notify(message, level) {
+        notifications.push({ message, level })
+      },
+    },
+    shutdown() {
+      shutdowns += 1
+      shutdownRequested.resolve()
+    },
+  }
+  const extension = createExtensionApi(createEventBus(), handlers)
+  await instanceControl(extension.api)
+  await handlers.get("session_start")({}, ctx)
+  const transport = await createTransport(scope)
+  const [record] = await transport.readRecords()
+  return {
+    cwd,
+    moved,
+    sessionFile,
+    handlers,
+    ctx,
+    transport,
+    record,
+    notifications,
+    shutdownRequested,
+    get shutdowns() {
+      return shutdowns
+    },
+    async close() {
+      await handlers.get("session_shutdown")({}, ctx)
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      await rm(root, { recursive: true, force: true })
+    },
+  }
+}
+
+test("when the working directory disappears before wrapper restart, admission rejects without closing OMP", async () => {
+  // Arrange
+  const fixture = await createRestartDirectoryFixture()
+  const { cwd, moved, transport, record } = fixture
+  const request = {
+    ...createRequest(record.instanceId, "restart-wrapper"),
+    nativeTarget: { device: "1", inode: "2", size: "3", modifiedNs: "4" },
+  }
+  try {
+    await rename(cwd, moved)
+
+    // Act
+    const response = await transport.request(record, request)
+    const unavailable = await transport.request(record, createRequest(record.instanceId, "status"))
+
+    // Assert
+    assert.equal(response.ok, false)
+    assert.equal(response.error.code, "CWD_UNAVAILABLE")
+    assert.equal(fixture.shutdowns, 0)
+    assert.equal(unavailable.data.canRestart, false)
+    assert.equal(unavailable.data.state, "running")
+    assert.equal(unavailable.data.operationId, null)
+
+    // Act
+    await rename(moved, cwd)
+    const retry = await transport.request(record, request)
+    await fixture.shutdownRequested.promise
+
+    // Assert
+    assert.equal(retry.data.state, "accepted")
+    assert.equal(fixture.shutdowns, 1)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when the working directory disappears while awaiting persistence, restart stays pending without closing OMP", async () => {
+  // Arrange
+  const fixture = await createRestartDirectoryFixture()
+  const { cwd, moved, sessionFile, transport, record, handlers, ctx } = fixture
+  try {
+    await rm(sessionFile)
+    const accepted = await transport.request(record, createRequest(record.instanceId, "restart"))
+    await rename(cwd, moved)
+    await writeFile(sessionFile, '{"type":"session","id":"cwd-session"}\n', { mode: 0o600 })
+
+    // Act
+    await handlers.get("agent_end")({}, ctx)
+    const unavailable = await transport.request(record, createRequest(record.instanceId, "status"))
+
+    // Assert
+    assert.equal(fixture.shutdowns, 0)
+    assert.equal(unavailable.data.canRestart, false)
+    assert.equal(unavailable.data.operationId, accepted.data.operationId)
+    assert.equal(
+      fixture.notifications.some(({ message }) => message.includes("working directory")),
+      true
+    )
+
+    // Act
+    await rename(moved, cwd)
+    await handlers.get("agent_end")({}, ctx)
+    await fixture.shutdownRequested.promise
+    const recovered = await transport.request(record, createRequest(record.instanceId, "status"))
+
+    // Assert
+    assert.equal(fixture.shutdowns, 1)
+    assert.equal(recovered.data.state, "restart-requested")
+    assert.equal(recovered.data.operationId, accepted.data.operationId)
+  } finally {
+    await fixture.close()
+  }
+})

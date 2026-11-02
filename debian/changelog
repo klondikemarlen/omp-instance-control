@@ -1,3 +1,10 @@
+omp-instance-control (0.19.1~ppa1) resolute; urgency=medium
+
+  * Refuse restart when its working directory is unavailable before shutdown.
+  * Recheck the working directory while waiting for transcript persistence.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Mon, 02 Nov 2026 10:03:00 -0700
+
 omp-instance-control (0.19.0~ppa1) resolute; urgency=medium
 
   * Recover current sessions when an older boot has an empty checkpoint.
