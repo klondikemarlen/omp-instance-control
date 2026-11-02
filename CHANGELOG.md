@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1 - 2026-11-02
+
+### Fixed
+
+- Keep the existing terminal open when its restart working directory is unavailable, including while waiting for the transcript to become persistent.
+
 ## 0.19.0 - 2026-10-30
 
 ### Changed
