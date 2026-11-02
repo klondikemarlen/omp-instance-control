@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0 - 2026-11-02
+
+### Added
+
+- Send messages to one participating terminal through `ompi control send` or `/ompi send`. Queue behind current work by default, or choose `--steer` to redirect it; idle delivery starts a turn. Submission acknowledgements do not claim task completion.
+
 ## 0.19.1 - 2026-11-02
 
 ### Fixed
