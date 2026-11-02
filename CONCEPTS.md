@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Give an operator or another OMP instance an explicit way to request safe restart/resume across participating Linux terminals without interrupting their work.
+Give an operator or another OMP instance explicit scoped discovery, peer messaging, and safe restart/resume across participating Linux terminals. OMP owns message queueing and lifecycle settlement; ompi does not decide which agent owns a task.
 
 ## Ownership
 

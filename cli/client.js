@@ -1,4 +1,4 @@
-import { createRequest, ProtocolError } from "../protocol/index.js"
+import { createMessageRequest, createRequest, ProtocolError } from "../protocol/index.js"
 
 const UNREACHABLE_CODES = new Set(["ENOENT", "ECONNREFUSED"])
 
@@ -93,6 +93,76 @@ export async function restartInstances(transport, { all = false, instanceId } = 
       }
     })
   )
+}
+
+export async function sendMessage(transport, { instanceId, text, delivery = "followUp" } = {}) {
+  if (typeof instanceId !== "string" || !/^[a-f0-9]{1,32}$/.test(instanceId)) {
+    throw new TypeError(
+      "Send requires one 1-32 character lowercase hexadecimal instance ID prefix."
+    )
+  }
+  const records = await transport.readRecords()
+  const selected = records.filter((record) => record.instanceId.startsWith(instanceId))
+
+  if (selected.length === 0) {
+    return [{ instanceId, status: "failed", error: "No matching instance found." }]
+  }
+  if (selected.length > 1) {
+    return [
+      {
+        instanceId,
+        status: "failed",
+        errorCode: "AMBIGUOUS_INSTANCE",
+        error: "Instance ID prefix matches multiple instances; use a longer ID.",
+      },
+    ]
+  }
+
+  const [record] = selected
+  try {
+    const request = createMessageRequest(record.instanceId, text, delivery)
+    const response = await transport.request(record, request)
+    if (!response.ok) {
+      return [
+        {
+          record,
+          instanceId: record.instanceId,
+          status: "failed",
+          error: response.error.message,
+          errorCode: response.error.code,
+        },
+      ]
+    }
+    if (
+      response.data?.state !== "submitted" ||
+      response.data.messageId !== request.requestId ||
+      response.data.delivery !== delivery
+    ) {
+      return [
+        {
+          record,
+          instanceId: record.instanceId,
+          status: "unknown",
+          error: "Message submission acknowledgement did not match the request.",
+        },
+      ]
+    }
+    return [
+      {
+        record,
+        instanceId: record.instanceId,
+        status: "submitted",
+        data: response.data,
+      },
+    ]
+  } catch (error) {
+    const status = UNREACHABLE_CODES.has(error.code)
+      ? "unreachable"
+      : error instanceof ProtocolError
+        ? "failed"
+        : "unknown"
+    return [{ record, instanceId: record.instanceId, status, error: error.message }]
+  }
 }
 
 function safeText(value) {

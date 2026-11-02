@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { formatRows, listInstances, restartInstances } from "../../cli/client.js"
+import { formatRows, listInstances, restartInstances, sendMessage } from "../../cli/client.js"
 
 const first = { instanceId: "a".repeat(32), pid: 10, cwd: "/one\npath" }
 const second = { instanceId: "b".repeat(32), pid: 11, cwd: "/two" }
@@ -14,6 +14,68 @@ function transport(records, request) {
     request,
   }
 }
+
+test("when sending to an ambiguous prefix, no message request is dispatched", async () => {
+  // Arrange
+  const client = transport(
+    [first, { ...second, instanceId: "a".repeat(32).slice(0, 1) + "b".repeat(31) }],
+    async () => assert.fail("ambiguous targets must not receive messages")
+  )
+
+  // Act / Assert
+  assert.equal(
+    (await sendMessage(client, { instanceId: "a", text: "hello" }))[0].errorCode,
+    "AMBIGUOUS_INSTANCE"
+  )
+})
+
+test("when sending to a unique prefix, one request preserves literal text and delivery", async () => {
+  // Arrange
+  const sent = []
+  const client = transport([first], async (record, request) => {
+    sent.push({ id: record.instanceId, request })
+    return {
+      ok: true,
+      data: { state: "submitted", messageId: request.requestId, delivery: "steer" },
+    }
+  })
+  const text = "--json\n雪 and spaces "
+
+  // Act
+  const rows = await sendMessage(client, {
+    instanceId: first.instanceId.slice(0, 8),
+    text,
+    delivery: "steer",
+  })
+
+  // Assert
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].request.message.text, text)
+  assert.equal(sent[0].request.message.delivery, "steer")
+  assert.equal(rows[0].status, "submitted")
+})
+
+test("when a submission acknowledgement is lost or mismatched, delivery stays unknown without retry", async () => {
+  // Arrange
+  for (const acknowledgement of [
+    null,
+    { state: "submitted", messageId: "different", delivery: "followUp" },
+  ]) {
+    let sends = 0
+    const client = transport([first], async () => {
+      sends++
+      if (acknowledgement === null) throw new Error("response lost")
+      return { ok: true, data: acknowledgement }
+    })
+
+    // Act
+    const [row] = await sendMessage(client, { instanceId: "a", text: "hello" })
+
+    // Assert
+    assert.equal(row.status, "unknown")
+    assert.equal(sends, 1)
+  }
+})
 
 test("when the selected instance is absent, restart fails without dispatching a request", async () => {
   // Arrange

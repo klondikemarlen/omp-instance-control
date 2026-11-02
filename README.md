@@ -1,6 +1,6 @@
 # OMP Instance Control
 
-`ompi` layers instance control on top of standard `omp`. Bare `ompi` launches OMP in the current terminal; normal OMP arguments and subcommands pass through. The reserved `control` namespace discovers participating terminals and requests settled-boundary restart/resume. Inside OMP, `/ompi` exposes controller commands directly without the extra namespace.
+`ompi` layers instance control on top of standard `omp`. Bare `ompi` launches OMP in the current terminal; normal OMP arguments and subcommands pass through. The reserved `control` namespace discovers participating terminals, sends explicit peer messages, and requests settled-boundary restart/resume. Inside OMP, `/ompi` exposes controller commands directly without the extra namespace.
 
 OMP owns settlement, transcript persistence, and graceful teardown. The native Go wrapper reopens the current persisted conversation in the same terminal after successful shutdown.
 
@@ -25,7 +25,7 @@ ompi control version
 
 The package installs `/usr/bin/ompi` and the plugin under `/usr/share/omp-instance-control/`. `ompi` loads it automatically; no separate plugin installation is required for wrapped sessions. Existing processes retain their loaded modules; launch fresh processes after installation or upgrade.
 
-The apt package includes Bash completion at `/usr/share/bash-completion/completions/ompi` and depends on `bash-completion`. Open a fresh interactive Bash shell after installation; no completion setup command or shell-configuration edit is required when the standard Ubuntu Bash completion startup is enabled. Complete controller actions after `ompi control ` and restart targets after `ompi control restart `. Type `-` to discover action-specific options; consumed options are not offered again. Profile names and instance IDs remain free-form Bash values. Ordinary OMP commands and launch options reuse the installed OMP's generated completion, loaded on first use.
+The apt package includes Bash completion at `/usr/share/bash-completion/completions/ompi` and depends on `bash-completion`. Open a fresh interactive Bash shell after installation; no completion setup command or shell-configuration edit is required when the standard Ubuntu Bash completion startup is enabled. Complete controller actions after `ompi control ` and restart targets after `ompi control restart `. Type `-` to discover action-specific options; consumed options are not offered again. Bash offers online IDs for `send`; profile names and restart IDs remain free-form values. Ordinary OMP commands and launch options reuse the installed OMP's generated completion, loaded on first use.
 
 Completion owns only the `ompi` registration. Lazy OMP delegation preserves an existing `omp` completion handler, and the package does not edit shared Bash startup or completion files. If an already-open shell cached a fallback before installation, run `source /usr/share/bash-completion/bash_completion` followed by `complete -r ompi 2>/dev/null`, or open a fresh shell.
 
@@ -128,6 +128,24 @@ Default cleanup output summarizes removed, retained, and failed registrations, w
 Use `--` before flag-shaped initial messages. Initial messages and startup session actions are never replayed after a controlled restart. For custom string-valued extension flags, use `--custom=value`; for custom boolean flags before a message, separate the message with `--`. An unknown bare flag followed by a non-flag token, a missing string value, or a flag-looking spaced string value makes controlled restart unavailable. Use `--system-prompt=--literal` for a flag-shaped string value. Initial OMP invocation still passes through unchanged.
 
 The wrapper does not register or shadow OMP flags. A parsed extension value sharing a built-in option used by the launch makes controlled restart unavailable rather than guessing its parsing or changing the original invocation. Ordinary spaced options such as `--model MODEL` remain supported.
+
+### Sending Peer Messages
+
+Use `ompi control list` (or `/ompi list`) to identify the receiving terminal, then send to its current full instance ID or unique hexadecimal prefix:
+
+```bash
+ompi control send ID 'Please investigate the API failure in your project.'
+ompi control send --steer ID 'Pause that approach; check the latest user correction first.'
+ompi control send --json --profile work ID 'Please report the current blocker.'
+```
+
+Inside OMP, use `/ompi send ID message` or `/ompi send --steer ID message`. Options precede the target. Bash requires one quoted message argument; the slash command takes everything after the target as literal text, without shell quote interpretation. Unicode and newlines are preserved, up to 16 KiB of UTF-8 text. Completion stops at the message body rather than suggesting more flags.
+
+Default delivery joins OMP's follow-up queue behind current work; `--steer` selects steering at a supported agent boundary. Either starts a model turn when the receiver is idle and can therefore incur the receiver's normal model cost. Messages are visibly marked as agent-attributed peer context, not new user instructions or permission to cross repository boundaries. The channel does not authenticate an originating agent identity; same-user local programs can send requests.
+
+`submitted` acknowledges handoff to OMP's public message API, not durable queueing, processing, a reply, or completion. JSON includes the selected `instanceId`, `data.messageId`, and `data.delivery`. A timeout or lost acknowledgement is unknown: inspect the recipient before explicitly trying again, because an automatic resend could duplicate work. Missing, ambiguous, stale, closing, or older unsupported targets fail without falling back to another terminal. There is no `all` message target. Profile/config-root boundaries remain the same as discovery and require explicit cross-profile selection.
+
+Both the receiver's launcher-loaded adapter and sender need messaging-capable code; already-running terminals retain their old modules. Choose a scoped restart or fresh launch after upgrading. This channel is separate from restart: it neither shuts down terminals nor restores checkpoint prompts. Automatic work routing and delegation policy belong to the calling agent's skills, not ompi.
 
 ### Taking Over a Plain-OMP Session
 

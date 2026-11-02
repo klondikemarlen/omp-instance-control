@@ -30,14 +30,48 @@ _ompi_control_completion()
     _comp_initialize -n = || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        mapfile -t COMPREPLY < <(compgen -W 'list restart restore cleanup help version' -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W 'list restart send restore cleanup help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            mapfile -t COMPREPLY < <(compgen -W 'list restart restore cleanup version' -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W 'list restart send restore cleanup version' -- "$cur")
         fi
+        return 0
+    fi
+    if [[ $action == send ]]; then
+        local index token option id state _remainder
+        local -a profile_args=() candidates=()
+        local -A consumed=()
+        for (( index=3; index<cword; index++ )); do
+            token=${words[index]}
+            case $token in
+                --profile)
+                    (( index+1 < cword )) || return 0
+                    (( index++ ))
+                    profile_args=(--profile "${words[index]}")
+                    consumed[--profile]=1
+                    ;;
+                --profile=*)
+                    profile_args=("$token")
+                    consumed[--profile]=1
+                    ;;
+                --steer|--json) consumed[$token]=1 ;;
+                *) return 0 ;;
+            esac
+        done
+        [[ $cur == --profile=* ]] && return 0
+        if [[ $cur == -* ]]; then
+            for option in --steer --profile --json; do
+                [[ -n ${consumed[$option]} ]] || candidates+=("$option")
+            done
+        else
+            while read -r id state _remainder; do
+                [[ $id =~ ^[a-f0-9]{12,32}$ && $state == running ]] && candidates+=("$id")
+            done < <(command ompi control list "${profile_args[@]}" 2>/dev/null)
+        fi
+        mapfile -t COMPREPLY < <(compgen -W "${candidates[*]}" -- "$cur")
         return 0
     fi
     [[ $action == list || $action == restart || $action == cleanup || $action == restore ]] || return 0

@@ -1,3 +1,10 @@
+omp-instance-control (0.20.0~ppa1) resolute; urgency=medium
+
+  * Send explicitly addressed peer messages with follow-up or steering delivery.
+  * Preserve literal message text and scoped identities without automatic retries.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Mon, 02 Nov 2026 14:02:05 -0700
+
 omp-instance-control (0.19.1~ppa1) resolute; urgency=medium
 
   * Refuse restart when its working directory is unavailable before shutdown.

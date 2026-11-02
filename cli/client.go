@@ -17,7 +17,7 @@ type Transport interface {
 	Request(context.Context, protocol.Record, protocol.Request) (protocol.Response, error)
 }
 
-// Row is the stable JSON result shape used by list and restart commands.
+// Row is the stable JSON result shape used by list, restart, and send commands.
 type Row struct {
 	Record             *protocol.Record `json:"record,omitempty"`
 	InstanceID         string           `json:"instanceId,omitempty"`
@@ -117,6 +117,57 @@ func RestartInstances(transport Transport, all bool, instanceID string) ([]Row, 
 	}
 	group.Wait()
 	return rows, nil
+}
+
+// SendMessage addresses one instance selected from a single discovery snapshot.
+// A transport error after the request may mean the receiver accepted it, so it
+// is reported as unknown and is never retried.
+func SendMessage(transport Transport, instanceID, text, delivery string) (Row, error) {
+	if instanceID == "" || len(instanceID) > 32 || strings.Trim(instanceID, "0123456789abcdef") != "" {
+		return Row{}, errors.New("invalid send ID: use 1-32 lowercase hexadecimal characters")
+	}
+	if strings.TrimSpace(text) == "" {
+		return Row{}, errors.New("message must not be empty")
+	}
+	if delivery != "followUp" && delivery != "steer" {
+		return Row{}, errors.New("delivery must be followUp or steer")
+	}
+	if len(text) > 16*1024 {
+		return Row{}, errors.New("message exceeds 16 KiB")
+	}
+	records, err := transport.ReadRecords()
+	if err != nil {
+		return Row{}, err
+	}
+	var selected *protocol.Record
+	for index := range records {
+		if !strings.HasPrefix(records[index].InstanceID, instanceID) {
+			continue
+		}
+		if selected != nil {
+			return Row{InstanceID: instanceID, Status: "failed", Error: "Instance ID prefix matches multiple instances; use a longer ID.", ErrorCode: "AMBIGUOUS_INSTANCE"}, nil
+		}
+		selected = &records[index]
+	}
+	if selected == nil {
+		return Row{InstanceID: instanceID, Status: "failed", Error: "No matching instance found."}, nil
+	}
+	record := *selected
+	request, err := protocol.CreateMessageRequest(record.InstanceID, text, delivery)
+	if err != nil {
+		return Row{Record: &record, InstanceID: record.InstanceID, Status: "failed", Error: err.Error()}, nil
+	}
+	response, err := transport.Request(context.Background(), record, request)
+	if err != nil {
+		return Row{Record: &record, InstanceID: record.InstanceID, Status: outcomeForError(err), Error: err.Error()}, nil
+	}
+	if !response.OK {
+		return Row{Record: &record, InstanceID: record.InstanceID, Status: "failed", Error: response.Error.Message, ErrorCode: response.Error.Code}, nil
+	}
+	if response.Data == nil || response.Data.State != "submitted" || response.Data.MessageID != request.RequestID || response.Data.Delivery != delivery {
+		return Row{Record: &record, InstanceID: record.InstanceID, Status: "unknown", Error: "Message submission acknowledgement did not match the request."}, nil
+	}
+	return Row{Record: &record, InstanceID: record.InstanceID, Status: "submitted", Data: response.Data}, nil
 }
 
 func restartRecord(ctx context.Context, transport Transport, record protocol.Record) Row {

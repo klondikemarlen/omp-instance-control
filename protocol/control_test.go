@@ -133,6 +133,19 @@ func TestCreateAndValidateRequests(t *testing.T) {
 	}
 }
 
+func TestMessageRequestRejectsInvalidDeliveryAndOversizedText(t *testing.T) {
+	instanceID := strings.Repeat("a", 32)
+	for _, invalid := range []Request{
+		{Version: Version, InstanceID: instanceID, RequestID: "x", Action: "send", Message: &Message{Text: "hi", Delivery: "invalid"}},
+		{Version: Version, InstanceID: instanceID, RequestID: "x", Action: "send", Message: &Message{Text: strings.Repeat("é", 8193), Delivery: "steer"}},
+		{Version: Version, InstanceID: instanceID, RequestID: "x", Action: "restart", Message: &Message{Text: "leak", Delivery: "steer"}},
+	} {
+		if err := ValidateRequest(invalid); err == nil {
+			t.Errorf("invalid request accepted: %#v", invalid)
+		}
+	}
+}
+
 func TestValidateResponseRequiresCorrelatedStructuredAcknowledgement(t *testing.T) {
 	request := Request{Version: Version, InstanceID: strings.Repeat("b", 32), RequestID: "request-1", Action: "restart"}
 	valid := Response{Version: Version, InstanceID: request.InstanceID, RequestID: request.RequestID, OK: true, Data: &Data{State: "accepted"}}

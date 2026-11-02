@@ -65,6 +65,15 @@ async function createFixture() {
           }
           return { data }
         }
+        if (request.action === "send") {
+          return {
+            data: {
+              state: "submitted",
+              messageId: request.requestId,
+              delivery: request.message.delivery,
+            },
+          }
+        }
         return {
           data: {
             state: "accepted",
@@ -275,6 +284,39 @@ test("when completion reaches consumed or conflicting choices, only valid next o
     candidates,
     cases.map(([, expected]) => expected)
   )
+})
+
+test("when sending, slash command preserves raw option-like and multiline message text", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    const id = "d".repeat(32)
+    const { requests } = await fixture.addPeer(getScope({ cwd: fixture.cwd }), id)
+    const ctx = createContext(fixture.cwd)
+    const ui = createCommand(ctx)
+
+    // Act
+    await ui.command.handler("send --steer " + id + " --json\n雪 --profile", ctx)
+
+    // Assert
+    assert.equal(requests.at(-1).message.text, "--json\n雪 --profile")
+    assert.equal(requests.at(-1).message.delivery, "steer")
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when completing send, profile options and IDs stop at the message position", async () => {
+  // Arrange
+  const { command } = createCommand(createContext(process.cwd()))
+
+  // Act / Assert
+  assert.deepEqual(command.getArgumentCompletions("send --"), [
+    { value: "send --steer", label: "--steer" },
+    { value: "send --profile", label: "--profile" },
+    { value: "send --json", label: "--json" },
+  ])
+  assert.deepEqual(command.getArgumentCompletions("send aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --"), [])
 })
 
 test("when completing a profile value, candidates stay within the active configuration root", async () => {
