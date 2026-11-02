@@ -41,6 +41,16 @@ export function createRequest(instanceId, action, requestId = randomUUID()) {
   return validateRequest({ version: PROTOCOL_VERSION, instanceId, requestId, action })
 }
 
+export function createMessageRequest(instanceId, text, delivery, requestId = randomUUID()) {
+  return validateRequest({
+    version: PROTOCOL_VERSION,
+    instanceId,
+    requestId,
+    action: "send",
+    message: { text, delivery },
+  })
+}
+
 export function validateRequest(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ProtocolError("INVALID_REQUEST", "Expected a control request object.")
@@ -56,11 +66,32 @@ export function validateRequest(value) {
   ) {
     throw new ProtocolError("INVALID_REQUEST", "Expected a bounded nonempty request identifier.")
   }
-  if (!["status", "restart", "restart-wrapper"].includes(value.action)) {
+  if (!["status", "restart", "restart-wrapper", "send"].includes(value.action)) {
     throw new ProtocolError(
       "UNSUPPORTED_ACTION",
-      "Only status, restart, and restart-wrapper are supported; resource-only reload is unavailable."
+      "Only status, restart, restart-wrapper, and send are supported; resource-only reload is unavailable."
     )
+  }
+  if (value.action === "send") {
+    if (
+      !value.message ||
+      typeof value.message !== "object" ||
+      Array.isArray(value.message) ||
+      typeof value.message.text !== "string" ||
+      value.message.text.trim().length === 0 ||
+      Buffer.byteLength(value.message.text, "utf8") > 16 * 1024 ||
+      !["followUp", "steer"].includes(value.message.delivery)
+    ) {
+      throw new ProtocolError(
+        "INVALID_REQUEST",
+        "Send requires nonempty UTF-8 message text up to 16 KiB and a valid delivery mode."
+      )
+    }
+    if (value.nativeTarget !== undefined && value.nativeTarget !== null) {
+      throw new ProtocolError("INVALID_REQUEST", "Native target is not valid for send.")
+    }
+  } else if (value.message !== undefined && value.message !== null) {
+    throw new ProtocolError("INVALID_REQUEST", "Message payload is only valid for send.")
   }
   if (value.nativeTarget !== undefined && value.nativeTarget !== null) {
     validateNativeTarget(value.nativeTarget, value.action)

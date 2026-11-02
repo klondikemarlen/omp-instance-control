@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	maxFrameBytes  = 64 * 1024
+	maxFrameBytes  = 128 * 1024
 	requestTimeout = 5 * time.Second
 	maxSocketPath  = 108
 )

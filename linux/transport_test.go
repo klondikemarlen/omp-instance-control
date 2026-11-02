@@ -291,6 +291,32 @@ func TestRequestInteroperatesWithCorrelatedOMPResponse(t *testing.T) {
 	}
 }
 
+func TestMessageFrameAcceptsEscapeHeavyPayloadAtTextLimit(t *testing.T) {
+	transport, scope := testTransport(t)
+	record := testRecord(scope, testInstanceID)
+	text := strings.Repeat("<", 16*1024)
+	startSocketReply(t, transport, func(request protocol.Request) protocol.Response {
+		if request.Message == nil || request.Message.Text != text {
+			t.Errorf("escaped message was changed or lost")
+		}
+		return protocol.Response{
+			Version: protocol.Version, InstanceID: request.InstanceID, RequestID: request.RequestID,
+			OK: true, Data: &protocol.Data{State: "submitted", MessageID: request.RequestID, Delivery: "followUp"},
+		}
+	})
+	request, err := protocol.CreateMessageRequest(record.InstanceID, text, "followUp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := transport.Request(context.Background(), record, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !response.OK || response.Data.MessageID != request.RequestID {
+		t.Fatalf("escaped boundary message was not submitted: %#v", response)
+	}
+}
+
 func TestInvalidAcknowledgementRemainsUnknownAndHostRejectionFails(t *testing.T) {
 	for _, testCase := range []struct {
 		name   string

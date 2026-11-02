@@ -17,7 +17,7 @@ import {
   readSendContextMetadata,
   writePrivateJson,
 } from "../../linux/transport.js"
-import { ProtocolError } from "../../protocol/index.js"
+import { createMessageRequest, ProtocolError } from "../../protocol/index.js"
 
 const INSTANCE_A = "a".repeat(32)
 const INSTANCE_B = "b".repeat(32)
@@ -265,6 +265,30 @@ test("when a record disappears after enumeration, discovery keeps surviving inst
   } finally {
     enumeration.mock.restore()
     syncBuiltinESMExports()
+  }
+})
+
+test("when a maximum-size message needs JSON escaping, transport preserves the payload", async () => {
+  // Arrange
+  const root = await createRoot()
+  const transport = await transportFor(root, SCOPE_A)
+  const record = makeRecord(SCOPE_A)
+  await transport.writeRecord(record)
+  const text = "\u0001".repeat(16 * 1024)
+  const server = await transport.serve(INSTANCE_A, async (request) => {
+    assert.equal(request.message.text, text)
+    return { data: { state: "submitted", messageId: request.requestId, delivery: "steer" } }
+  })
+  try {
+    const request = createMessageRequest(INSTANCE_A, text, "steer")
+    // Act
+    const response = await transport.request(record, request)
+
+    // Assert
+    assert.equal(response.ok, true)
+    assert.equal(response.data.messageId, request.requestId)
+  } finally {
+    await server.close()
   }
 })
 

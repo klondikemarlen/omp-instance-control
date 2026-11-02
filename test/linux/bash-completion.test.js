@@ -77,6 +77,21 @@ for (const { condition, words, expected } of [
     expected: [],
   },
   {
+    condition: "a send target is complete and its message starts with an option",
+    words: ["ompi", "control", "send", "a".repeat(32), "--"],
+    expected: [],
+  },
+  {
+    condition: "send already consumes the steering option",
+    words: ["ompi", "control", "send", "--steer", "--"],
+    expected: ["--profile", "--json"],
+  },
+  {
+    condition: "a send profile value is pending",
+    words: ["ompi", "control", "send", "--profile", "--"],
+    expected: [],
+  },
+  {
     condition: "a checkpoint operation is selected",
     words: ["ompi", "control", "restore", "checkpoint", "--"],
     expected: ["--profile"],

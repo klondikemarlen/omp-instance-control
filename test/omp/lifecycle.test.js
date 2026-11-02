@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 
 import { createTransport, writePrivateJson } from "../../linux/transport.js"
-import { createRequest, getScope } from "../../protocol/index.js"
+import { createMessageRequest, createRequest, getScope } from "../../protocol/index.js"
 import { createEventBus, createExtensionApi, createSdk } from "./lifecycle-fixture.js"
 
 import instanceControl from "../../omp/index.js"
@@ -631,7 +631,7 @@ test("when an installed update appears during manual restart, it only notifies a
   }
 })
 
-async function createRestartDirectoryFixture() {
+async function createRestartDirectoryFixture({ sendMessages = [] } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "ic-cwd-"))
   const cwd = path.join(root, "project")
   const moved = path.join(root, "moved")
@@ -690,6 +690,7 @@ async function createRestartDirectoryFixture() {
     },
   }
   const extension = createExtensionApi(createEventBus(), handlers)
+  extension.api.sendMessage = (content, options) => sendMessages.push({ content, options })
   await instanceControl(extension.api)
   await handlers.get("session_start")({}, ctx)
   const transport = await createTransport(scope)
@@ -700,6 +701,7 @@ async function createRestartDirectoryFixture() {
     sessionFile,
     handlers,
     ctx,
+    api: extension.api,
     transport,
     record,
     notifications,
@@ -787,6 +789,101 @@ test("when the working directory disappears while awaiting persistence, restart 
     assert.equal(fixture.shutdowns, 1)
     assert.equal(recovered.data.state, "restart-requested")
     assert.equal(recovered.data.operationId, accepted.data.operationId)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when restart prerequisites are unavailable, peer send still submits without shutdown", async () => {
+  // Arrange
+  const calls = []
+  const fixture = await createRestartDirectoryFixture({ sendMessages: calls })
+  const request = {
+    ...createMessageRequest(
+      fixture.record.instanceId,
+      "literal\npeer content",
+      "steer",
+      "peer-request"
+    ),
+  }
+  try {
+    await rm(fixture.sessionFile)
+    await rename(fixture.cwd, fixture.moved)
+
+    // Act
+    const response = await fixture.transport.request(fixture.record, request)
+
+    // Assert
+    assert.equal(response.ok, true)
+    assert.equal(response.data.state, "submitted")
+    assert.equal(response.data.messageId, "peer-request")
+    assert.equal(response.data.delivery, "steer")
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].content.customType, "ompi-peer-message")
+    assert.equal(calls[0].content.display, true)
+    assert.ok(calls[0].content.content.endsWith("literal\npeer content"))
+    assert.deepEqual(calls[0].content.details, {
+      requestId: "peer-request",
+      delivery: "steer",
+    })
+    assert.deepEqual(calls[0].options, { triggerTurn: true, deliverAs: "steer" })
+    assert.equal(fixture.shutdowns, 0)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when the host message API is unavailable, peer send refuses without shutdown", async () => {
+  // Arrange
+  const calls = []
+  const fixture = await createRestartDirectoryFixture({ sendMessages: calls })
+  try {
+    delete fixture.api.sendMessage
+    const status = await fixture.transport.request(
+      fixture.record,
+      createRequest(fixture.record.instanceId, "status")
+    )
+    assert.equal(status.data.canSend, false)
+
+    // Act
+    const response = await fixture.transport.request(
+      fixture.record,
+      createMessageRequest(fixture.record.instanceId, "hello", "followUp")
+    )
+
+    // Assert
+    assert.equal(response.ok, false)
+    assert.equal(response.error.code, "SEND_API_UNAVAILABLE")
+    assert.deepEqual(calls, [])
+    assert.equal(fixture.shutdowns, 0)
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when exit is requested, peer messages cannot wake the closing conversation", async () => {
+  // Arrange
+  const calls = []
+  const fixture = await createRestartDirectoryFixture({ sendMessages: calls })
+  try {
+    fixture.api.events.emit("omp-exit-command:exit-requested", { sessionId: "cwd-session" })
+    const status = await fixture.transport.request(
+      fixture.record,
+      createRequest(fixture.record.instanceId, "status")
+    )
+    assert.equal(status.data.canSend, false)
+
+    // Act
+    const response = await fixture.transport.request(
+      fixture.record,
+      createMessageRequest(fixture.record.instanceId, "hello", "steer")
+    )
+
+    // Assert
+    assert.equal(response.ok, false)
+    assert.equal(response.error.code, "INSTANCE_CLOSING")
+    assert.deepEqual(calls, [])
+    assert.equal(fixture.shutdowns, 0)
   } finally {
     await fixture.close()
   }

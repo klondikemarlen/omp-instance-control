@@ -193,6 +193,12 @@ type NativeTarget struct {
 	ModifiedNs string `json:"modifiedNs"`
 }
 
+// Message contains a peer message and its delivery mode.
+type Message struct {
+	Text     string `json:"text"`
+	Delivery string `json:"delivery"`
+}
+
 // Request is one versioned operation addressed to a specific OMP process.
 type Request struct {
 	Version      int           `json:"version"`
@@ -200,6 +206,7 @@ type Request struct {
 	RequestID    string        `json:"requestId"`
 	Action       string        `json:"action"`
 	NativeTarget *NativeTarget `json:"nativeTarget,omitempty"`
+	Message      *Message      `json:"message,omitempty"`
 }
 
 // Error is a correlated protocol-level rejection returned by an OMP process.
@@ -243,6 +250,9 @@ type Data struct {
 	OperationID     *string              `json:"operationId,omitempty"`
 	LastRestart     *Restart             `json:"lastRestart,omitempty"`
 	CanRestart      bool                 `json:"canRestart"`
+	CanSend         bool                 `json:"canSend"`
+	MessageID       string               `json:"messageId,omitempty"`
+	Delivery        string               `json:"delivery,omitempty"`
 	Message         string               `json:"message,omitempty"`
 	SendContext     *SendContextMetadata `json:"sendContext,omitempty"`
 	Native          *NativeMetadata      `json:"native,omitempty"`
@@ -288,9 +298,15 @@ func ValidateInstanceID(instanceID string) error {
 
 // CreateRequest creates a versioned status or lifecycle request with a fresh UUID.
 func CreateRequest(instanceID, action string) (Request, error) {
-	if err := ValidateInstanceID(instanceID); err != nil {
-		return Request{}, err
-	}
+	return createRequest(instanceID, action, nil)
+}
+
+// CreateMessageRequest creates an addressed peer-message request with a fresh UUID.
+func CreateMessageRequest(instanceID, text, delivery string) (Request, error) {
+	return createRequest(instanceID, "send", &Message{Text: text, Delivery: delivery})
+}
+
+func createRequest(instanceID, action string, message *Message) (Request, error) {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return Request{}, fmt.Errorf("create request identifier: %w", err)
@@ -303,6 +319,7 @@ func CreateRequest(instanceID, action string) (Request, error) {
 		InstanceID: instanceID,
 		RequestID:  requestID,
 		Action:     action,
+		Message:    message,
 	}
 	if err := ValidateRequest(request); err != nil {
 		return Request{}, err
@@ -357,8 +374,21 @@ func ValidateRequest(request Request) error {
 	if request.RequestID == "" || requestIDLength > 128 {
 		return &Error{Code: "INVALID_REQUEST", Message: "Expected a bounded nonempty request identifier."}
 	}
-	if request.Action != "status" && request.Action != "restart" && request.Action != "restart-wrapper" {
-		return &Error{Code: "UNSUPPORTED_ACTION", Message: "Only status, restart, and restart-wrapper are supported; resource-only reload is unavailable."}
+	if request.Action != "status" && request.Action != "restart" && request.Action != "restart-wrapper" && request.Action != "send" {
+		return &Error{Code: "UNSUPPORTED_ACTION", Message: "Only status, restart, restart-wrapper, and send are supported; resource-only reload is unavailable."}
+	}
+	if request.Action == "send" {
+		if request.Message == nil || strings.TrimSpace(request.Message.Text) == "" || len(request.Message.Text) > 16*1024 {
+			return &Error{Code: "INVALID_REQUEST", Message: "Send requires nonempty message text no larger than 16 KiB in UTF-8."}
+		}
+		if request.Message.Delivery != "followUp" && request.Message.Delivery != "steer" {
+			return &Error{Code: "INVALID_REQUEST", Message: "Message delivery must be followUp or steer."}
+		}
+	} else if request.Message != nil {
+		return &Error{Code: "INVALID_REQUEST", Message: "Message payload is only valid for send."}
+	}
+	if request.Action == "send" && request.NativeTarget != nil {
+		return &Error{Code: "INVALID_REQUEST", Message: "Native target is not valid for send."}
 	}
 	if request.NativeTarget != nil {
 		if request.Action != "restart-wrapper" {

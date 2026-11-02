@@ -31,6 +31,7 @@ type testTransport struct {
 	readCount   int
 	requested   []string
 	respond     func(protocol.Record, protocol.Request) (protocol.Response, error)
+	requestErr  error
 }
 
 func (transport *testTransport) ReadRecords() ([]protocol.Record, error) {
@@ -47,7 +48,11 @@ func (transport *testTransport) Request(_ context.Context, record protocol.Recor
 		transport.records = []protocol.Record{transport.replacement}
 	}
 	respond := transport.respond
+	requestErr := transport.requestErr
 	transport.mu.Unlock()
+	if requestErr != nil {
+		return protocol.Response{}, requestErr
+	}
 	return respond(record, request)
 }
 
@@ -337,5 +342,70 @@ func TestFormatRowsEscapesTerminalControls(t *testing.T) {
 	formatted := FormatRows([]Row{row})
 	if !strings.Contains(formatted, "\\u000apath\\u0085") {
 		t.Fatalf("terminal control characters were not escaped: %s", formatted)
+	}
+}
+
+func TestSendMessageUsesUniqueSnapshotAndPreservesText(t *testing.T) {
+	target := clientRecord(strings.Repeat("a", 32))
+	transport := &testTransport{
+		records: []protocol.Record{target},
+		respond: func(_ protocol.Record, request protocol.Request) (protocol.Response, error) {
+			if request.Action != "send" || request.Message == nil || request.Message.Text != "  -literal\n雪 🙂  " {
+				t.Errorf("request = %#v; message text was not preserved", request)
+			}
+			return protocol.Response{OK: true, Data: &protocol.Data{State: "submitted", MessageID: request.RequestID, Delivery: request.Message.Delivery}}, nil
+		},
+	}
+	text := "  -literal\n雪 🙂  "
+	row, err := SendMessage(transport, "a", text, "followUp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "submitted" || row.Data == nil || row.Data.MessageID == "" || row.Data.Delivery != "followUp" {
+		t.Fatalf("SendMessage() = %#v, want submitted acknowledgement", row)
+	}
+	if len(transport.requested) != 1 || row.Record == nil || row.Record.InstanceID != target.InstanceID ||
+		transport.readCount != 1 {
+		t.Fatalf("target snapshot/request mismatch: row=%#v, reads=%d, requests=%q", row, transport.readCount, transport.requested)
+	}
+}
+
+func TestSendMessageRejectsAmbiguousTargetWithoutSending(t *testing.T) {
+	transport := &testTransport{records: []protocol.Record{
+		clientRecord("a" + strings.Repeat("1", 31)),
+		clientRecord("a" + strings.Repeat("2", 31)),
+	}}
+	row, err := SendMessage(transport, "a", "hello", "followUp")
+	if err != nil || row.Status != "failed" || row.ErrorCode != "AMBIGUOUS_INSTANCE" || len(transport.requested) != 0 {
+		t.Fatalf("SendMessage() = %#v, %v; requests=%q", row, err, transport.requested)
+	}
+}
+
+func TestSendMessageReportsLostResponseAsUnknownWithoutRetry(t *testing.T) {
+	transport := &testTransport{
+		records:    []protocol.Record{clientRecord(strings.Repeat("a", 32))},
+		requestErr: errors.New("response lost"),
+	}
+	row, err := SendMessage(transport, "a", "hello", "steer")
+	if err != nil || row.Status != "unknown" || len(transport.requested) != 1 {
+		t.Fatalf("SendMessage() = %#v, %v; requests=%q", row, err, transport.requested)
+	}
+}
+
+func TestSendMessageRejectsUncorrelatedAcknowledgementWithoutRetry(t *testing.T) {
+	for _, data := range []*protocol.Data{
+		{State: "accepted"},
+		{State: "submitted", MessageID: "another-request", Delivery: "followUp"},
+	} {
+		transport := &testTransport{
+			records: []protocol.Record{clientRecord(strings.Repeat("a", 32))},
+			respond: func(_ protocol.Record, _ protocol.Request) (protocol.Response, error) {
+				return protocol.Response{OK: true, Data: data}, nil
+			},
+		}
+		row, err := SendMessage(transport, "a", "hello", "followUp")
+		if err != nil || row.Status != "unknown" || len(transport.requested) != 1 {
+			t.Fatalf("SendMessage() = %#v, %v; requests=%q", row, err, transport.requested)
+		}
 	}
 }

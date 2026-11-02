@@ -3,7 +3,7 @@ import { parseArgs } from "node:util"
 import packageJson from "../package.json" with { type: "json" }
 import { getScope } from "../protocol/index.js"
 import { createTransport } from "../linux/transport.js"
-import { listInstances, formatRows, restartInstances } from "../cli/client.js"
+import { listInstances, formatRows, restartInstances, sendMessage } from "../cli/client.js"
 import { waitForRestarts } from "../cli/restart-wait.js"
 import { listProfileNames } from "../linux/profiles.js"
 import { listSavedSessions, validateRestoreName } from "../linux/restore.js"
@@ -14,7 +14,16 @@ import { requestWrapperRestart } from "./restart.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
-const ROOT_COMPLETIONS = ["help", "version", "list", "restart", "cleanup", "restore", "take-over"]
+const ROOT_COMPLETIONS = [
+  "help",
+  "version",
+  "list",
+  "restart",
+  "send",
+  "cleanup",
+  "restore",
+  "take-over",
+]
 const LIST_COMPLETIONS = ["--profile", "--json"]
 const RESTORE_OPERATIONS = [
   "list",
@@ -32,6 +41,8 @@ const RESTORE_SAVE_COMPLETIONS = ["--instance", "--profile"]
 const RESTORE_HISTORY_COMPLETIONS = ["--json", "--profile"]
 
 const RESTART_COMPLETIONS = ["--profile", "--json", "--no-wait"]
+
+const SEND_COMPLETIONS = ["--steer", "--profile", "--json"]
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
@@ -94,6 +105,7 @@ function normalizeBooleanArguments(args) {
 }
 
 function parseOmpiArguments(args) {
+  if (/^\s*send(?:\s|$)/.test(args)) return parseSendArguments(args)
   const normalized = normalizeBooleanArguments(args)
   const parsed = parseArgs({
     args: normalized.args,
@@ -134,9 +146,9 @@ function parseOmpiArguments(args) {
       positionals.length > 2 ||
       [...present].some((name) => !["help", "version"].includes(name)) ||
       (positionals.length === 2 &&
-        !["list", "restart", "cleanup", "restore", "take-over"].includes(positionals[1]))
+        !["list", "restart", "send", "cleanup", "restore", "take-over"].includes(positionals[1]))
     ) {
-      throw new Error("Usage: /ompi help [list|restart|cleanup|restore|take-over]")
+      throw new Error("Usage: /ompi help [list|restart|send|cleanup|restore|take-over]")
     }
     return {
       action: "help",
@@ -265,7 +277,9 @@ function parseOmpiArguments(args) {
 
   const action = positionals[0]
   if (!["list", "cleanup"].includes(action) || positionals.length !== 1) {
-    throw new Error(`Usage: /${COMMAND} [help [COMMAND]|version|list|restart ID|all|cleanup]`)
+    throw new Error(
+      `Usage: /${COMMAND} [help [COMMAND]|version|list|restart ID|all|send ID MESSAGE|cleanup]`
+    )
   }
   if (
     parsed.tokens.some(
@@ -288,6 +302,38 @@ function parseOmpiArguments(args) {
     return { action: "version", values: parsed.values, present }
   }
   return { action, values: parsed.values, present }
+}
+
+function parseSendArguments(args) {
+  const tokens = args.matchAll(/\S+/g)
+  tokens.next()
+  const values = { profile: undefined, json: false, steer: false }
+  for (const token of tokens) {
+    const word = token[0]
+    if (word === "--steer") {
+      values.steer = true
+    } else if (word === "--json") {
+      values.json = true
+    } else if (word === "--profile") {
+      const profile = tokens.next().value?.[0]
+      if (!profile || profile.startsWith("-")) throw new Error("--profile requires a value.")
+      values.profile = profile
+    } else if (word.startsWith("--profile=")) {
+      values.profile = word.slice("--profile=".length)
+    } else if (word.startsWith("-")) {
+      throw new Error("Invalid options for /ompi send; use /ompi help send.")
+    } else {
+      const message = args.slice(token.index + word.length + 1)
+      if (!/^[a-f0-9]{1,32}$/.test(word) || !message.trim()) {
+        throw new Error("Send requires one ID prefix followed by a nonempty message.")
+      }
+      if (Buffer.byteLength(message, "utf8") > 16 * 1024) {
+        throw new Error("Message exceeds 16 KiB.")
+      }
+      return { action: "send", target: word, message, values }
+    }
+  }
+  throw new Error("Usage: /ompi send [--steer] [--profile NAME] [--json] ID MESSAGE")
 }
 
 function normalizeProfile(profile) {
@@ -477,6 +523,9 @@ function getArgumentCompletions(
   const tokens = argumentText.trim() ? argumentText.trim().split(/\s+/) : []
   const tokenPrefix = trailingSpace ? "" : (tokens.pop() ?? "")
   const completedTokens = trailingSpace ? tokens : [...tokens]
+  if (completedTokens[0] === "send") {
+    return getSendCompletions(completedTokens, tokenPrefix, completionIds, profileNames, cwd)
+  }
   const context = completionContext(completedTokens.slice(1))
   if (context.ended || context.options.has("help") || context.options.has("version")) return []
 
@@ -491,7 +540,9 @@ function getArgumentCompletions(
   if (command === "help") {
     if (completedTokens.length > 1) return []
     return completionValues(
-      ["list", "restart", "cleanup", "restore", "take-over"].map((value) => completionItem(value)),
+      ["list", "restart", "send", "cleanup", "restore", "take-over"].map((value) =>
+        completionItem(value)
+      ),
       completedTokens,
       tokenPrefix
     )
@@ -538,6 +589,41 @@ function getArgumentCompletions(
     candidates
       .filter((option) => !context.options.has(option.slice(2)))
       .map((value) => completionItem(value)),
+    completedTokens,
+    tokenPrefix
+  )
+}
+
+function getSendCompletions(completedTokens, tokenPrefix, completionIds, profileNames, cwd) {
+  const options = new Set()
+  let pendingProfile = false
+  for (const token of completedTokens.slice(1)) {
+    if (pendingProfile) {
+      pendingProfile = false
+    } else if (token === "--profile") {
+      options.add("--profile")
+      pendingProfile = true
+    } else if (token.startsWith("--profile=")) {
+      options.add("--profile")
+    } else if (SEND_COMPLETIONS.includes(token)) {
+      options.add(token)
+    } else {
+      return []
+    }
+  }
+  if (pendingProfile || tokenPrefix.startsWith("--profile=")) {
+    const inline = tokenPrefix.startsWith("--profile=")
+    return completionValues(
+      profileNames.map((name) => completionItem(inline ? `--profile=${name}` : name, name)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  const candidates = tokenPrefix.startsWith("-")
+    ? SEND_COMPLETIONS.filter((option) => !options.has(option))
+    : [...scopeInstanceIds(completionIds, cwd, completedTokens)]
+  return completionValues(
+    candidates.map((value) => completionItem(value)),
     completedTokens,
     tokenPrefix
   )
@@ -761,13 +847,15 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
       completionCwd = ctx.cwd
 
       try {
-        const { action, operation, name, helpTarget, target, values } = parseOmpiArguments(args)
+        const { action, operation, name, helpTarget, target, message, values } =
+          parseOmpiArguments(args)
         if (action === "help") {
           const help = {
             root: [
               "Usage: /ompi COMMAND",
               "list                 Show participating terminals",
               "restart [ID|all]      Restart this terminal, one peer, or all in scope",
+              "send ID MESSAGE      Send a peer message; --steer redirects active work",
               "restore [NAME]       Choose a recoverable conversation",
               "cleanup              Remove safely confirmed stale registrations",
               "take-over            Prepare a plain-OMP session for manual relaunch",
@@ -775,6 +863,13 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "version              Show the controller version",
             ],
             list: ["Usage: /ompi list [--profile NAME] [--json]"],
+            send: [
+              "Usage: /ompi send [--steer] [--profile NAME] [--json] ID MESSAGE",
+              "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
+              "Options precede ID. Everything after ID is literal text, not shell syntax.",
+              "Default delivery waits behind current work; --steer redirects it. Idle delivery starts a turn.",
+              "Submitted means handed to OMP's message API, not processed or completed.",
+            ],
             restart: [
               "Usage: /ompi restart [ID|all] [--profile NAME] [--json] [--no-wait]",
               "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
@@ -862,7 +957,29 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           notifyRows(ctx, rows, values.json === true)
           return
         }
-
+        if (action === "send") {
+          const rows = await sendMessage(transport, {
+            instanceId: target,
+            text: message,
+            delivery: values.steer ? "steer" : "followUp",
+          })
+          if (values.json) {
+            notifyRows(ctx, rows, true)
+          } else {
+            const [row] = rows
+            if (row.status === "submitted") {
+              ctx.ui.notify(
+                safeTerminalText(
+                  `${row.instanceId} submitted ${row.data.messageId} ${row.data.delivery}`
+                ),
+                "info"
+              )
+            } else {
+              notifyRows(ctx, rows, false)
+            }
+          }
+          return
+        }
         const rows = await restartInstances(transport, {
           all: target === "all",
           instanceId: target === "all" ? undefined : target,

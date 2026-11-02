@@ -14,7 +14,7 @@ function scopeDirectoryName(scopeId) {
   return createHash("sha256").update(scopeId).digest("hex").slice(0, 16)
 }
 
-const MAX_FRAME_BYTES = 64 * 1024
+const MAX_FRAME_BYTES = 128 * 1024
 const REQUEST_TIMEOUT_MS = 5_000
 const INSTANCE_ID = /^[a-f0-9]{32}$/
 const SEND_CONTEXT_STATE_DIRECTORY = [".omp", "agent", "editor-context-bridge.json.d"]

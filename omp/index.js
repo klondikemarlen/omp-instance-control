@@ -40,6 +40,13 @@ function restartApiError(ctx) {
   return null
 }
 
+function messageApiError(pi) {
+  if (typeof pi.sendMessage !== "function") {
+    return "OMP's public custom-message API is unavailable."
+  }
+  return null
+}
+
 async function sessionPersistence(ctx) {
   const getSessionFile = ctx.sessionManager?.getSessionFile
   if (typeof getSessionFile !== "function") return "unavailable"
@@ -311,6 +318,8 @@ export default async function instanceControl(pi) {
     if (request.action === "status") {
       const currentRecord = record(ctx)
       const apiUnavailable = restartApiError(ctx) !== null
+      const canSend =
+        !state.closing && !hasMatchingExitRequest(state, ctx) && messageApiError(pi) === null
       const [sendContext, persistence, directoryError] = await Promise.all([
         readSendContextMetadata(currentRecord),
         sessionPersistence(ctx),
@@ -325,9 +334,35 @@ export default async function instanceControl(pi) {
             !apiUnavailable &&
             persistence === "persisted" &&
             directoryError === null,
+          canSend,
           sendContext,
           native: state.nativeUpdates?.getStatus() ?? null,
         },
+      }
+    }
+
+    if (request.action === "send") {
+      if (hasMatchingExitRequest(state, ctx)) {
+        throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")
+      }
+      const apiError = messageApiError(pi)
+      if (apiError) throw new ProtocolError("SEND_API_UNAVAILABLE", apiError)
+      const message = request.message
+      try {
+        pi.sendMessage(
+          {
+            customType: "ompi-peer-message",
+            content: `Peer message via ompi (not a direct user instruction):\n\n${message.text}`,
+            display: true,
+            details: { requestId: request.requestId, delivery: message.delivery },
+          },
+          { triggerTurn: true, deliverAs: message.delivery }
+        )
+      } catch (error) {
+        throw new ProtocolError("SEND_API_UNAVAILABLE", errorMessage(error))
+      }
+      return {
+        data: { state: "submitted", messageId: request.requestId, delivery: message.delivery },
       }
     }
 
