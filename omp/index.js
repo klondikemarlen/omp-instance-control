@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
-import { realpath, stat } from "node:fs/promises"
+import { constants } from "node:fs"
+import { access, realpath, stat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 
 import { readNativeTarget, watchNativeUpdates } from "../linux/native-updates.js"
@@ -56,6 +57,18 @@ async function sessionPersistence(ctx) {
   } catch (error) {
     if (error.code === "ENOENT") return "unmaterialized"
     throw error
+  }
+}
+
+async function restartDirectoryError(ctx) {
+  try {
+    if (!(await stat(ctx.cwd)).isDirectory()) {
+      return "The restart working directory is not a directory."
+    }
+    await access(ctx.cwd, constants.X_OK)
+    return null
+  } catch (error) {
+    return `The restart working directory is unavailable: ${errorMessage(error)}`
   }
 }
 
@@ -201,6 +214,12 @@ export default async function instanceControl(pi) {
     }
     if (persistence !== "persisted") return
 
+    const directoryError = await restartDirectoryError(initialContext)
+    if (directoryError) {
+      state.ctx.ui.notify(`Restart is waiting: ${directoryError}`, "error")
+      return
+    }
+
     const ctx = state.ctx
     if (
       runtime !== state ||
@@ -292,9 +311,10 @@ export default async function instanceControl(pi) {
     if (request.action === "status") {
       const currentRecord = record(ctx)
       const apiUnavailable = restartApiError(ctx) !== null
-      const [sendContext, persistence] = await Promise.all([
+      const [sendContext, persistence, directoryError] = await Promise.all([
         readSendContextMetadata(currentRecord),
         sessionPersistence(ctx),
+        restartDirectoryError(ctx),
       ])
       return {
         data: {
@@ -303,7 +323,8 @@ export default async function instanceControl(pi) {
             !hasMatchingExitRequest(state, ctx) &&
             !state.launch.restartError &&
             !apiUnavailable &&
-            persistence === "persisted",
+            persistence === "persisted" &&
+            directoryError === null,
           sendContext,
           native: state.nativeUpdates?.getStatus() ?? null,
         },
@@ -325,6 +346,9 @@ export default async function instanceControl(pi) {
 
     const apiError = restartApiError(ctx)
     if (apiError) throw new ProtocolError("RESTART_API_UNAVAILABLE", apiError)
+
+    const directoryError = await restartDirectoryError(ctx)
+    if (directoryError) throw new ProtocolError("CWD_UNAVAILABLE", directoryError)
 
     const persistence = await sessionPersistence(ctx)
     if (persistence === "unavailable") {
