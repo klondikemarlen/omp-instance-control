@@ -34,9 +34,10 @@ type wrapperExecState struct {
 }
 
 type resumeState struct {
-	cwd         string
-	sessionFile string
-	restart     restartRecord
+	cwd          string
+	sessionFile  string
+	restart      restartRecord
+	recoveryFile string
 }
 
 func currentWrapperExecutable() (string, error) {
@@ -161,6 +162,9 @@ func resumeWrapper(args []string, extensionPath, nativeVersion string) (int, err
 	}
 	state, lock, err := consumeWrapperExecState()
 	if err != nil {
+		if state.Restart.OperationID != "" {
+			err = restartRecoveryFailure(existingRestartRecovery(state.Scope, state.Restart.OperationID), err)
+		}
 		return 1, err
 	}
 	if lock != nil {
@@ -168,7 +172,8 @@ func resumeWrapper(args []string, extensionPath, nativeVersion string) (int, err
 	}
 	return launchWithResume(
 		state.Args, extensionPath, nativeVersion, state.RestoreID, lock,
-		&resumeState{cwd: state.CWD, sessionFile: state.SessionFile, restart: state.Restart},
+		&resumeState{cwd: state.CWD, sessionFile: state.SessionFile, restart: state.Restart,
+			recoveryFile: existingRestartRecovery(state.Scope, state.Restart.OperationID)},
 	)
 }
 

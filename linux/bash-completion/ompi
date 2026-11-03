@@ -30,14 +30,18 @@ _ompi_control_completion()
     _comp_initialize -n = || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore cleanup help version' -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover cleanup help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore cleanup version' -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover cleanup version' -- "$cur")
         fi
+        return 0
+    fi
+    if [[ $action == recover ]]; then
+        (( cword == 3 )) && _comp_compgen_filedir
         return 0
     fi
     if [[ $action == send || $action == steer ]]; then
