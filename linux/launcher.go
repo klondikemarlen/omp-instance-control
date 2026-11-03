@@ -69,7 +69,24 @@ func launch(args []string, extensionPath, nativeVersion, restoreID string, resto
 	return launchWithResume(args, extensionPath, nativeVersion, restoreID, restoreLock, nil)
 }
 
-func launchWithResume(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState) (int, error) {
+func launchWithResume(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState) (code int, launchError error) {
+	recoveryFile := ""
+	if resume != nil {
+		recoveryFile = resume.recoveryFile
+	}
+	defer func() {
+		if recoveryFile == "" {
+			return
+		}
+		if code != 0 || launchError != nil {
+			if launchError == nil {
+				launchError = fmt.Errorf("replacement OMP exited with status %d", code)
+			}
+			launchError = restartRecoveryFailure(recoveryFile, launchError)
+		} else if err := os.Remove(recoveryFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			code, launchError = 1, fmt.Errorf("remove completed restart recovery record: %w", err)
+		}
+	}()
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		return runPassthrough(args)
 	}
@@ -253,10 +270,22 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 		if err := validateHandoff(handoff); err != nil {
 			return 1, err
 		}
-		if err := os.Remove(handoffPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := validateSessionAndCWD(handoff.SessionFile, handoff.CWD); err != nil {
 			return 1, err
 		}
-		if err := validateSessionAndCWD(handoff.SessionFile, handoff.CWD); err != nil {
+		nextRecoveryFile, recoveryError := preserveRestartRecovery(scope, restoreID, restartArgs, handoff)
+		if recoveryFile != "" && recoveryFile != nextRecoveryFile {
+			if err := os.Remove(recoveryFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return 1, fmt.Errorf("retire preceding restart recovery record: %w", err)
+			}
+		}
+		recoveryFile = nextRecoveryFile
+		if recoveryError != nil {
+			fmt.Fprintf(os.Stderr, "Exact restart recovery unavailable: %v\n", recoveryError)
+		} else {
+			fmt.Fprintf(os.Stderr, "If replacement startup fails, recover explicitly with:\n  ompi control recover %s\n", shellQuote(recoveryFile))
+		}
+		if err := os.Remove(handoffPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return 1, err
 		}
 		cwd = handoff.CWD

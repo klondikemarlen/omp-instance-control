@@ -24,6 +24,7 @@ const controlHelp = `Usage:
   ompi control steer [--profile NAME] [--json] ID MESSAGE
   ompi control cleanup [--profile NAME] [--json]
   ompi control restore ...
+  ompi control recover FILE
 
 Restart IDs may be unique lowercase hexadecimal prefixes.
 Every target replaces its native ompi wrapper and OMP using the installed code.
@@ -113,6 +114,8 @@ func runControl(args []string) (int, error) {
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		case "restore":
 			fmt.Print(restoreHelp)
+		case "recover":
+			fmt.Print(recoverHelp)
 		case "version":
 			fmt.Println("Usage: ompi control version")
 		default:
@@ -129,6 +132,9 @@ func runControl(args []string) (int, error) {
 	}
 	if args[0] == "restore" {
 		return runRestore(args[1:])
+	}
+	if args[0] == "recover" {
+		return runRecover(args[1:])
 	}
 	return runControlAction(args)
 }
@@ -185,7 +191,7 @@ func splitLeadingSendOptions(args []string) ([]string, []string) {
 func runControlAction(args []string) (int, error) {
 	action := args[0]
 	if action != "list" && action != "restart" && action != "send" && action != "steer" && action != "cleanup" {
-		return 0, usageError("use 'ompi control list', 'ompi control restart ID|all', 'ompi control send ID MESSAGE', 'ompi control steer ID MESSAGE', 'ompi control cleanup', or 'ompi control restore ...'")
+		return 0, usageError("use 'ompi control help' for available commands")
 	}
 
 	var optionArgs, positionals []string
