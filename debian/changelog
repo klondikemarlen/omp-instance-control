@@ -1,3 +1,11 @@
+omp-instance-control (1.0.0~ppa1) resolute; urgency=medium
+
+  * Preserve exact failed-restart recovery outside ephemeral launcher state.
+  * Validate explicit manual recovery without retargeting conversations.
+  * Establish the bounded Linux version 1 command contract.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 03 Nov 2026 13:56:59 -0700
+
 omp-instance-control (0.21.0~ppa1) resolute; urgency=medium
 
   * Separate queued messages and steering into send and steer commands.
