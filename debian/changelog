@@ -1,3 +1,10 @@
+omp-instance-control (1.0.1~ppa1) resolute; urgency=medium
+
+  * Retain preceding recovery evidence when the next handoff cannot be saved.
+  * Stop chained relaunch without discarding the original recovery record.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 03 Nov 2026 14:24:20 -0700
+
 omp-instance-control (1.0.0~ppa1) resolute; urgency=medium
 
   * Preserve exact failed-restart recovery outside ephemeral launcher state.

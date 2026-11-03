@@ -213,3 +213,32 @@ func TestConsumedOrChangedRecoveryRecordCannotAcquireLaunchAuthority(t *testing.
 		})
 	}
 }
+
+func TestNextRecoveryCaptureFailureRetainsThePrecedingRecordAndStopsRelaunch(t *testing.T) {
+	file, record := failedRestartFixture(t)
+	root := t.TempDir()
+	logPath := filepath.Join(root, "invocations.jsonl")
+	prepareFakeOMP(t, root, logPath, record.Session.SessionFile, record.Session.CWD, "valid")
+	t.Setenv("PI_CONFIG_DIR", record.Session.Scope.ConfigRoot)
+	t.Setenv("PI_CODING_AGENT_DIR", record.Session.Scope.AgentDir)
+
+	// A directory at the next record path forces atomic record replacement to fail.
+	nextFile := failedRestartPath(record.Session.Scope, "operation-123")
+	if err := os.Mkdir(nextFile, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	code, launchError := launchWithResume(record.Session.ResumeArgs, filepath.Join(root, "adapter.js"), "test", record.Session.RestoreID, nil,
+		&resumeState{cwd: record.Session.CWD, sessionFile: record.Session.SessionFile, restart: record.Restart, recoveryFile: file})
+
+	preserved, err := readFailedRestart(file)
+	if err != nil || !reflect.DeepEqual(preserved.Session, record.Session) || preserved.Restart != record.Restart {
+		t.Fatalf("next capture failure discarded the preceding recovery record: record=%#v err=%v", preserved, err)
+	}
+	if code != 1 || launchError == nil || !strings.Contains(launchError.Error(), "preserve next restart recovery record") {
+		t.Fatalf("next capture failure did not explicitly stop relaunch: code=%d err=%v", code, launchError)
+	}
+	if calls := readInvocations(t, logPath); len(calls) != 1 {
+		t.Fatalf("next capture failure launched a replacement: %#v", calls)
+	}
+}

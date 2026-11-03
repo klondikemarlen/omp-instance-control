@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1](https://github.com/klondikemarlen/omp-instance-control/pull/86) - 2026-11-03
+
+### Fixed
+
+- Retain the preceding exact recovery record and stop a chained restart if the next handoff cannot be preserved.
+
 ## [1.0.0](https://github.com/klondikemarlen/omp-instance-control/pull/85) - 2026-11-03
 
 ### Added
