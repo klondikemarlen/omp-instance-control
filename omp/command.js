@@ -141,7 +141,7 @@ function parseOmpiArguments(args) {
     if (parsed.values.help) return { action: "help", values: parsed.values, present }
     if (parsed.values.version) return { action: "version", values: parsed.values, present }
     if (present.size === 0) return { action: "help", values: parsed.values, present }
-    throw new Error(`Usage: /${COMMAND} [help [COMMAND]|version|list|restart ID|all|cleanup]`)
+    throw new Error(`Usage: /${COMMAND} COMMAND; use /${COMMAND} help.`)
   }
 
   const positionTokens = parsed.tokens.filter((token) => token.kind === "positional")
@@ -284,9 +284,7 @@ function parseOmpiArguments(args) {
 
   const action = positionals[0]
   if (!["list", "cleanup"].includes(action) || positionals.length !== 1) {
-    throw new Error(
-      `Usage: /${COMMAND} [help [COMMAND]|version|list|restart ID|all|send ID MESSAGE|cleanup]`
-    )
+    throw new Error(`Usage: /${COMMAND} COMMAND; use /${COMMAND} help.`)
   }
   if (
     parsed.tokens.some(

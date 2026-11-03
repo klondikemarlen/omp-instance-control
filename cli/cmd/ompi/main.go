@@ -71,7 +71,7 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 	if code == 0 && len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nSaved sessions: ompi control restore")
+		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nMessages: ompi control send|steer ID MESSAGE\nSaved sessions: ompi control restore")
 	}
 	return code, nil
 }
@@ -188,9 +188,11 @@ func runControlAction(args []string) (int, error) {
 		return 0, usageError("use 'ompi control list', 'ompi control restart ID|all', 'ompi control send ID MESSAGE', 'ompi control steer ID MESSAGE', 'ompi control cleanup', or 'ompi control restore ...'")
 	}
 
-	optionArgs, positionals := splitControlArguments(args[1:])
+	var optionArgs, positionals []string
 	if action == "send" || action == "steer" {
 		optionArgs, positionals = splitLeadingSendOptions(args[1:])
+	} else {
+		optionArgs, positionals = splitControlArguments(args[1:])
 	}
 	flags := flag.NewFlagSet("ompi control "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
