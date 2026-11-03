@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Use `ompi control send ID MESSAGE` to queue a message and `ompi control steer ID MESSAGE` to redirect active work, with matching `/ompi` verbs and relevant completions. The `--steer` option is removed; delivery and acknowledgement semantics are unchanged.
+
 ## 0.20.0 - 2026-11-02
 
 ### Added
