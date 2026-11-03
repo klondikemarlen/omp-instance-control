@@ -14,6 +14,8 @@ Restart completion is a live replacement whose `lastRestart` matches the accepte
 
 `cmd/ompi/main.go` composes the native command. Bare `ompi` launches OMP; standard commands pass through, while the reserved `ompi control` namespace owns controller actions and metadata. `/ompi` exposes those actions directly rather than mirroring an unnecessary external namespace. See [usage](../README.md#usage) and [shared concepts](../CONCEPTS.md).
 
+`send ID MESSAGE` selects follow-up delivery; `steer ID MESSAGE` selects steering. Both parse leading profile/output options and preserve the single literal message argument after the target. They share the existing client and wire `send` action; command vocabulary does not add another transport or scheduling owner.
+
 Recovery adds an explicit shell menu for automatically captured managed slots, optional immutable names, checkpoint history, and reviewed imports/exports. The CLI confirms the selected exact session; persistent validation, process identity, and per-slot locking remain in `linux/`. Options and completion mirror the host command without automatic shell startup or terminal launching. Legacy data remains review/export-only because it has no verified managed ownership.
 
 `cmd/ompi/cleanup.go` renders explicit Linux cleanup outcomes with full JSON identities/reasons and nonzero failure exits. The native and OMP commands invoke their platform transport's cleanup operation; shared listing and restart clients remain read-only apart from explicit restart dispatch.

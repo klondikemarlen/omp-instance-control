@@ -135,13 +135,13 @@ Use `ompi control list` (or `/ompi list`) to identify the receiving terminal, th
 
 ```bash
 ompi control send ID 'Please investigate the API failure in your project.'
-ompi control send --steer ID 'Pause that approach; check the latest user correction first.'
+ompi control steer ID 'Pause that approach; check the latest user correction first.'
 ompi control send --json --profile work ID 'Please report the current blocker.'
 ```
 
-Inside OMP, use `/ompi send ID message` or `/ompi send --steer ID message`. Options precede the target. Bash requires one quoted message argument; the slash command takes everything after the target as literal text, without shell quote interpretation. Unicode and newlines are preserved, up to 16 KiB of UTF-8 text. Completion stops at the message body rather than suggesting more flags.
+Inside OMP, use `/ompi send ID message` or `/ompi steer ID message`. Options precede the target. Bash requires one quoted message argument; the slash command takes everything after the target as literal text, without shell quote interpretation. Unicode and newlines are preserved, up to 16 KiB of UTF-8 text. Completion stops at the message body rather than suggesting more flags.
 
-Default delivery joins OMP's follow-up queue behind current work; `--steer` selects steering at a supported agent boundary. Either starts a model turn when the receiver is idle and can therefore incur the receiver's normal model cost. Messages are visibly marked as agent-attributed peer context, not new user instructions or permission to cross repository boundaries. The channel does not authenticate an originating agent identity; same-user local programs can send requests.
+`send` joins OMP's follow-up queue behind current work; `steer` redirects work at a supported agent boundary. These are separate verbs, not `send --steer`. Either starts a model turn when the receiver is idle and can therefore incur the receiver's normal model cost. Messages are visibly marked as agent-attributed peer context, not new user instructions or permission to cross repository boundaries. The channel does not authenticate an originating agent identity; same-user local programs can send requests.
 
 `submitted` acknowledges handoff to OMP's public message API, not durable queueing, processing, a reply, or completion. JSON includes the selected `instanceId`, `data.messageId`, and `data.delivery`. A timeout or lost acknowledgement is unknown: inspect the recipient before explicitly trying again, because an automatic resend could duplicate work. Missing, ambiguous, stale, closing, or older unsupported targets fail without falling back to another terminal. There is no `all` message target. Profile/config-root boundaries remain the same as discovery and require explicit cross-profile selection.
 

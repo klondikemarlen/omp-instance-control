@@ -1,3 +1,10 @@
+omp-instance-control (0.21.0~ppa1) resolute; urgency=medium
+
+  * Separate queued messages and steering into send and steer commands.
+  * Remove the steering option and keep message bodies literal.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Tue, 03 Nov 2026 00:18:39 -0700
+
 omp-instance-control (0.20.0~ppa1) resolute; urgency=medium
 
   * Send explicitly addressed peer messages with follow-up or steering delivery.

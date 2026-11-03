@@ -30,17 +30,17 @@ _ompi_control_completion()
     _comp_initialize -n = || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        mapfile -t COMPREPLY < <(compgen -W 'list restart send restore cleanup help version' -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore cleanup help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            mapfile -t COMPREPLY < <(compgen -W 'list restart send restore cleanup version' -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore cleanup version' -- "$cur")
         fi
         return 0
     fi
-    if [[ $action == send ]]; then
+    if [[ $action == send || $action == steer ]]; then
         local index token option id state _remainder
         local -a profile_args=() candidates=()
         local -A consumed=()
@@ -57,13 +57,13 @@ _ompi_control_completion()
                     profile_args=("$token")
                     consumed[--profile]=1
                     ;;
-                --steer|--json) consumed[$token]=1 ;;
+                --json) consumed[$token]=1 ;;
                 *) return 0 ;;
             esac
         done
         [[ $cur == --profile=* ]] && return 0
         if [[ $cur == -* ]]; then
-            for option in --steer --profile --json; do
+            for option in --profile --json; do
                 [[ -n ${consumed[$option]} ]] || candidates+=("$option")
             done
         else
