@@ -273,9 +273,15 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 		if err := validateSessionAndCWD(handoff.SessionFile, handoff.CWD); err != nil {
 			return 1, err
 		}
-		recoveryFile, err = preserveRestartRecovery(scope, restoreID, restartArgs, handoff)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Exact restart recovery unavailable: %v\n", err)
+		nextRecoveryFile, recoveryError := preserveRestartRecovery(scope, restoreID, restartArgs, handoff)
+		if recoveryFile != "" && recoveryFile != nextRecoveryFile {
+			if err := os.Remove(recoveryFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return 1, fmt.Errorf("retire preceding restart recovery record: %w", err)
+			}
+		}
+		recoveryFile = nextRecoveryFile
+		if recoveryError != nil {
+			fmt.Fprintf(os.Stderr, "Exact restart recovery unavailable: %v\n", recoveryError)
 		} else {
 			fmt.Fprintf(os.Stderr, "If replacement startup fails, recover explicitly with:\n  ompi control recover %s\n", shellQuote(recoveryFile))
 		}

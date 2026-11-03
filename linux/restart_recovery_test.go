@@ -161,3 +161,55 @@ func TestReplacementStartupFailurePreservesOriginalErrorAndExactRecovery(t *test
 		t.Fatalf("startup failure discarded exact recovery evidence: record=%#v err=%v", preserved, err)
 	}
 }
+
+func TestFailedRecoveryAttemptKeepsTheOriginalLaunchFailure(t *testing.T) {
+	file, record := failedRestartFixture(t)
+	original := errors.New("native execution denied")
+	first := restartRecoveryFailure(file, original)
+	if !errors.Is(first, original) {
+		t.Fatalf("original execution error lost its cause: %v", first)
+	}
+	attempt := errors.New("replacement OMP exited with status 73")
+	second := restartRecoveryFailure(file, attempt)
+	if !errors.Is(second, attempt) {
+		t.Fatalf("current recovery error lost its cause: %v", second)
+	}
+	preserved, err := readFailedRestart(file)
+	if err != nil || preserved.Failure != original.Error() || preserved.Restart != record.Restart {
+		t.Fatalf("a failed recovery replaced the original failure: record=%#v err=%v", preserved, err)
+	}
+}
+
+func TestConsumedOrChangedRecoveryRecordCannotAcquireLaunchAuthority(t *testing.T) {
+	for _, condition := range []string{"consumed", "changed"} {
+		t.Run(condition, func(t *testing.T) {
+			file, expected := failedRestartFixture(t)
+			directories, err := ensureRestoreDirectories(expected.Session.Scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if condition == "consumed" {
+				err = os.Remove(file)
+			} else {
+				changed := expected
+				changed.Session.ResumeArgs = append([]string{"--no-skills"}, expected.Session.ResumeArgs...)
+				err = WritePrivateJSON(file, changed)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			lock, err := lockFailedRestartRecord(file, expected, directories)
+			if err == nil || lock != nil {
+				if lock != nil {
+					lock.Close()
+				}
+				t.Fatalf("stale record acquired launch authority: condition=%s err=%v", condition, err)
+			}
+			freshLock, err := lockRestoreSnapshot(directories, expected.Session.RestoreID)
+			if err != nil {
+				t.Fatalf("record refusal leaked its slot lock: %v", err)
+			}
+			freshLock.Close()
+		})
+	}
+}

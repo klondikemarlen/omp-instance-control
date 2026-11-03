@@ -162,11 +162,36 @@ func restartRecoveryFailure(file string, failure error) error {
 	if err != nil {
 		return fmt.Errorf("%w; restart recovery record unavailable: %v", failure, err)
 	}
-	record.Failure = failure.Error()
-	if err := WritePrivateJSON(file, record); err != nil {
-		return fmt.Errorf("%w; cannot preserve restart failure: %v; recovery record: %q", failure, err, file)
+	if record.Failure == "" {
+		record.Failure = failure.Error()
+		if err := WritePrivateJSON(file, record); err != nil {
+			return fmt.Errorf("%w; cannot preserve restart failure: %v; recovery record: %q", failure, err, file)
+		}
 	}
 	return fmt.Errorf("%w\nRestart operation %q for instance %s failed.\nRepair the reported prerequisite, then recover explicitly with:\n  ompi control recover %s", failure, record.Restart.OperationID, record.Restart.PreviousInstanceID, shellQuote(file))
+}
+
+// A record read before locking may have been consumed by another foreground
+// recovery. Re-read under the slot lock before granting launch authority.
+func lockFailedRestartRecord(file string, expected failedRestartRecord, directories restoreDirectories) (*os.File, error) {
+	lock, err := lockRestoreSnapshot(directories, expected.Session.RestoreID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := readFailedRestart(file)
+	if err != nil {
+		lock.Close()
+		return nil, err
+	}
+	if current.Version != expected.Version || current.Restart != expected.Restart ||
+		current.SessionIdentity != expected.SessionIdentity || current.CWDIdentity != expected.CWDIdentity ||
+		current.Failure != expected.Failure || current.Session.Owner != expected.Session.Owner ||
+		current.Session.AgentOwner != expected.Session.AgentOwner || current.Session.UpdatedAt != expected.Session.UpdatedAt ||
+		!sameSelectedRestoreSession(expected.Session, current.Session, expected.Session.Scope, expected.Session.RestoreID) {
+		lock.Close()
+		return nil, errors.New("restart recovery record changed before acquiring its slot lock")
+	}
+	return lock, nil
 }
 
 // RecoverFailedRestart resumes only the exact captured failed handoff. Reading
@@ -202,7 +227,7 @@ func recoverFailedRestart(file string, hasTerminal bool, launchSession func(fail
 	if err != nil {
 		return 1, err
 	}
-	lock, err := lockRestoreSnapshot(directories, session.RestoreID)
+	lock, err := lockFailedRestartRecord(file, record, directories)
 	if err != nil {
 		return 1, err
 	}
