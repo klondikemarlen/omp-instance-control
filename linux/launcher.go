@@ -274,6 +274,9 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			return 1, err
 		}
 		nextRecoveryFile, recoveryError := preserveRestartRecovery(scope, restoreID, restartArgs, handoff)
+		if recoveryError != nil && recoveryFile != "" {
+			return 1, fmt.Errorf("preserve next restart recovery record: %w", recoveryError)
+		}
 		if recoveryFile != "" && recoveryFile != nextRecoveryFile {
 			if err := os.Remove(recoveryFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return 1, fmt.Errorf("retire preceding restart recovery record: %w", err)
