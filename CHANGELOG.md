@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.21.0](https://github.com/klondikemarlen/omp-instance-control/pull/84) - 2026-11-03
 
 ### Changed
 
