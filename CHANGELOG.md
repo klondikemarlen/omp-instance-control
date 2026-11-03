@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Recover an exact failed restart with `ompi control recover FILE`. Private recovery records survive native replacement and OMP startup failures; manual recovery preserves the original conversation, directory, launch arguments, profile/configuration scope, and recovery slot, and refuses changed or unavailable targets.
+
+### Changed
+
+- Establish the 1.0 Linux command contract and document its settlement, messaging, manual-recovery, and host-dependency boundaries. No automatic retries, fallback executables, or model-generated checkpoint prompts are introduced.
+
 ## [0.21.0](https://github.com/klondikemarlen/omp-instance-control/pull/84) - 2026-11-03
 
 ### Changed

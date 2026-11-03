@@ -62,6 +62,22 @@ Both command surfaces expose selection, optional naming, checkpoint history, imp
 
 Legacy command snapshots are parsed as bounded data, never evaluated. Their transcript IDs resolve only within the selected scope's session tree. Content/path-derived checkpoint identities make import idempotent; originals remain untouched. Because the old helper did not record verified managed ownership, imports remain review/export-only. Managed exports preserve slot locking through `ompi control restore slot`; legacy exports clearly identify manual, unowned resumes. Automatic discovery never scans arbitrary OMP processes.
 
+## Failed Restart Recovery
+
+A settled restart can still fail after OMP releases the terminal: the accepted native image may become unavailable, or the replacement OMP may fail to start. Admission checks reduce this risk but cannot make filesystem changes or process startup atomic. Acceptance and process creation are not proof that a replacement session is ready.
+
+Before replacing the native wrapper, the launcher preserves a private exact-handoff record under the original agent directory's `instance-control/restore/failed-restarts/`, outside ephemeral launcher state. The record captures the accepted conversation, working directory, normalized launch arguments, profile/configuration scope, recovery slot, restart correlation, and transcript/directory filesystem identities. It contains no launcher tokens or credentials. Observed launch errors are retained with that record; the recovery command is printed before replacement so it also remains available if the new executable cannot report its own startup error.
+
+After failure, repair the reported prerequisite and explicitly run the printed `ompi control recover /absolute/path/to/record.json` command in the affected shell. This shell-only command starts the recovered OMP in that terminal; it is not an in-OMP command or an automatic retry. It uses the record's original scope rather than the invoking shell's selected profile. It revalidates the transcript header and filesystem identity, directory identity and access, normalized arguments, current slot metadata when present, original process identities, and the existing per-slot lock. Missing, replaced, changed, live, or uncertain targets refuse launch without discarding the record. It never follows a slot to another conversation, uses an older executable, or submits preparation/continuation messages.
+
+Records survive launcher-directory cleanup and failed recovery attempts. A normal zero-status exit of the resumed foreground session removes its record; merely starting a process does not. While that session runs, its inherited slot lock prevents concurrent recovery. No discovery, completion, installation, or background process replays recovery records. If exact capture is unavailable, the launcher reports that limitation rather than promising a recovery command. Transcript contents remain in the original OMP file; records are not transcript backups and cannot recover a deleted or corrupted conversation.
+
+## Version 1 Contract
+
+The 1.0 line establishes the Linux native-wrapper and public-adapter command contract: ordinary OMP passthrough; explicit scoped discovery, settled restart/resume, addressed `send`/`steer`, and manual recovery. Public commands and wire/storage schemas evolve deliberately; unsupported platforms and private host APIs do not become supported merely because the major version changes.
+
+Version 1 does not promise instantaneous restart, survival of arbitrary in-memory work, authenticated agent identity, durable message delivery, automatic relaunch recovery, or freedom from host/filesystem failures. A live correlated replacement is still required for restart completion. The wider historical restart incident and retired checkpoint instructions remain tracked in [#79](https://github.com/klondikemarlen/omp-instance-control/issues/79); a scoped recovery release does not attribute those earlier closures.
+
 ## Scope and Trust
 
 Scope includes OMP config root, normalized profile, and effective agent directory. Default-profile `PI_CODING_AGENT_DIR` overrides remain distinct; named profiles ignore that override, as OMP does. The Linux transport chooses its own private runtime path. Shared client code receives a transport object and never constructs Linux socket paths.
