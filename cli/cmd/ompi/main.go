@@ -20,7 +20,8 @@ const controlHelp = `Usage:
   ompi control [help [COMMAND] | version]
   ompi control list [--profile NAME] [--json]
   ompi control restart ID|all [--profile NAME] [--json] [--no-wait]
-  ompi control send [--steer] [--profile NAME] [--json] ID MESSAGE
+  ompi control send [--profile NAME] [--json] ID MESSAGE
+  ompi control steer [--profile NAME] [--json] ID MESSAGE
   ompi control cleanup [--profile NAME] [--json]
   ompi control restore ...
 
@@ -30,8 +31,8 @@ Restarts inject zero model messages. OMP settles active work and typed
 instructions queued while busy before the session reopens for input; explicit
 exit suppresses relaunch.
 
-Send options precede ID; quote MESSAGE as one literal shell argument.
-Default delivery is follow-up; --steer requests steering. A submitted
+Send and steer options precede ID; quote MESSAGE as one literal shell argument.
+Send queues a follow-up; steer directs the active turn. A submitted
 acknowledgement means handed to the host API, not processed or completed.
 
 Restart argv replays recognized OMP options but not startup prompts. Unknown
@@ -101,8 +102,13 @@ func runControl(args []string) (int, error) {
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
 			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.\n  Restarts inject zero model messages. OMP settles active work and typed instructions queued while busy before the session reopens for input.\n  Explicit exit suppresses relaunch.")
-		case "send":
-			fmt.Println("Usage: ompi control send [--steer] [--profile NAME] [--json] ID MESSAGE\n  Options precede ID. Quote MESSAGE as one literal shell argument.\n  Default delivery is follow-up; --steer requests steering. Idle delivery starts a turn.\n  Submitted means handed to the host API, not processed or completed.")
+		case "send", "steer":
+			fmt.Printf("Usage: ompi control %s [--profile NAME] [--json] ID MESSAGE\n  ID may be a unique lowercase hexadecimal prefix.\n  Options precede ID. Quote MESSAGE as one literal shell argument. Idle delivery starts a turn.\n", args[1])
+			if args[1] == "send" {
+				fmt.Println("  Queues a follow-up. Submitted means handed to the host API, not processed or completed.")
+			} else {
+				fmt.Println("  Steers the active turn. Submitted means handed to the host API, not processed or completed.")
+			}
 		case "cleanup":
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		case "restore":
@@ -163,7 +169,7 @@ func splitLeadingSendOptions(args []string) ([]string, []string) {
 				return args[:index+1], nil
 			}
 			index += 2
-		case "--json", "--steer", "--help", "-h", "--version":
+		case "--json", "--help", "-h", "--version":
 			index++
 		default:
 			if strings.HasPrefix(argument, "-") {
@@ -178,22 +184,18 @@ func splitLeadingSendOptions(args []string) ([]string, []string) {
 
 func runControlAction(args []string) (int, error) {
 	action := args[0]
-	if action != "list" && action != "restart" && action != "send" && action != "cleanup" {
-		return 0, usageError("use 'ompi control list', 'ompi control restart ID|all', 'ompi control send ID MESSAGE', 'ompi control cleanup', or 'ompi control restore ...'")
+	if action != "list" && action != "restart" && action != "send" && action != "steer" && action != "cleanup" {
+		return 0, usageError("use 'ompi control list', 'ompi control restart ID|all', 'ompi control send ID MESSAGE', 'ompi control steer ID MESSAGE', 'ompi control cleanup', or 'ompi control restore ...'")
 	}
 
 	optionArgs, positionals := splitControlArguments(args[1:])
-	if action == "send" {
+	if action == "send" || action == "steer" {
 		optionArgs, positionals = splitLeadingSendOptions(args[1:])
 	}
 	flags := flag.NewFlagSet("ompi control "+action, flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	profile := flags.String("profile", "", "OMP profile")
 	jsonOutput := flags.Bool("json", false, "JSON output")
-	steer := false
-	if action == "send" {
-		flags.BoolVar(&steer, "steer", false, "steer the target session")
-	}
 	var noWait bool
 	if action == "restart" {
 		flags.BoolVar(&noWait, "no-wait", false, "return after restart requests are accepted")
@@ -213,8 +215,13 @@ func runControlAction(args []string) (int, error) {
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
 			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.\n  Restarts inject zero model messages. OMP settles active work and typed instructions queued while busy before the session reopens for input.\n  Explicit exit suppresses relaunch.")
-		case "send":
-			fmt.Println("Usage: ompi control send [--steer] [--profile NAME] [--json] ID MESSAGE\n  ID may be a unique lowercase hexadecimal prefix. MESSAGE is literal text.\n  Default delivery is follow-up; --steer requests steering.")
+		case "send", "steer":
+			fmt.Printf("Usage: ompi control %s [--profile NAME] [--json] ID MESSAGE\n  ID may be a unique lowercase hexadecimal prefix. MESSAGE is literal text.\n", action)
+			if action == "send" {
+				fmt.Println("  Queues a follow-up.")
+			} else {
+				fmt.Println("  Steers the active turn.")
+			}
 		case "cleanup":
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		}
@@ -234,8 +241,8 @@ func runControlAction(args []string) (int, error) {
 		if err != nil {
 			return 0, usageError(err.Error())
 		}
-	} else if action == "send" {
-		instanceID, message, err = parseSendArguments(remaining)
+	} else if action == "send" || action == "steer" {
+		instanceID, message, err = parseSendArguments(remaining, action)
 		if err != nil {
 			return 0, usageError(err.Error())
 		}
@@ -264,9 +271,9 @@ func runControlAction(args []string) (int, error) {
 		}
 		return printRows(rows, *jsonOutput), nil
 	}
-	if action == "send" {
+	if action == "send" || action == "steer" {
 		delivery := "followUp"
-		if steer {
+		if action == "steer" {
 			delivery = "steer"
 		}
 		row, err := cli.SendMessage(transport, instanceID, message, delivery)
@@ -292,14 +299,14 @@ func parseRestartTarget(positionals []string) (bool, string, error) {
 	return false, instanceID, nil
 }
 
-func parseSendArguments(positionals []string) (string, string, error) {
+func parseSendArguments(positionals []string, action string) (string, string, error) {
 	if len(positionals) != 2 {
-		return "", "", errors.New("send requires exactly one target and one MESSAGE argument")
+		return "", "", errors.New(action + " requires exactly one target and one MESSAGE argument")
 	}
 	instanceID, message := positionals[0], positionals[1]
 	if instanceID == "all" || len(instanceID) == 0 || len(instanceID) > 32 ||
 		strings.Trim(instanceID, "0123456789abcdef") != "" {
-		return "", "", errors.New("invalid send ID: use 1-32 lowercase hexadecimal characters")
+		return "", "", errors.New("invalid " + action + " ID: use 1-32 lowercase hexadecimal characters")
 	}
 	if strings.TrimSpace(message) == "" {
 		return "", "", errors.New("message must not be empty")

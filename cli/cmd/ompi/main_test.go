@@ -38,6 +38,15 @@ func TestParseRestartTargetRequiresExactlyOneValidTarget(t *testing.T) {
 }
 
 func TestParseSendArgumentsPreservesOptionLikeMessageAndRejectsAll(t *testing.T) {
+	testParseMessageArguments(t, "send")
+}
+
+func TestParseSteerArgumentsPreservesOptionLikeMessage(t *testing.T) {
+	testParseMessageArguments(t, "steer")
+}
+
+func testParseMessageArguments(t *testing.T, action string) {
+	t.Helper()
 	for _, testCase := range []struct {
 		name        string
 		args        []string
@@ -47,14 +56,13 @@ func TestParseSendArgumentsPreservesOptionLikeMessageAndRejectsAll(t *testing.T)
 	}{
 		{name: "literal option-like message", args: []string{"abcd", "--profile all"}, wantID: "abcd", wantMessage: "--profile all"},
 		{name: "literal dash message", args: []string{"abcd", "-x"}, wantID: "abcd", wantMessage: "-x"},
-		{name: "profile name all is separate from selector", args: []string{"abcd", "hello"}, wantID: "abcd", wantMessage: "hello"},
 		{name: "all is forbidden", args: []string{"all", "hello"}, wantError: true},
 		{name: "malformed target", args: []string{"bad-id", "hello"}, wantError: true},
 		{name: "missing message", args: []string{"abcd"}, wantError: true},
 		{name: "multiple message arguments", args: []string{"abcd", "hello", "world"}, wantError: true},
 	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			id, message, err := parseSendArguments(testCase.args)
+		t.Run(action+"/"+testCase.name, func(t *testing.T) {
+			id, message, err := parseSendArguments(testCase.args, action)
 			if (err != nil) != testCase.wantError {
 				t.Fatalf("parseSendArguments() error = %v, want error %t", err, testCase.wantError)
 			}

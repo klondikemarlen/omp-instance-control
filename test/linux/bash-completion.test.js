@@ -77,14 +77,24 @@ for (const { condition, words, expected } of [
     expected: [],
   },
   {
-    condition: "a send target is complete and its message starts with an option",
-    words: ["ompi", "control", "send", "a".repeat(32), "--"],
+    condition: "the send verb offers options before the target",
+    words: ["ompi", "control", "send", "--"],
+    expected: ["--json", "--profile"],
+  },
+  {
+    condition: "the steer verb offers options before the target",
+    words: ["ompi", "control", "steer", "--"],
+    expected: ["--json", "--profile"],
+  },
+  {
+    condition: "a steer target is complete and its message starts with an option",
+    words: ["ompi", "control", "steer", "a".repeat(32), "--"],
     expected: [],
   },
   {
-    condition: "send already consumes the steering option",
-    words: ["ompi", "control", "send", "--steer", "--"],
-    expected: ["--profile", "--json"],
+    condition: "a send target is complete and its message starts with an option",
+    words: ["ompi", "control", "send", "a".repeat(32), "--"],
+    expected: [],
   },
   {
     condition: "a send profile value is pending",
@@ -118,7 +128,7 @@ for (const { condition, words, expected } of [
       const candidates = complete(input)
 
       // Assert
-      assert.deepEqual(candidates, expected)
+      assert.deepEqual(new Set(candidates), new Set(expected))
     }
   )
 }

@@ -232,6 +232,14 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     assert.equal(workRows[0].record.instanceId, workId)
     assert.equal(workRows[0].record.scope, workScope.id)
     assert.deepEqual(workRows[0].data.sendContext, { version: "2.8.0", protocolVersion: 1 })
+    for (const verb of ["send", "steer"]) {
+      assert.deepEqual(
+        ui.command
+          .getArgumentCompletions(`${verb} --profile work 22222222`)
+          .map((item) => item.value),
+        [`${verb} --profile work ${workId}`]
+      )
+    }
     assert.deepEqual(
       ui.command
         .getArgumentCompletions("restart --profile work 22222222")
@@ -286,7 +294,7 @@ test("when completion reaches consumed or conflicting choices, only valid next o
   )
 })
 
-test("when sending, slash command preserves raw option-like and multiline message text", async () => {
+test("when sending or steering, slash commands preserve raw option-like and multiline message text", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -295,28 +303,47 @@ test("when sending, slash command preserves raw option-like and multiline messag
     const ctx = createContext(fixture.cwd)
     const ui = createCommand(ctx)
 
-    // Act
-    await ui.command.handler("send --steer " + id + " --json\n雪 --profile", ctx)
-
-    // Assert
-    assert.equal(requests.at(-1).message.text, "--json\n雪 --profile")
-    assert.equal(requests.at(-1).message.delivery, "steer")
+    // Act / Assert
+    for (const [verb, delivery] of [
+      ["send", "followUp"],
+      ["steer", "steer"],
+    ]) {
+      await ui.command.handler(`${verb} --json ${id} --json\n雪 --profile --steer`, ctx)
+      assert.equal(requests.at(-1).message.text, "--json\n雪 --profile --steer")
+      assert.equal(requests.at(-1).message.delivery, delivery)
+    }
   } finally {
     await fixture.close()
   }
 })
 
-test("when completing send, profile options and IDs stop at the message position", async () => {
+test("when completing send verbs, options and scoped IDs stop at the message position", async () => {
   // Arrange
   const { command } = createCommand(createContext(process.cwd()))
 
   // Act / Assert
-  assert.deepEqual(command.getArgumentCompletions("send --"), [
-    { value: "send --steer", label: "--steer" },
-    { value: "send --profile", label: "--profile" },
-    { value: "send --json", label: "--json" },
-  ])
-  assert.deepEqual(command.getArgumentCompletions("send aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --"), [])
+  for (const verb of ["send", "steer"]) {
+    assert.deepEqual(command.getArgumentCompletions(`${verb} --`), [
+      { value: `${verb} --profile`, label: "--profile" },
+      { value: `${verb} --json`, label: "--json" },
+    ])
+    assert.deepEqual(
+      command.getArgumentCompletions(`${verb} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --`),
+      []
+    )
+  }
+})
+
+test("when --steer appears before the target, send rejects the removed option", async () => {
+  // Arrange
+  const ctx = createContext(process.cwd())
+  const ui = createCommand(ctx)
+
+  // Act
+  await ui.command.handler("send --steer " + "d".repeat(32) + " message", ctx)
+
+  // Assert
+  assert.match(ui.notifications.at(-1).message, /Invalid options for \/ompi send/)
 })
 
 test("when completing a profile value, candidates stay within the active configuration root", async () => {

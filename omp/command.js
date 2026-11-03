@@ -20,6 +20,7 @@ const ROOT_COMPLETIONS = [
   "list",
   "restart",
   "send",
+  "steer",
   "cleanup",
   "restore",
   "take-over",
@@ -39,10 +40,14 @@ const RESTORE_OPERATIONS = [
 const RESTORE_LIST_COMPLETIONS = ["--json", "--from", "--profile"]
 const RESTORE_SAVE_COMPLETIONS = ["--instance", "--profile"]
 const RESTORE_HISTORY_COMPLETIONS = ["--json", "--profile"]
-
 const RESTART_COMPLETIONS = ["--profile", "--json", "--no-wait"]
 
-const SEND_COMPLETIONS = ["--steer", "--profile", "--json"]
+const SEND_COMPLETIONS = ["--profile", "--json"]
+
+const SEND_ACTIONS = new Map([
+  ["send", "followUp"],
+  ["steer", "steer"],
+])
 
 function isMainTerminal(ctx) {
   return ctx.agent.kind === "main" && ctx.mode === "tui"
@@ -105,7 +110,7 @@ function normalizeBooleanArguments(args) {
 }
 
 function parseOmpiArguments(args) {
-  if (/^\s*send(?:\s|$)/.test(args)) return parseSendArguments(args)
+  if (/^\s*(?:send|steer)(?:\s|$)/.test(args)) return parseSendArguments(args)
   const normalized = normalizeBooleanArguments(args)
   const parsed = parseArgs({
     args: normalized.args,
@@ -146,9 +151,11 @@ function parseOmpiArguments(args) {
       positionals.length > 2 ||
       [...present].some((name) => !["help", "version"].includes(name)) ||
       (positionals.length === 2 &&
-        !["list", "restart", "send", "cleanup", "restore", "take-over"].includes(positionals[1]))
+        !["list", "restart", "send", "steer", "cleanup", "restore", "take-over"].includes(
+          positionals[1]
+        ))
     ) {
-      throw new Error("Usage: /ompi help [list|restart|send|cleanup|restore|take-over]")
+      throw new Error("Usage: /ompi help [list|restart|send|steer|cleanup|restore|take-over]")
     }
     return {
       action: "help",
@@ -306,13 +313,11 @@ function parseOmpiArguments(args) {
 
 function parseSendArguments(args) {
   const tokens = args.matchAll(/\S+/g)
-  tokens.next()
-  const values = { profile: undefined, json: false, steer: false }
+  const verb = tokens.next().value?.[0]
+  const values = { profile: undefined, json: false, delivery: SEND_ACTIONS.get(verb) }
   for (const token of tokens) {
     const word = token[0]
-    if (word === "--steer") {
-      values.steer = true
-    } else if (word === "--json") {
+    if (word === "--json") {
       values.json = true
     } else if (word === "--profile") {
       const profile = tokens.next().value?.[0]
@@ -321,11 +326,12 @@ function parseSendArguments(args) {
     } else if (word.startsWith("--profile=")) {
       values.profile = word.slice("--profile=".length)
     } else if (word.startsWith("-")) {
-      throw new Error("Invalid options for /ompi send; use /ompi help send.")
+      throw new Error(`Invalid options for /ompi ${verb}; use /ompi help ${verb}.`)
     } else {
       const message = args.slice(token.index + word.length + 1)
       if (!/^[a-f0-9]{1,32}$/.test(word) || !message.trim()) {
-        throw new Error("Send requires one ID prefix followed by a nonempty message.")
+        const verbName = verb === "send" ? "Send" : "Steer"
+        throw new Error(`${verbName} requires one ID prefix followed by a nonempty message.`)
       }
       if (Buffer.byteLength(message, "utf8") > 16 * 1024) {
         throw new Error("Message exceeds 16 KiB.")
@@ -333,7 +339,7 @@ function parseSendArguments(args) {
       return { action: "send", target: word, message, values }
     }
   }
-  throw new Error("Usage: /ompi send [--steer] [--profile NAME] [--json] ID MESSAGE")
+  throw new Error(`Usage: /ompi ${verb} [--profile NAME] [--json] ID MESSAGE`)
 }
 
 function normalizeProfile(profile) {
@@ -523,7 +529,7 @@ function getArgumentCompletions(
   const tokens = argumentText.trim() ? argumentText.trim().split(/\s+/) : []
   const tokenPrefix = trailingSpace ? "" : (tokens.pop() ?? "")
   const completedTokens = trailingSpace ? tokens : [...tokens]
-  if (completedTokens[0] === "send") {
+  if (SEND_ACTIONS.has(completedTokens[0])) {
     return getSendCompletions(completedTokens, tokenPrefix, completionIds, profileNames, cwd)
   }
   const context = completionContext(completedTokens.slice(1))
@@ -540,7 +546,7 @@ function getArgumentCompletions(
   if (command === "help") {
     if (completedTokens.length > 1) return []
     return completionValues(
-      ["list", "restart", "send", "cleanup", "restore", "take-over"].map((value) =>
+      ["list", "restart", "send", "steer", "cleanup", "restore", "take-over"].map((value) =>
         completionItem(value)
       ),
       completedTokens,
@@ -855,7 +861,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "Usage: /ompi COMMAND",
               "list                 Show participating terminals",
               "restart [ID|all]      Restart this terminal, one peer, or all in scope",
-              "send ID MESSAGE      Send a peer message; --steer redirects active work",
+              "send ID MESSAGE      Queue a follow-up message for a peer",
+              "steer ID MESSAGE     Redirect a peer's active work with a message",
               "restore [NAME]       Choose a recoverable conversation",
               "cleanup              Remove safely confirmed stale registrations",
               "take-over            Prepare a plain-OMP session for manual relaunch",
@@ -864,10 +871,17 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
             ],
             list: ["Usage: /ompi list [--profile NAME] [--json]"],
             send: [
-              "Usage: /ompi send [--steer] [--profile NAME] [--json] ID MESSAGE",
+              "Usage: /ompi send [--profile NAME] [--json] ID MESSAGE",
               "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
               "Options precede ID. Everything after ID is literal text, not shell syntax.",
-              "Default delivery waits behind current work; --steer redirects it. Idle delivery starts a turn.",
+              "Send queues a follow-up behind current work; idle delivery starts a turn.",
+              "Submitted means handed to OMP's message API, not processed or completed.",
+            ],
+            steer: [
+              "Usage: /ompi steer [--profile NAME] [--json] ID MESSAGE",
+              "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
+              "Options precede ID. Everything after ID is literal text, not shell syntax.",
+              "Steer redirects active work; idle delivery starts a turn.",
               "Submitted means handed to OMP's message API, not processed or completed.",
             ],
             restart: [
@@ -961,7 +975,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           const rows = await sendMessage(transport, {
             instanceId: target,
             text: message,
-            delivery: values.steer ? "steer" : "followUp",
+            delivery: values.delivery,
           })
           if (values.json) {
             notifyRows(ctx, rows, true)
