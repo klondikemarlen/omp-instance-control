@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Explain how OMP auto-updates reach new and existing terminals, distinguish OMP from native ompi versions, and refresh the upstream lifecycle ownership assessment for OMP 18.17.0. Runtime behavior and package versions are unchanged.
+
 ## [1.0.1](https://github.com/klondikemarlen/omp-instance-control/pull/86) - 2026-11-03
 
 ### Fixed

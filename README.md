@@ -88,6 +88,24 @@ Prompts typed while busy, including `/queue` and `=>` input, belong to OMP's nor
 
 Repeated requests share one restart operation and its accepted native-image identity. No continuation is injected after relaunch; the conversation is ready for your next instruction. Ctrl-C stops an external observer, not the accepted restart.
 
+### OMP Auto-Updates
+
+With OMP auto-update enabled, OMP installs new OMP versions in the background at startup. Existing terminals keep running their loaded version; installing an update does not restart them or replace their loaded code. New terminals use the installed version.
+
+After OMP reports that an update is ready, run `/ompi restart` in a managed terminal when you want it to use the update. OMP finishes active and queued work before the terminal reopens the same saved conversation and directory. Normal PATH-based launches select `omp` again when they relaunch; an explicitly pinned OMP executable remains pinned.
+
+```bash
+ompi update --check     # Check for an OMP update without installing it
+ompi --version         # OMP selected by a new invocation
+ompi control version   # Native ompi wrapper version
+```
+
+These version commands start new processes; they do not report which OMP version an already-running terminal has loaded. Likewise, `data.native` in `ompi control list --json` describes the native ompi wrapper, not OMP.
+
+OMP's updater does not install the separate Ubuntu `omp-instance-control` package. Keep OMP's auto-update preference under OMP's control; ompi does not add another installer or restart automatically when OMP updates. See [the update ownership boundary](CONCEPTS.md#omp-auto-update-boundary).
+
+### Updating ompi
+
 Managed launches detect installed-binary changes at startup and every two seconds. A bounded version probe verifies the installed candidate, including atomic replacements whose version string stays unchanged. Detection only notifies: it never requests a restart, installs packages, or patches live instructions.
 
 The notification `Installed native ompi VERSION detected; run /ompi restart to apply.` leaves every terminal running. Use `/ompi restart` for the current terminal, an explicit ID for one peer, or `ompi control restart all` for the selected profile's snapshot. Each requested restart waits for OMP to finish safely before replacing the native wrapper and reopening the conversation.
@@ -231,7 +249,7 @@ Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). 
 | Scoped instance discovery, Unix sockets, and request dispatch        | OMP exposes supported same-user discovery/control preserving profile/config-root boundaries and per-launch identities. |
 | The `ompi` executable/package                                        | Standard `omp` supplies all required instance-control commands; migrate usage and remove the redundant wrapper.        |
 
-The [OMP 18.12.2 compatibility audit](CONCEPTS.md#host-api-dependency) found no fully satisfied removal criterion. Keep the current boundaries until supported public APIs cover the same behavior; OMP's internal native restart is not an extension or peer-control contract.
+The [OMP 18.17.0 compatibility assessment](CONCEPTS.md#host-api-dependency), including its auto-updater, found no fully satisfied removal criterion. OMP owns installing its updates, but that does not replace ompi's explicit settled restart, native-wrapper replacement, peer control, or exact failed-restart recovery.
 
 Resource refresh is not loaded-extension re-evaluation or executable upgrade. Do not replace public host contracts with private imports, terminal injection, or PID-based lifecycle guesses. See [Concepts](CONCEPTS.md) and [Changelog](CHANGELOG.md).
 
