@@ -90,15 +90,21 @@ Resource discovery/MCP reconnects are not extension-module reload or executable 
 
 This helper implements restart only. It loads code/configuration present on disk at the next launch, without performing package installation or executable upgrades. Unwrapped, ephemeral, or never-materialized sessions cannot claim restart/resume through the helper.
 
+### OMP Auto-Update Boundary
+
+OMP's [auto-update setting](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/modes/settings.ts#L1312-L1330) is opt-in. When enabled, [interactive startup](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/main.ts#L737-L760) starts or follows a [detached updater](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/cli/auto-update.ts) that installs through the owning installer, including Homebrew. The worker updates files on disk and reports readiness; it does not restart the current session. The native ompi package and its bundled adapter remain separately installed. No second OMP installer, updater-state-file dependency, or automatic restart policy belongs in this wrapper.
+
+OMP's built-in `/restart` replaces the OMP process, not its parent ompi wrapper. Its [executable resolver](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/subprocess/worker-client.ts#L114-L155) prefers the current physical executable while it remains usable, falling back to the launcher/PATH if that path disappears. Consequently, an older Homebrew Cellar binary that remains executable may be selected again. Do not treat the built-in command as proof that an installed update was adopted, or as a supported extension request for settled peer restart. Normal ompi relaunches resolve the configured OMP executable again and retain their own per-launch identity, correlation, scope, slot lock, and failure-recovery boundaries.
+
 ## Host API Dependency
 
-Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). The OMP 18.12.2 compatibility audit retains the Linux launcher workaround: the public extension context exposes graceful `shutdown()` and read-only session access, but no supported restart/resume request or same-user instance discovery/control contract. None of the [wrapper removal criteria](README.md#temporary-ownership-and-upstream-removal) is fully met.
+Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). The OMP 18.17.0 compatibility assessment retains the Linux launcher workaround: the public extension context exposes graceful `shutdown()` and read-only session access, but no supported settled restart request or same-user instance discovery/control contract. None of the [wrapper removal criteria](README.md#temporary-ownership-and-upstream-removal) is fully met; the auto-updater changes installation ownership, not these lifecycle/control boundaries.
 
 Versioned source contracts:
 
-- [Extension context](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/extensibility/extensions/types.ts): public `shutdown()`, current `cwd`, read-only session access, and session lifecycle events. Built-in `/restart` does not imply a public extension restart method.
-- [Interactive lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/modes/interactive-mode.ts): OMP owns the settled shutdown-request path, native restart, and terminal teardown. The internal `restart()` implementation is not a supported extension request API.
-- [Extension flag binding](https://github.com/can1357/oh-my-pi/blob/v18.12.2/packages/coding-agent/src/extensibility/extensions/loader.ts): public `getFlag()` remains scoped to the calling extension; parsed cross-extension flags remain runtime metadata rather than a supported public contract.
+- [Extension context](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/extensibility/extensions/types.ts): public `shutdown()`, current `cwd`, read-only session access, and session lifecycle events. Built-in `/restart` does not imply a public extension restart method.
+- [Interactive lifecycle](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/modes/interactive-mode.ts): OMP owns the settled shutdown-request path, native restart, and terminal teardown. The internal `restart()` implementation is not a supported extension request API.
+- [Extension flag binding](https://github.com/can1357/oh-my-pi/blob/v18.17.0/packages/coding-agent/src/extensibility/extensions/loader.ts): public `getFlag()` remains scoped to the calling extension; parsed cross-extension flags remain runtime metadata rather than a supported public contract.
 
 An isolated OMP 18.12.2 launch with the installed 0.8.1 wrapper verified graceful shutdown, correlated replacement, preserved session ID/file/cwd, and normal-exit endpoint cleanup. A separate extension's flag remained unavailable through public `getFlag()`. This audit does not replace the historical 18.8.7 module-reload experiment above with an unobserved claim about current `/reload-plugins` behavior.
 
