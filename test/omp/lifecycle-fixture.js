@@ -36,6 +36,7 @@ export function createExtensionApi(events, handlers) {
         handlers.set(event, handler)
       },
       registerCommand() {},
+      registerMessageRenderer() {},
     },
   }
 }

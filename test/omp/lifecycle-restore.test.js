@@ -61,6 +61,7 @@ async function createSessionFile(directory, name) {
 }
 
 test("when lifecycle events change session or cwd, named restore follows the final persisted state", async () => {
+  // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-restore-life-"))
   const launchDirectory = path.join(root, "launch")
   const workDirectory = path.join(root, "work")
@@ -163,10 +164,14 @@ test("when lifecycle events change session or cwd, named restore follows the fin
         handlers.set(event, handler)
       },
       registerCommand() {},
+      registerMessageRenderer() {},
     })
 
+    // Act
     await handlers.get("session_start")({}, ctx)
     const transport = await createTransport(scope)
+
+    // Assert
     const records = await transport.readRecords()
     assert.equal(records.length, 1)
     assert.equal(records[0].restoreId, restoreId)

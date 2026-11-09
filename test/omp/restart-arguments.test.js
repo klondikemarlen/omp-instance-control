@@ -134,6 +134,7 @@ for (const scenario of [
           handlers.set(event, handler)
         },
         registerCommand() {},
+        registerMessageRenderer() {},
         getFlag: () => undefined,
         runtime: scenario.missingMetadata ? undefined : { flagValues },
       })
