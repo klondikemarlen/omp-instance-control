@@ -64,6 +64,7 @@ test("when agent-end arrives during shutdown, removed endpoint records stay remo
         handlers.set(event, handler)
       },
       registerCommand() {},
+      registerMessageRenderer() {},
     })
     await handlers.get("session_start")({}, ctx)
     const transport = await createTransport(scope)
@@ -158,6 +159,7 @@ test("when status is queried, it exposes loaded Send Context health metadata or 
         handlers.set(event, handler)
       },
       registerCommand() {},
+      registerMessageRenderer() {},
     })
     await handlers.get("session_start")({}, ctx)
     const transport = await createTransport(scope)

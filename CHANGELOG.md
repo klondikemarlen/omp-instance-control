@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.0.2 - 2026-11-09
 
 ### Changed
 
-- Explain how OMP auto-updates reach new and existing terminals, distinguish OMP from native ompi versions, and refresh the upstream lifecycle ownership assessment for OMP 18.17.0. Runtime behavior and package versions are unchanged.
+- Show peer messages as an unboxed two-line preview with expandable full text, preserving their peer-not-user context and transcript content.
+- Explain how OMP auto-updates reach new and existing terminals, distinguish OMP from native ompi versions, and refresh the upstream lifecycle ownership assessment for OMP 18.17.0.
 
 ## [1.0.1](https://github.com/klondikemarlen/omp-instance-control/pull/86) - 2026-11-03
 

@@ -14,6 +14,7 @@ import {
   writeRestartHandoff,
 } from "./launcher-context.js"
 import { registerOmpiCommand } from "./command.js"
+import { registerPeerMessageRenderer } from "./peer-message.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
 const EXIT_REQUESTED_EVENT = "omp-exit-command:exit-requested"
@@ -117,6 +118,8 @@ export default async function instanceControl(pi) {
   const releaseClaim = pi.events.on(ENTRY_CLAIM_EVENT, (probe) => {
     if (probe && typeof probe === "object") probe.claimed = true
   })
+
+  registerPeerMessageRenderer(pi)
 
   let runtime
   const refreshCompletions = registerOmpiCommand(pi, { getRuntime: () => runtime })

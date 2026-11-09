@@ -748,6 +748,7 @@ test("when separate entry URLs bind one host, one endpoint and self-safe command
       registerCommand(name, command) {
         commands.push({ name, command })
       },
+      registerMessageRenderer() {},
     }
   }
 
