@@ -1,0 +1,18 @@
+{
+  "lint": {
+    "commands": {
+      "go": {
+        "tool": "golangci-lint",
+        "command": ["./bin/dev", "lint", "go"]
+      },
+      "javascript": {
+        "tool": "eslint",
+        "command": ["./bin/dev", "lint", "js"]
+      },
+      "shell": {
+        "tool": "shellcheck",
+        "command": ["./bin/dev", "lint", "shell"]
+      }
+    }
+  }
+}
