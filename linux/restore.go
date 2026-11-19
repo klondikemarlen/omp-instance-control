@@ -168,10 +168,6 @@ func RestoreSessionSlot(scope protocol.Scope, restoreID, extensionPath, nativeVe
 	return restoreSessionSlotExpected(scope, restoreID, extensionPath, expected, stdinIsTerminal() && stdoutIsTerminal(), launchSession)
 }
 
-func restoreSessionSlot(scope protocol.Scope, restoreID, extensionPath string, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
-	return restoreSessionSlotWithBinding(scope, restoreID, "", extensionPath, hasTerminal, launchSession, nil)
-}
-
 func restoreSessionSlotExpected(scope protocol.Scope, restoreID, extensionPath string, expected protocol.SavedSession, hasTerminal bool, launchSession func([]string, string, string, *os.File) (int, error)) (int, error) {
 	return restoreSessionSlotWithBinding(scope, restoreID, "", extensionPath, hasTerminal, launchSession, &expected)
 }
