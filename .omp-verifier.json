@@ -9,6 +9,10 @@
         "tool": "eslint",
         "command": ["./bin/dev", "lint", "js"]
       },
+      "ruby": {
+        "tool": "rubocop",
+        "command": ["./bin/dev", "lint", "ruby"]
+      },
       "shell": {
         "tool": "shellcheck",
         "command": ["./bin/dev", "lint", "shell"]
