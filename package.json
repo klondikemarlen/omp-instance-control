@@ -34,8 +34,10 @@
     "build": "make build",
     "test": "go test ./... && node --test",
     "format": "gofmt -w cli linux protocol test && prettier --write .",
-    "lint": "npm run lint:js && npm run lint:shell",
+    "lint": "npm run lint:go && npm run lint:js && npm run lint:ruby && npm run lint:shell",
+    "lint:go": "golangci-lint run --fix=false ./...",
     "lint:js": "eslint . --max-warnings 0",
+    "lint:ruby": "rubocop dev.config.rb dev/plugins",
     "lint:shell": "shellcheck --shell=bash bin/* linux/bash-completion/ompi",
     "check": "go vet ./... && npm run lint && prettier --check . && test -z \"$(gofmt -l cli linux protocol test)\""
   },

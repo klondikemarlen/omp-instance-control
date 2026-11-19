@@ -119,7 +119,7 @@ func (transport *Transport) cleanupRecord(instanceID string) CleanupResult {
 	}
 
 	// A newly-created endpoint must not be orphaned by removing its record.
-	currentSocketInfo, currentSocketExists, err = inspectOwnedRegistrationSocket(socketFile)
+	_, currentSocketExists, err = inspectOwnedRegistrationSocket(socketFile)
 	if err != nil {
 		return cleanupResult(instanceID, "failed", fmt.Sprintf("instance socket became unsafe; record left unchanged: %v", err))
 	}
