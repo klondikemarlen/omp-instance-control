@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0 - 2026-11-19
+
+### Added
+
+- `ompi control list` and `/ompi list` group peers by project and show live session titles beside their launch IDs. Use `--json` for version diagnostics and restart history.
+
 ## 1.0.2 - 2026-11-09
 
 ### Changed
