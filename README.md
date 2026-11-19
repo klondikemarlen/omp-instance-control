@@ -275,7 +275,7 @@ Resource refresh is not loaded-extension re-evaluation or executable upgrade. Do
 
 ## Development and Release
 
-Install Go 1.25+, [golangci-lint v2](https://golangci-lint.run/docs/welcome/install/local/) (tested with 2.15.0), Node.js 22.13+, and ShellCheck 0.11+ for development. Both native linters must be on `PATH`; on Ubuntu, install ShellCheck with `sudo apt install shellcheck`. JavaScript tools are pinned in `package-lock.json`.
+Install Go 1.25+, [golangci-lint v2](https://golangci-lint.run/docs/welcome/install/local/) (tested with 2.15.0), Node.js 22.13+, RuboCop 1.92+, and ShellCheck 0.11+ for development. The linters must be on `PATH`; on Ubuntu, install ShellCheck with `sudo apt install shellcheck`. JavaScript tools are pinned in `package-lock.json`.
 
 ```bash
 npm ci
@@ -287,7 +287,7 @@ git diff --check
 ./dist/ompi control help
 ```
 
-`npm run check` runs Go vet, linting, and formatting checks. `npm run lint` checks Go (`govet`, `ineffassign`, `unused`), JavaScript (ESLint recommended rules, zero warnings), and Bash (ShellCheck). To reproduce a Verifier language check, run `./bin/dev lint go`, `./bin/dev lint js`, or `./bin/dev lint shell` from the checkout. These commands report violations without fixing files.
+`npm run check` runs Go vet, linting, and formatting checks. `npm run lint` checks Go (`govet`, `ineffassign`, `unused`), JavaScript (ESLint recommended rules, zero warnings), the Ruby development wrapper (RuboCop), and Bash (ShellCheck). To reproduce a Verifier check, run `./bin/dev lint` with the language `go`, `js`, `ruby`, or `shell`. These commands report violations without fixing files.
 
 `make build` produces `dist/ompi` without cgo or runtime dependencies. The installed wrapper resolves its adapter relative to the real executable, not the working directory.
 
