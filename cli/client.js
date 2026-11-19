@@ -182,6 +182,25 @@ function compactProjectPath(value) {
   return `.../${parts.slice(-2).join("/")}`
 }
 
+function listProjectHeading(cwd, homeDirectory) {
+  if (!cwd) {
+    return "unknown project"
+  }
+  if (!homeDirectory) {
+    return cwd
+  }
+
+  const home = homeDirectory.replace(/\/+$/, "") || "/"
+  if (cwd === home) {
+    return "~"
+  }
+  const homePrefix = home === "/" ? home : `${home}/`
+  if (cwd.startsWith(homePrefix)) {
+    return `~/${cwd.slice(homePrefix.length)}`
+  }
+  return cwd
+}
+
 function errorSummary(row) {
   if (row.status !== "unreachable") {
     return row.error ?? ""
@@ -198,31 +217,23 @@ function errorSummary(row) {
   return "endpoint unavailable"
 }
 
+function instanceRowParts(row) {
+  const instanceId = row.instanceId || row.record?.instanceId || "unknown"
+  const id = instanceId.length === 32 ? instanceId.slice(0, 12) : instanceId
+  let state = row.status === "online" ? row.data?.state || row.status : row.status
+  if (state === "restart-requested") {
+    state = "restart pending"
+  }
+  return [id, state]
+}
+
 export function formatRows(rows) {
   return rows
     .map((row) => {
-      let id = row.instanceId || row.record?.instanceId || "unknown"
-      if (id.length === 32) {
-        id = id.slice(0, 12)
-      }
-
-      let state = row.status === "online" ? row.data?.state || row.status : row.status
-      if (state === "restart-requested") {
-        state = "restart pending"
-      }
-
+      const parts = instanceRowParts(row)
       const currentCwd = row.data?.cwd || row.record?.cwd
-      const parts = [id, state]
-      if (row.status === "online") {
-        parts.push(formatSendContext(row.data?.sendContext ?? null))
-        parts.push(formatNative(row.data?.native ?? null))
-      }
       if (currentCwd) {
         parts.push(compactProjectPath(currentCwd))
-      }
-
-      if (row.status === "online" && row.data?.lastRestart) {
-        parts.push("(previous restart completed)")
       }
 
       const error = errorSummary(row)
@@ -235,32 +246,43 @@ export function formatRows(rows) {
     .join("\n")
 }
 
-function formatSendContext(metadata) {
-  if (
-    !metadata ||
-    typeof metadata.version !== "string" ||
-    metadata.version.trim() === "" ||
-    metadata.version !== metadata.version.trim() ||
-    metadata.version.toLowerCase() === "unknown" ||
-    metadata.version.length > 128 ||
-    !Number.isSafeInteger(metadata.protocolVersion) ||
-    metadata.protocolVersion <= 0
-  ) {
-    return "Send Context: unknown"
-  }
-  return `Send Context: ${metadata.version} (routing protocol ${metadata.protocolVersion})`
-}
-
-function formatNative(metadata) {
-  if (!metadata || typeof metadata.runningVersion !== "string" || !metadata.runningVersion) {
-    return "Native ompi: unknown"
+export function formatListRows(rows) {
+  const byCwd = new Map()
+  for (const row of rows) {
+    const cwd = row.data?.cwd || row.record?.cwd || ""
+    let project = byCwd.get(cwd)
+    if (!project) {
+      const sortKey = Buffer.from(cwd)
+      project = {
+        cwd,
+        sortKey,
+        rows: [],
+      }
+      byCwd.set(cwd, project)
+    }
+    project.rows.push(row)
   }
 
-  const installedVersion = metadata.installedVersion ?? "unknown"
-  let summary = `Native ompi: ${metadata.runningVersion} (installed ${installedVersion}; update ${metadata.state})`
-  if (metadata.message) {
-    summary += `: ${metadata.message}`
+  const lines = []
+  const homeDirectory = process.env.HOME
+  // Match Go's bytewise path order, including for non-ASCII directory names.
+  const projects = [...byCwd.values()].sort((a, b) => Buffer.compare(a.sortKey, b.sortKey))
+  for (const { cwd, rows: projectRows } of projects) {
+    const heading = listProjectHeading(cwd, homeDirectory)
+    lines.push(safeText(heading))
+    for (const row of projectRows) {
+      const parts = instanceRowParts(row)
+      const sessionTitle = row.data?.sessionTitle
+      if (row.status !== "online") {
+        const error = errorSummary(row)
+        if (error) {
+          parts.push(error)
+        }
+      } else if (typeof sessionTitle === "string" && /\P{White_Space}/u.test(sessionTitle)) {
+        parts.push(sessionTitle)
+      }
+      lines.push(`  ${parts.map(safeText).join("  ")}`)
+    }
   }
-
-  return summary
+  return lines.join("\n")
 }

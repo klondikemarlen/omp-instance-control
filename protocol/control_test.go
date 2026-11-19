@@ -204,3 +204,48 @@ func TestDataPreservesUnknownWireFields(t *testing.T) {
 		t.Fatalf("raw status payload changed: %s", roundTrip)
 	}
 }
+
+func TestDataPreservesOptionalSessionTitle(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		title   string
+	}{
+		{
+			name:    "named",
+			payload: `{"state":"running","sessionTitle":"Review\npayments"}`,
+			title:   "Review\npayments",
+		},
+		{
+			name:    "untitled",
+			payload: `{"state":"running","sessionTitle":null}`,
+		},
+		{
+			name:    "older receiver",
+			payload: `{"state":"running"}`,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			var data Data
+			if err := json.Unmarshal([]byte(test.payload), &data); err != nil {
+				t.Fatal(err)
+			}
+			if test.title == "" {
+				if data.SessionTitle != nil {
+					t.Fatalf("decoded session title = %q, want nil", *data.SessionTitle)
+				}
+			} else if data.SessionTitle == nil || *data.SessionTitle != test.title {
+				t.Fatalf("session title %q was not decoded from %s", test.title, test.payload)
+			}
+
+			roundTrip, err := json.Marshal(&data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(roundTrip) != test.payload {
+				t.Fatalf("round-trip payload = %s, want %s", roundTrip, test.payload)
+			}
+		})
+	}
+}

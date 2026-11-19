@@ -205,7 +205,9 @@ func TestRestartSelectionAndOutcomeClassification(t *testing.T) {
 	}
 }
 
-func TestRestartFailureStillIdentifiesTheProject(t *testing.T) {
+func TestListFailureStillIdentifiesTheProject(t *testing.T) {
+	t.Setenv("HOME", "/home/operator")
+
 	record := clientRecord(strings.Repeat("a", 32))
 	record.CWD = "/projects/customer/payments"
 	transport := &testTransport{
@@ -215,13 +217,14 @@ func TestRestartFailureStillIdentifiesTheProject(t *testing.T) {
 		},
 	}
 
-	rows, err := RestartInstances(transport, true, "")
+	rows, err := ListInstances(transport)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if text := FormatRows(rows); !strings.Contains(text, "customer/payments") || !strings.Contains(text, "unreachable") {
-		t.Fatalf("failed restart lost its identifiable project: %q", text)
+	want := "/projects/customer/payments\n  aaaaaaaaaaaa  unreachable  socket missing"
+	if got := FormatRows(rows); got != want {
+		t.Fatalf("failed list probe = %q, want %q", got, want)
 	}
 }
 
@@ -251,7 +254,7 @@ func TestListDistinguishesUnreachableAndCorrelatedRejection(t *testing.T) {
 	}
 }
 
-func TestListDisplaysLoadedSendContextAndKeepsUnknownExplicit(t *testing.T) {
+func TestListJSONPreservesLoadedAndUnknownSendContext(t *testing.T) {
 	first := clientRecord(strings.Repeat("a", 32))
 	second := clientRecord(strings.Repeat("b", 32))
 	third := clientRecord(strings.Repeat("c", 32))
@@ -290,11 +293,6 @@ func TestListDisplaysLoadedSendContextAndKeepsUnknownExplicit(t *testing.T) {
 		rows[1].Data.SendContext != nil || rows[2].Data.SendContext != nil {
 		t.Fatalf("list did not preserve verified and unknown metadata: %#v", rows)
 	}
-	formatted := FormatRows(rows)
-	if !strings.Contains(formatted, "Send Context: 2.8.0 (routing protocol 1)") ||
-		!strings.Contains(formatted, "Send Context: unknown") {
-		t.Fatalf("list output did not distinguish loaded metadata from unknown: %q", formatted)
-	}
 
 	encoded, err := json.Marshal(rows)
 	if err != nil {
@@ -327,6 +325,145 @@ func TestListDisplaysLoadedSendContextAndKeepsUnknownExplicit(t *testing.T) {
 		if _, duplicated := output[index]["sendContext"]; duplicated {
 			t.Fatalf("JSON repeated Send Context outside status data: %s", encoded)
 		}
+	}
+}
+
+func TestListDisplaysRenamedSessionTitle(t *testing.T) {
+	t.Setenv("HOME", "/home/operator")
+
+	first := clientRecord(strings.Repeat("a", 32))
+	second := clientRecord(strings.Repeat("b", 32))
+	firstTitle := "Réviser les paiements"
+	transport := &testTransport{
+		records: []protocol.Record{first, second},
+		respond: func(record protocol.Record, _ protocol.Request) (protocol.Response, error) {
+			title := "Review refunds"
+			if record.InstanceID == first.InstanceID {
+				title = firstTitle
+			}
+			return protocol.Response{
+				OK: true,
+				Data: &protocol.Data{
+					State:        "running",
+					SessionTitle: &title,
+				},
+			}, nil
+		},
+	}
+
+	rows, err := ListInstances(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/workspace\n" +
+		"  aaaaaaaaaaaa  running  Réviser les paiements\n" +
+		"  bbbbbbbbbbbb  running  Review refunds"
+	if got := FormatRows(rows); got != want {
+		t.Fatalf("initial list = %q, want %q", got, want)
+	}
+
+	firstTitle = " Review \x1b[31mpayments\r\nagain\u009b "
+	rows, err = ListInstances(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = "/workspace\n" +
+		"  aaaaaaaaaaaa  running   Review \\u001b[31mpayments\\u000d\\u000aagain\\u009b \n" +
+		"  bbbbbbbbbbbb  running  Review refunds"
+	if got := FormatRows(rows); got != want {
+		t.Fatalf("list after rename = %q, want %q", got, want)
+	}
+}
+
+func TestFormatRowsGroupsByFullWorkingDirectory(t *testing.T) {
+	t.Setenv("HOME", "/home/operator/")
+
+	first := clientRecord(strings.Repeat("a", 32))
+	first.CWD = "/home/operator-backup/hub/payments"
+	second := clientRecord(strings.Repeat("b", 32))
+	second.CWD = "/home/operator/hub/payments"
+	third := clientRecord(strings.Repeat("c", 32))
+	third.CWD = "/old/registration/path"
+	fourth := clientRecord(strings.Repeat("d", 32))
+	fourth.CWD = "/home/operator"
+
+	rows := []Row{
+		{
+			Record: &first,
+			Status: "online",
+		},
+		{
+			Record: &second,
+			Status: "online",
+		},
+		{
+			Record: &third,
+			Status: "online",
+			Data: &protocol.Data{
+				CWD:   "/home/operator/hub/payments",
+				State: "restart-requested",
+				SendContext: &protocol.SendContextMetadata{
+					Version:         "2.8.0",
+					ProtocolVersion: 1,
+				},
+				Native: &protocol.NativeMetadata{
+					RunningVersion: "1.0.2",
+				},
+				LastRestart: &protocol.Restart{
+					OperationID: "previous",
+				},
+			},
+		},
+		{
+			Record: &fourth,
+			Status: "online",
+		},
+	}
+	want := "~\n" +
+		"  dddddddddddd  online\n" +
+		"/home/operator-backup/hub/payments\n" +
+		"  aaaaaaaaaaaa  online\n" +
+		"~/hub/payments\n" +
+		"  bbbbbbbbbbbb  online\n" +
+		"  cccccccccccc  restart pending"
+	if got := FormatRows(rows); got != want {
+		t.Fatalf("grouped list = %q, want %q", got, want)
+	}
+}
+
+func TestFormatRowsOmitsTitlesWithoutNamedOnlineStatus(t *testing.T) {
+	t.Setenv("HOME", "/home/operator")
+
+	record := clientRecord(strings.Repeat("a", 32))
+	blankTitle := " \t\u0085 "
+	oldTitle := "previous title"
+
+	rows := []Row{
+		{
+			Record: &record,
+			Status: "online",
+		},
+		{
+			Record: &record,
+			Status: "online",
+			Data: &protocol.Data{
+				SessionTitle: &blankTitle,
+			},
+		},
+		{
+			Record: &record,
+			Status: "unreachable",
+			Data: &protocol.Data{
+				SessionTitle: &oldTitle,
+			},
+		},
+	}
+	want := "/workspace\n" +
+		"  aaaaaaaaaaaa  online\n" +
+		"  aaaaaaaaaaaa  online\n" +
+		"  aaaaaaaaaaaa  unreachable  endpoint unavailable"
+	if got := FormatRows(rows); got != want {
+		t.Fatalf("list without named online status = %q, want %q", got, want)
 	}
 }
 

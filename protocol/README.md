@@ -12,9 +12,11 @@ Current user-facing restart commands always send `restart-wrapper`, including sc
 
 Received response data is read-only. Native CLI JSON preserves the host payload's explicit nulls, absent capability fields, and unknown fields rather than synthesizing values from Go defaults.
 
-Status data may include `sendContext: {version, protocolVersion}` for the loaded Send Context plugin, or `null` when unverified. Its package version and routing protocol are independent of this control protocol's version, OMP, and the native wrapper. An older response without the field stays absent in JSON and renders as unknown in human-facing lists. Restart admission and completion correlation do not depend on plugin metadata.
+Live status may include `sessionTitle`: the current OMP session name, or `null` when unnamed or unavailable. Older adapters omit it. Titles are read from the host for status requests, not stored in registrations or used to resolve message targets.
 
-Status may also carry `native: {runningVersion, installedVersion, state, message?}`. Installed version is `null` until verified; state distinguishes checking, current, available, and failed observation. `available` means notification only, not accepted restart or applied update. These are executing-launcher and installed-candidate facts, independent of OMP and Send Context versions. Older payloads remain unchanged in JSON and display native metadata as unknown.
+Status data may include `sendContext: {version, protocolVersion}` for the loaded Send Context plugin, or `null` when unverified. Its package version and routing protocol are independent of this control protocol's version, OMP, and the native wrapper. An older response without the field stays absent in JSON. Restart admission and completion correlation do not depend on plugin metadata.
+
+Status may also carry `native: {runningVersion, installedVersion, state, message?}`. Installed version is `null` until verified; state distinguishes checking, current, available, and failed observation. `available` means notification only, not accepted restart or applied update. These are executing-launcher and installed-candidate facts, independent of OMP and Send Context versions. Older payloads remain unchanged in JSON.
 
 `canRestart` reports persisted-session readiness and availability of public session/graceful-shutdown APIs. A persistent session may accept a restart while that flag is false because its first response has not materialized the allocated transcript yet. Acceptance does not claim shutdown or completion.
 

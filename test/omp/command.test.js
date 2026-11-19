@@ -39,7 +39,7 @@ async function createFixture() {
   return {
     root,
     cwd,
-    async addPeer(scope, instanceId, peerCwd = cwd, sendContext) {
+    async addPeer(scope, instanceId, peerCwd = cwd, { sendContext, sessionTitle } = {}) {
       const transport = await createTransport(scope)
       const record = {
         version: 1,
@@ -62,6 +62,9 @@ async function createFixture() {
           const data = { ...record, canRestart: true }
           if (sendContext !== undefined) {
             data.sendContext = sendContext
+          }
+          if (sessionTitle !== undefined) {
+            data.sessionTitle = sessionTitle
           }
           return { data }
         }
@@ -197,8 +200,10 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
       path.join(fixture.root, "default-peer")
     )
     await fixture.addPeer(workScope, workId, path.join(fixture.root, "work-peer"), {
-      version: "2.8.0",
-      protocolVersion: 1,
+      sendContext: {
+        version: "2.8.0",
+        protocolVersion: 1,
+      },
     })
     const offlineId = "6".repeat(32)
     const defaultTransport = await createTransport(defaultScope)
@@ -213,7 +218,10 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     await ui.command.handler("list", ctx)
 
     // Assert
-    assert.match(ui.notifications[0].message, /Send Context: unknown/)
+    const defaultLines = ui.notifications[0].message.split("\n")
+    assert.ok(defaultLines.includes("~/default-peer"))
+    assert.ok(defaultLines.includes("  111111111111  running"))
+    assert.ok(defaultLines.includes("  666666666666  unreachable  socket missing"))
     assert.deepEqual(
       ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
       [`restart ${defaultId}`]
@@ -251,11 +259,58 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     await ui.command.handler("list --profile work", ctx)
 
     // Assert
-    assert.match(ui.notifications[2].message, /Send Context: 2\.8\.0 \(routing protocol 1\)/)
+    assert.ok(ui.notifications[2].message.endsWith("~/work-peer\n  222222222222  running"))
     assert.deepEqual(
       ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
       [`restart ${defaultId}`]
     )
+  } finally {
+    await fixture.close()
+  }
+})
+
+test("when peers share a working directory, slash list shows safe titles and send still targets an ID", async () => {
+  // Arrange
+  const fixture = await createFixture()
+  try {
+    const ctx = createContext(fixture.cwd)
+    const scope = getScope({
+      cwd: ctx.cwd,
+    })
+    const firstId = "1".repeat(32)
+    const secondId = "2".repeat(32)
+    const sessionTitle = "Review \u001b[31m\n\u009b"
+    const first = await fixture.addPeer(scope, firstId, ctx.cwd, {
+      sessionTitle: "Plan next steps",
+    })
+    const second = await fixture.addPeer(scope, secondId, ctx.cwd, {
+      sessionTitle,
+    })
+    const ui = createCommand(ctx)
+
+    // Act
+    await ui.command.handler("list", ctx)
+    await ui.command.handler("list --json", ctx)
+
+    // Assert
+    const lines = ui.notifications[0].message.split("\n")
+    assert.equal(lines.filter((line) => line === "~/worktree").length, 1)
+    assert.ok(lines.includes("  111111111111  running  Plan next steps"))
+    assert.ok(lines.includes("  222222222222  running  Review \\u001b[31m\\u000a\\u009b"))
+    const rows = JSON.parse(ui.notifications[1].message)
+    const secondRow = rows.find((row) => row.record.instanceId === secondId)
+    assert.equal(secondRow.data.sessionTitle, sessionTitle)
+
+    // Act
+    await ui.command.handler(`send ${secondId} Please review`, ctx)
+
+    // Assert
+    assert.equal(
+      first.requests.some((request) => request.action === "send"),
+      false
+    )
+    assert.equal(second.requests.at(-1).action, "send")
+    assert.equal(second.requests.at(-1).message.text, "Please review")
   } finally {
     await fixture.close()
   }

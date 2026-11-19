@@ -76,9 +76,9 @@ Restart injects no preparation or continuation messages and needs no model-gener
 
 Restart rejects a missing, non-directory, or inaccessible working directory without closing OMP. A restart waiting for transcript persistence checks the directory again before requesting shutdown. These checks do not eliminate filesystem or executable failures after shutdown has begun.
 
-Human-facing lists show short instance IDs, current state, the final two project-path components, concise connection failures, and a small annotation for a previous completed restart. The short ID shown in a list or the OMP status line can select that instance: for example, `ompi control restart 906e493e` or `/ompi restart 906e493e`. Any nonempty lowercase hexadecimal prefix up to the full 32-character ID is accepted when it matches exactly one registration in the selected profile/config scope. Ambiguous prefixes restart nothing; use a longer prefix or the full ID. Stale registrations also count toward ambiguity. These are current control-instance IDs, not persisted conversation/session IDs; they change after relaunch. JSON and autocomplete retain full IDs, paths, restart correlation, and diagnostics. Partial-failure warnings distinguish unreachable registrations from reachable instances.
+The default list groups peers by working directory. Each row shows a short launch ID, state, and live session title when available; unreachable peers retain a concise failure reason. Use `--json` for full IDs, paths, versions, and restart history. A short ID from the list or status line can select a peer: `ompi control restart 906e493e` or `/ompi restart 906e493e`. A lowercase hexadecimal prefix must match exactly one registration in the scope, including stale registrations. Launch IDs change after relaunch; they are not conversation IDs.
 
-`ompi control list` and `/ompi list` also show each online child's **loaded Send Context version** and routing protocol. This is the running plugin's health metadata, not the installed-on-disk package version, OMP version, or native `ompi` version. `--json` exposes it under `data.sendContext`; the current adapter emits `null` when unknown, while older status payloads remain unchanged. Missing or older metadata, mismatched identities, unreachable health endpoints, and unsafe private state display as unknown. Queries use only read-only `/health` requests: they do not claim focus, send prompts, invoke `/ide`, or restart sessions. Send Context package and routing-protocol versions remain separate; matching package versions are not required.
+`data.sendContext` in list JSON reports the online child's loaded Send Context version and routing protocol, not the installed package or OMP version. The adapter emits `null` when health metadata is unavailable; older status payloads remain unchanged. Read-only `/health` queries do not claim focus, send prompts, invoke `/ide`, or restart sessions.
 
 Use `ompi control restart all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
@@ -112,7 +112,7 @@ The notification `Installed native ompi VERSION detected; run /ompi restart to a
 
 Notification-only updates require the 0.18.0 or newer adapter to be loaded. Installing an update cannot change code already loaded in a terminal: older 0.16.x–0.17.x adapters retain automatic-update watchers and may initiate one last restart when the installed binary changes. Those processes do not gain the new policy until they relaunch.
 
-`ompi control list` and `/ompi list` distinguish the running native version, installed version, and update state; JSON exposes them under `data.native`. An `available` update has not been applied. Each observed file identity is checked and notified once per running adapter. An explicit restart captures the installed image identity at acceptance and refuses a changed image before native execution rather than silently adopting a later update. The saved conversation remains recoverable through `ompi control restore`.
+`ompi control list --json` and `/ompi list --json` distinguish the running native version, installed version, and update state under `data.native`. An `available` update has not been applied. Each observed file identity is checked and notified once per running adapter. An explicit restart captures the installed image identity at acceptance and refuses a changed image before native execution rather than silently adopting a later update. The saved conversation remains recoverable through `ompi control restore`.
 
 Existing terminals must first adopt a capable 0.16.0 launcher and adapter through a manual scoped restart. Launchers from before 0.11.0 require one fresh `ompi` launch: they cannot acquire native replacement merely by reloading their adapter. Unsupported targets refuse restart before shutdown rather than falling back to OMP-only restart; a batch retains each target's refusal while independently restarting supported peers. Ordinary unwrapped OMP can control managed peers but cannot restart itself through `ompi`.
 
@@ -149,7 +149,15 @@ The wrapper does not register or shadow OMP flags. A parsed extension value shar
 
 ### Sending Peer Messages
 
-Use `ompi control list` (or `/ompi list`) to identify the receiving terminal, then send to its current full instance ID or unique hexadecimal prefix:
+Use `ompi control list` (or `/ompi list`) to find the receiving project. When several online instances share a working directory, compare their live OMP session titles. Give your own conversation a useful title with OMP's `/rename`, for example `/rename Review CSV exports`. Re-list after a rename or restart. Titles can be absent, duplicated, or out of date with the work; if the intended recipient is still unclear, do not send.
+
+For a compact project directory, list online peers with their full launch IDs, working directories, and titles:
+
+```bash
+ompi control list --json | jq -c '.[] | select(.status == "online") | [.record.instanceId, .data.cwd, .data.sessionTitle]'
+```
+
+Send to the selected instance's current full ID or unique hexadecimal prefix, never its title:
 
 ```bash
 ompi control send ID 'Please investigate the API failure in your project.'

@@ -3,7 +3,13 @@ import { parseArgs } from "node:util"
 import packageJson from "../package.json" with { type: "json" }
 import { getScope } from "../protocol/index.js"
 import { createTransport } from "../linux/transport.js"
-import { listInstances, formatRows, restartInstances, sendMessage } from "../cli/client.js"
+import {
+  formatListRows,
+  formatRows,
+  listInstances,
+  restartInstances,
+  sendMessage,
+} from "../cli/client.js"
 import { waitForRestarts } from "../cli/restart-wait.js"
 import { listProfileNames } from "../linux/profiles.js"
 import { listSavedSessions, validateRestoreName } from "../linux/restore.js"
@@ -664,7 +670,7 @@ function outcomeSummary(rows) {
   return [...counts].map(([label, count]) => `${count} ${label}`).join(", ")
 }
 
-function notifyRows(ctx, rows, json) {
+function notifyRows(ctx, rows, json, format = formatRows) {
   const hasFailure = rows.some((row) =>
     ["blocked", "failed", "unknown", "unreachable", "restarting", "waiting"].includes(row.status)
   )
@@ -673,7 +679,7 @@ function notifyRows(ctx, rows, json) {
     return
   }
 
-  const lines = [outcomeSummary(rows), formatRows(rows)]
+  const lines = [outcomeSummary(rows), format(rows)]
   if (rows.some((row) => row.status === "unreachable")) {
     lines.push("Unreachable registrations may be stale. Run /ompi cleanup for safe cleanup.")
   }
@@ -966,7 +972,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           const rows = await listInstances(transport)
           replaceCompletionIds(scope, rows, completionIds)
           await refreshProfileNames(scope)
-          notifyRows(ctx, rows, values.json === true)
+          notifyRows(ctx, rows, values.json === true, formatListRows)
           return
         }
         if (action === "send") {

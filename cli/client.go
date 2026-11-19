@@ -3,7 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -202,73 +203,11 @@ func outcomeForError(err error) string {
 	return "unknown"
 }
 
-// FormatRows creates compact operational output; JSON retains diagnostic details.
+// FormatRows groups human-readable list results by working directory.
 func FormatRows(rows []Row) string {
-	var formatted strings.Builder
-	for index, row := range rows {
-		if index > 0 {
-			formatted.WriteByte('\n')
-		}
-		id := row.InstanceID
-		if id == "" && row.Record != nil {
-			id = row.Record.InstanceID
-		}
-		if id == "" {
-			id = "unknown"
-		}
-		if len(id) == 32 {
-			id = id[:12]
-		}
-		state := row.Status
-		if state == "online" && row.Data != nil && row.Data.State != "" {
-			state = row.Data.State
-		}
-		if state == "restart-requested" {
-			state = "restart pending"
-		}
-		formatted.WriteString(safeText(id))
-		formatted.WriteString("  ")
-		formatted.WriteString(safeText(state))
-		if row.Status == "online" {
-			contextVersion := "unknown"
-			if row.Data != nil && validSendContext(row.Data.SendContext) {
-				contextVersion = fmt.Sprintf(
-					"%s (routing protocol %d)",
-					row.Data.SendContext.Version,
-					row.Data.SendContext.ProtocolVersion,
-				)
-			}
-			formatted.WriteString("  Send Context: ")
-			formatted.WriteString(safeText(contextVersion))
-			if row.Data != nil && row.Data.Native != nil {
-				native := row.Data.Native
-				formatted.WriteString("  Native ompi: ")
-				runningVersion := native.RunningVersion
-				if runningVersion == "" {
-					runningVersion = "unknown"
-				}
-				formatted.WriteString(safeText(runningVersion))
-				formatted.WriteString(" (installed ")
-				installedVersion := native.InstalledVersion
-				if installedVersion == "" {
-					installedVersion = "unknown"
-				}
-				formatted.WriteString(safeText(installedVersion))
-				formatted.WriteString("; update ")
-				updateState := native.State
-				if updateState == "" {
-					updateState = "unknown"
-				}
-				formatted.WriteString(safeText(updateState))
-				formatted.WriteByte(')')
-				if native.Message != "" {
-					formatted.WriteString(": ")
-					formatted.WriteString(safeText(native.Message))
-				}
-			} else {
-				formatted.WriteString("  Native ompi: unknown")
-			}
-		}
+	byProject := make(map[string][]*Row)
+	for index := range rows {
+		row := &rows[index]
 		cwd := ""
 		if row.Data != nil {
 			cwd = row.Data.CWD
@@ -276,41 +215,88 @@ func FormatRows(rows []Row) string {
 		if cwd == "" && row.Record != nil {
 			cwd = row.Record.CWD
 		}
-		if cwd != "" {
-			formatted.WriteString("  ")
-			formatted.WriteString(safeText(compactProjectPath(cwd)))
+		byProject[cwd] = append(byProject[cwd], row)
+	}
+
+	projects := make([]string, 0, len(byProject))
+	for cwd := range byProject {
+		projects = append(projects, cwd)
+	}
+	sort.Strings(projects)
+
+	home, _ := os.UserHomeDir()
+	var formatted strings.Builder
+	for index, cwd := range projects {
+		if index > 0 {
+			formatted.WriteByte('\n')
 		}
-		if row.Status == "online" && row.Data != nil && row.Data.LastRestart != nil {
-			formatted.WriteString("  (previous restart completed)")
-		}
-		if details := ErrorSummary(row); details != "" {
-			formatted.WriteString("  ")
-			formatted.WriteString(safeText(details))
+		writeProjectHeading(&formatted, cwd, home)
+		for _, row := range byProject[cwd] {
+			writeListRow(&formatted, row)
 		}
 	}
 	return formatted.String()
 }
 
-func validSendContext(metadata *protocol.SendContextMetadata) bool {
-	return metadata != nil &&
-		metadata.Version != "" &&
-		metadata.Version == strings.TrimSpace(metadata.Version) &&
-		!strings.EqualFold(metadata.Version, "unknown") &&
-		len(metadata.Version) <= 128 &&
-		metadata.ProtocolVersion > 0
+func writeProjectHeading(formatted *strings.Builder, cwd, home string) {
+	if cwd == "" {
+		formatted.WriteString("unknown project")
+		return
+	}
+
+	if home != "" {
+		relative, matchesHome := strings.CutPrefix(cwd, strings.TrimRight(home, "/"))
+		if matchesHome && (relative == "" || strings.HasPrefix(relative, "/")) {
+			formatted.WriteByte('~')
+			if cwd != "/" {
+				writeSafeText(formatted, relative)
+			}
+			return
+		}
+	}
+	writeSafeText(formatted, cwd)
 }
 
-func compactProjectPath(value string) string {
-	trimmed := strings.TrimRight(value, "/")
-	last := strings.LastIndex(trimmed, "/")
-	if last <= 0 {
-		return value
+func writeListRow(formatted *strings.Builder, row *Row) {
+	id := row.InstanceID
+	if id == "" && row.Record != nil {
+		id = row.Record.InstanceID
 	}
-	parent := strings.LastIndex(trimmed[:last], "/")
-	if parent <= 0 {
-		return value
+	if id == "" {
+		id = "unknown"
 	}
-	return "..." + trimmed[parent:]
+	if len(id) == 32 {
+		id = id[:12]
+	}
+
+	state := row.Status
+	if row.Status == "online" && row.Data != nil && row.Data.State != "" {
+		state = row.Data.State
+	}
+	if state == "restart-requested" {
+		state = "restart pending"
+	}
+	formatted.WriteString("\n  ")
+	writeSafeText(formatted, id)
+	formatted.WriteString("  ")
+	writeSafeText(formatted, state)
+
+	if row.Status != "online" {
+		if details := ErrorSummary(*row); details != "" {
+			formatted.WriteString("  ")
+			writeSafeText(formatted, details)
+		}
+		return
+	}
+	if row.Data == nil || row.Data.SessionTitle == nil {
+		return
+	}
+	title := *row.Data.SessionTitle
+	if strings.TrimSpace(title) == "" {
+		return
+	}
+	formatted.WriteString("  ")
+	writeSafeText(formatted, title)
 }
 
 // ErrorSummary omits socket internals from human output, not from JSON results.
@@ -327,14 +313,15 @@ func ErrorSummary(row Row) string {
 	return row.Error
 }
 
-func safeText(value string) string {
-	var escaped strings.Builder
+func writeSafeText(formatted *strings.Builder, value string) {
+	const hexDigits = "0123456789abcdef"
 	for _, character := range value {
 		if character < 0x20 || character >= 0x7f && character <= 0x9f {
-			escaped.WriteString(fmt.Sprintf("\\u%04x", character))
+			formatted.WriteString("\\u00")
+			formatted.WriteByte(hexDigits[character>>4])
+			formatted.WriteByte(hexDigits[character&0xf])
 			continue
 		}
-		escaped.WriteRune(character)
+		formatted.WriteRune(character)
 	}
-	return escaped.String()
 }
