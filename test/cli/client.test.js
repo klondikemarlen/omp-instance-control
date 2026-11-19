@@ -1,7 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { formatRows, listInstances, restartInstances, sendMessage } from "../../cli/client.js"
+import {
+  formatListRows,
+  formatRows,
+  listInstances,
+  restartInstances,
+  sendMessage,
+} from "../../cli/client.js"
 
 const first = { instanceId: "a".repeat(32), pid: 10, cwd: "/one\npath" }
 const second = { instanceId: "b".repeat(32), pid: 11, cwd: "/two" }
@@ -219,10 +225,13 @@ test("when listing a vanished endpoint, its outcome remains distinct from a live
     rows.map((row) => row.status),
     ["unreachable", "online"]
   )
-  assert.match(formatRows(rows), /\\u000apath/)
+  assert.equal(
+    formatListRows(rows),
+    "/one\\u000apath\n  aaaaaaaaaaaa  unreachable  endpoint unavailable\n/two\n  bbbbbbbbbbbb  running"
+  )
 })
 
-test("when status includes loaded Send Context metadata, listing shows its version and protocol", async () => {
+test("when status includes loaded Send Context metadata, list JSON retains it but the compact rows omit it", async () => {
   // Arrange
   const client = transport([first, second], async (record) => {
     let data
@@ -242,13 +251,15 @@ test("when status includes loaded Send Context metadata, listing shows its versi
     rows.map((row) => row.data.sendContext),
     [{ version: "2.8.0", protocolVersion: 1 }, null]
   )
-  assert.match(formatRows(rows), /Send Context: 2\.8\.0 \(routing protocol 1\)/)
-  assert.match(formatRows(rows), /Send Context: unknown/)
+  assert.equal(
+    formatListRows(rows),
+    "/one\\u000apath\n  aaaaaaaaaaaa  running\n/two\n  bbbbbbbbbbbb  running"
+  )
   assert.equal(Object.hasOwn(rows[0], "sendContext"), false)
   assert.equal(JSON.parse(JSON.stringify(rows))[1].data.sendContext, null)
 })
 
-test("when older status data omits Send Context, listing keeps JSON and human output explicitly unknown", async () => {
+test("when older status data omits Send Context and the title, listing leaves them absent", async () => {
   // Arrange
   const client = transport([first], async () => ({ ok: true, data: { state: "running" } }))
 
@@ -257,6 +268,95 @@ test("when older status data omits Send Context, listing keeps JSON and human ou
 
   // Assert
   assert.equal(Object.hasOwn(rows[0].data, "sendContext"), false)
-  assert.match(formatRows(rows), /Send Context: unknown/)
+  assert.equal(formatListRows(rows), "/one\\u000apath\n  aaaaaaaaaaaa  running")
   assert.deepEqual(JSON.parse(JSON.stringify(rows))[0].data, { state: "running" })
+})
+
+test("when project folders have the same name, list headings distinguish their full paths", () => {
+  // Arrange
+  const rows = [
+    {
+      status: "online",
+      record: first,
+      data: {
+        cwd: "/😀/team/project",
+        sessionTitle: null,
+      },
+    },
+    {
+      status: "online",
+      record: second,
+      data: {
+        cwd: "/\ue000/team/project",
+        sessionTitle: "First topic",
+      },
+    },
+    {
+      status: "online",
+      instanceId: "c".repeat(32),
+      data: {
+        cwd: "/\ue000/team/project",
+        state: "restart-requested",
+        sessionTitle: "Second topic",
+        lastRestart: {
+          status: "completed",
+        },
+      },
+    },
+  ]
+
+  // Act / Assert
+  assert.deepEqual(formatListRows(rows).split("\n"), [
+    "/\ue000/team/project",
+    "  bbbbbbbbbbbb  online  First topic",
+    "  cccccccccccc  restart pending  Second topic",
+    "/😀/team/project",
+    "  aaaaaaaaaaaa  online",
+  ])
+})
+
+test("when a project is at or below home, only the home directory prefix is abbreviated", (t) => {
+  // Arrange
+  const previousHome = process.env.HOME
+  process.env.HOME = "/home/ompi-user/"
+  t.after(() => {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+  })
+  const rows = [
+    {
+      instanceId: "a".repeat(32),
+      status: "online",
+      data: {
+        cwd: "/home/ompi-user",
+      },
+    },
+    {
+      instanceId: "b".repeat(32),
+      status: "online",
+      data: {
+        cwd: "/home/ompi-user/work/project",
+      },
+    },
+    {
+      instanceId: "c".repeat(32),
+      status: "online",
+      data: {
+        cwd: "/home/ompi-user-other/work/project",
+      },
+    },
+  ]
+
+  // Act / Assert
+  assert.deepEqual(formatListRows(rows).split("\n"), [
+    "~",
+    "  aaaaaaaaaaaa  online",
+    "/home/ompi-user-other/work/project",
+    "  cccccccccccc  online",
+    "~/work/project",
+    "  bbbbbbbbbbbb  online",
+  ])
 })

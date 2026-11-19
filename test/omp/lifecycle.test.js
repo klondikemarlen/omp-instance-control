@@ -722,6 +722,43 @@ async function createRestartDirectoryFixture({ sendMessages = [] } = {}) {
   }
 }
 
+test("when status is queried again, the adapter reads the current OMP session title", async () => {
+  // Arrange
+  const fixture = await createRestartDirectoryFixture()
+  const { api, transport, record } = fixture
+  function readStatus() {
+    const request = createRequest(record.instanceId, "status")
+    return transport.request(record, request)
+  }
+
+  try {
+    // Act / Assert
+    assert.equal((await readStatus()).data.sessionTitle, null)
+
+    let sessionTitle = "First title"
+    api.getSessionName = () => sessionTitle
+    assert.equal((await readStatus()).data.sessionTitle, "First title")
+
+    sessionTitle = "Renamed title"
+    assert.equal((await readStatus()).data.sessionTitle, "Renamed title")
+    const [registration] = await transport.readRecords()
+    assert.equal(Object.hasOwn(registration, "sessionTitle"), false)
+
+    sessionTitle = "\t\u0085 "
+    assert.equal((await readStatus()).data.sessionTitle, null)
+
+    sessionTitle = undefined
+    assert.equal((await readStatus()).data.sessionTitle, null)
+
+    api.getSessionName = () => {
+      throw new Error("Session name unavailable")
+    }
+    assert.equal((await readStatus()).data.sessionTitle, null)
+  } finally {
+    await fixture.close()
+  }
+})
+
 test("when the working directory disappears before wrapper restart, admission rejects without closing OMP", async () => {
   // Arrange
   const fixture = await createRestartDirectoryFixture()

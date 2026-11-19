@@ -48,6 +48,20 @@ function messageApiError(pi) {
   return null
 }
 
+function readSessionTitle(pi) {
+  let sessionTitle
+  try {
+    sessionTitle = pi.getSessionName?.()
+  } catch {
+    return null
+  }
+
+  if (typeof sessionTitle !== "string" || !/\P{White_Space}/u.test(sessionTitle)) {
+    return null
+  }
+  return sessionTitle
+}
+
 async function sessionPersistence(ctx) {
   const getSessionFile = ctx.sessionManager?.getSessionFile
   if (typeof getSessionFile !== "function") return "unavailable"
@@ -320,6 +334,7 @@ export default async function instanceControl(pi) {
     const ctx = state.ctx
     if (request.action === "status") {
       const currentRecord = record(ctx)
+      const sessionTitle = readSessionTitle(pi)
       const apiUnavailable = restartApiError(ctx) !== null
       const canSend =
         !state.closing && !hasMatchingExitRequest(state, ctx) && messageApiError(pi) === null
@@ -331,6 +346,7 @@ export default async function instanceControl(pi) {
       return {
         data: {
           ...currentRecord,
+          sessionTitle,
           canRestart:
             !hasMatchingExitRequest(state, ctx) &&
             !state.launch.restartError &&
