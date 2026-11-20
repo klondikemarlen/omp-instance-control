@@ -226,7 +226,7 @@ Select a slot and confirm its exact session ID and working directory. `ompi cont
 
 Managed recovery reopens the conversation for inspection; it does **not** ask OMP to continue interrupted turns or subagents. Check which conversation opened before asking it to continue. OMP 19.0.1 may follow a newer continuation of the selected transcript even when given its absolute path. Native `omp --restore` can resume unfinished work, including tool calls, and is not a substitute for inspecting a managed slot. Normal graceful restart still waits for OMP to settle.
 
-If you launched an older wrapper with `--restore`, exit normally rather than requesting a restart. Version 1.2.1 does not replay old saved launch options that still contain that flag. Once the original processes have stopped, use a fresh wrapper in the original project and profile with `-r /absolute/path/to/session.jsonl` to inspect the conversation without requesting interrupted work. Do not edit a saved slot or recovery record to bypass a refusal.
+If you launched an older wrapper with `--restore`, exit normally rather than requesting a restart. Version 1.2.1 omits the old flag when reading a saved slot. It refuses pending or failed restart handoffs that still request native restore. If your handoff is refused, wait until the original processes have stopped, then use a fresh wrapper in the original project and profile with `-r /absolute/path/to/session.jsonl`. Do not edit a recovery record to bypass a refusal.
 
 Optional names remain available:
 
