@@ -277,7 +277,16 @@ Resource refresh is not loaded-extension re-evaluation or executable upgrade. Do
 
 ## Development and Release
 
-Install Go 1.25+, [golangci-lint v2](https://golangci-lint.run/docs/welcome/install/local/) (tested with 2.15.0), Node.js 22.13+, RuboCop 1.92+, and ShellCheck 0.11+ for development. The linters must be on `PATH`; on Ubuntu, install ShellCheck with `sudo apt install shellcheck`. JavaScript tools are pinned in `package-lock.json`.
+The checkout's `.tool-versions` pins Go, golangci-lint, and ShellCheck for development. With asdf shims on `PATH`, register any missing plugins once, then install the pinned versions from this directory:
+
+```bash
+asdf plugin add golang https://github.com/asdf-community/asdf-golang.git
+asdf plugin add golangci-lint https://github.com/hypnoglow/asdf-golangci-lint.git
+asdf plugin add shellcheck https://github.com/luizm/asdf-shellcheck.git
+asdf install
+```
+
+These pins do not change your home defaults. You also need Node.js 22.13+ and RuboCop 1.92+; `npm ci` installs the JavaScript lint dependencies from `package-lock.json`. Without asdf, put the pinned tool versions on `PATH` yourself.
 
 ```bash
 npm ci
