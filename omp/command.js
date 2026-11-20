@@ -636,7 +636,7 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
     return []
   }
 
-  const inlineProfile = tokenPrefix.startsWith("--profile=")
+  const inlineProfile = !pendingProfile && tokenPrefix.startsWith("--profile=")
 
   if (pendingProfile || inlineProfile) {
     return completionValues(
