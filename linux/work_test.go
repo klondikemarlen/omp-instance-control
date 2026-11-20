@@ -146,7 +146,7 @@ func TestWorkClaimsFailClosedOnUnsafeRecords(t *testing.T) {
 		{
 			name: "hard link",
 			prepare: func(t *testing.T, file string, claim protocol.WorkClaim) {
-				target := filepath.Join(t.TempDir(), "target.json")
+				target := filepath.Join(privateWorkTestDir(t), "target.json")
 				if err := WritePrivateJSON(target, claim); err != nil {
 					t.Fatal(err)
 				}
@@ -286,9 +286,18 @@ func TestWorkClaimsRejectAnUnsafeScopeDirectory(t *testing.T) {
 	}
 }
 
+func privateWorkTestDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func workClaimFixture(t *testing.T) (protocol.Scope, protocol.WorkClaim) {
 	t.Helper()
-	home := t.TempDir()
+	home := privateWorkTestDir(t)
 	scope := protocol.Scope{
 		ID:         "aaaaaaaaaaaaaaaa",
 		ConfigRoot: filepath.Join(home, ".omp"),
