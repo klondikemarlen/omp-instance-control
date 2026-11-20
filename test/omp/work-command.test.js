@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
-import { mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, writeFile } from "node:fs/promises"
+import { createServer } from "node:net"
 import path from "node:path"
 import test from "node:test"
 
@@ -210,6 +211,7 @@ test("when the conversation cwd disappeared, slash work reports the cwd instead 
   // Arrange
   const fixture = await createFixture()
   t.after(() => fixture.close())
+  process.env.PATH = path.join(fixture.root, "without ompi")
   const ctx = createContext(path.join(fixture.root, "missing worktree"))
   const ui = createCommand(ctx)
 
@@ -289,8 +291,24 @@ test("when the managed session changes during native discovery, slash refuses wo
   // Arrange
   const fixture = await createFixture()
   t.after(() => fixture.close())
-  const executable = path.join(fixture.root, "managed bin", "ompi")
-  await writeWorkExecutable(executable)
+  const executable = path.join(fixture.root, "ompi")
+  const socket = path.join(fixture.root, "probe.sock")
+  const clearMarker = path.join(fixture.root, "clear-called")
+  await writeFile(
+    executable,
+    `#!${process.execPath}
+if (process.argv.slice(2).join(" ") === "control work --help") {
+  require("node:net").connect(${JSON.stringify(socket)}).on("end", () => {
+    console.log("Usage: ompi control work")
+  }).resume()
+} else {
+  require("node:fs").writeFileSync(${JSON.stringify(clearMarker)}, "called")
+}
+`,
+    {
+      mode: 0o700,
+    }
+  )
   const ctx = createContext(fixture.cwd)
   let sessionFile = path.join(fixture.root, "original.ndjson")
   ctx.sessionManager = {
@@ -301,13 +319,26 @@ test("when the managed session changes during native discovery, slash refuses wo
   const ui = createCommand(ctx, {
     runtime,
   })
+  let probeStarted = false
+  const server = createServer((connection) => {
+    probeStarted = true
+    sessionFile = path.join(fixture.root, "replacement.ndjson")
+    connection.end()
+  })
+  await new Promise((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(socket, resolve)
+  })
+  t.after(() => server.close())
 
   // Act
-  const clearing = ui.command.handler("work clear", ctx)
-  sessionFile = path.join(fixture.root, "replacement.ndjson")
-  await clearing
+  await ui.command.handler("work clear", ctx)
 
   // Assert
+  assert.equal(probeStarted, true)
+  await assert.rejects(access(clearMarker), {
+    code: "ENOENT",
+  })
   assert.deepEqual(ui.notifications, [
     {
       level: "error",
