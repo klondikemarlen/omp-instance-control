@@ -1,3 +1,9 @@
+omp-instance-control (1.2.1~ppa1) resolute; urgency=medium
+
+  * Keep native interrupted-work recovery out of managed relaunches.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 20 Nov 2026 11:33:00 -0700
+
 omp-instance-control (1.2.0~ppa1) resolute; urgency=medium
 
   * Find the conversations that claim a GitHub issue or pull request.

@@ -24,7 +24,7 @@ func TestWrapperRestartHarness(t *testing.T) {
 	os.Args[0] = os.Getenv("OMPI_TEST_WRAPPER_PATH")
 	var args []string
 	if phase == "original" {
-		args = []string{"--profile", "work", "--config", "settings.json", "initial prompt"}
+		args = []string{"--profile", "work", "--config", "settings.json", "--restore=original-session", "--system-prompt=--restore", "initial prompt"}
 	}
 	code, err := Launch(args, filepath.Join(os.Getenv("OMPI_TEST_ROOT"), "adapter.js"), "test")
 	if err != nil || code != 0 {
@@ -107,13 +107,55 @@ func TestWrapperRestartExecutesAtomicallyReplacedBinaryAndRetainsOwnership(t *te
 		!reflect.DeepEqual(first.Launch["scope"], second.Launch["scope"]) {
 		t.Fatalf("replacement lost launch identity or scope: first=%#v second=%#v", first, second)
 	}
-	if second.CWD != cwd || !containsPair(second.Args, "-r", session) ||
-		!containsPair(second.Args, "--config", filepath.Join(root, "settings.json")) || contains(second.Args, "initial prompt") {
-		t.Fatalf("replacement changed current session/cwd/arguments: %#v", second)
+	if !contains(first.Args, "--restore=original-session") {
+		t.Fatalf("initial OMP invocation did not receive the explicit restore option: %#v", first.Args)
+	}
+	wantSaved := []any{"--profile", "work", "--config", filepath.Join(root, "settings.json"), "--system-prompt=--restore"}
+	if !reflect.DeepEqual(first.Launch["resumeArgs"], wantSaved) {
+		t.Fatalf("initial launch metadata retained one-shot options or changed literal values: %#v", first.Launch["resumeArgs"])
+	}
+	wantReplacement := []string{
+		"-e", filepath.Join(root, "adapter.js"),
+		"--profile", "work",
+		"--config", filepath.Join(root, "settings.json"),
+		"--system-prompt=--restore",
+		"-r", session,
+	}
+	if second.CWD != cwd || !reflect.DeepEqual(second.Args, wantReplacement) {
+		t.Fatalf("replacement did not pass only normalized options and the selected transcript: %#v", second)
 	}
 	correlation := second.Launch["lastRestart"].(map[string]any)
 	if correlation["operationId"] != "operation-123" || correlation["previousInstanceId"] != "00000000000000000000000000000001" {
 		t.Fatalf("replacement lost restart correlation: %#v", correlation)
+	}
+}
+
+func TestPendingWrapperRestartRefusesPersistedNativeRestore(t *testing.T) {
+	fixtureScope, session := newRestoreFixture(t, strings.Repeat("c", 32), stoppedRestoreOwner())
+	t.Setenv("PI_CONFIG_DIR", fixtureScope.ConfigRoot)
+	t.Setenv("PI_CODING_AGENT_DIR", fixtureScope.AgentDir)
+	scope, err := protocol.GetScope("default", session.CWD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := wrapperExecState{
+		Version:     1,
+		Token:       strings.Repeat("b", 32),
+		Scope:       scope,
+		Args:        []string{"--profile=default", "--system-prompt=--restore"},
+		CWD:         session.CWD,
+		SessionFile: session.SessionFile,
+		Restart: restartRecord{
+			OperationID:        "legacy-restart",
+			PreviousInstanceID: strings.Repeat("c", 32),
+		},
+	}
+	if err := validateWrapperExecState(state, 0); err != nil {
+		t.Fatalf("pending restart with a literal --restore value refused: %v", err)
+	}
+	state.Args = append(state.Args, "--restore")
+	if err := validateWrapperExecState(state, 0); err == nil {
+		t.Fatal("pending restart accepted a persisted native restore option")
 	}
 }
 

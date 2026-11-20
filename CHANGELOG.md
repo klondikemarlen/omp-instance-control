@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 - 2026-11-20
+
+### Fixed
+
+- Managed restart and recovery no longer replay OMP's `--restore` option. An explicit native restore applies only to the launch that requested it.
+
 ## 1.2.0 - 2026-11-20
 
 ### Added

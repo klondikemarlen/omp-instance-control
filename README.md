@@ -82,7 +82,7 @@ The default list groups peers by working directory. Each row shows a short launc
 
 Use `ompi control restart all --no-wait` for acknowledgement-only behavior. Waiting is unlimited by default. Ctrl-C stops watching and exits with status 130; it does not cancel accepted requests or kill OMP. `--json` waits too and prints only the final result array; combine it with `--no-wait` when scripts need immediate acceptance.
 
-Every `ompi control restart ID_OR_PREFIX|all` and `/ompi restart [ID_OR_PREFIX|all]` replaces each selected terminal's native `ompi` wrapper as well as OMP. After OMP settles and exits successfully, the wrapper executes its installed replacement, reloads the adapter, and resumes the exact current transcript and working directory. The recovery slot and its lock survive native replacement; a fresh control identity identifies the new OMP launch. Bare `/ompi restart` selects only the invoking terminal; explicit IDs and `all` retain their profile/config-root scope.
+Every `ompi control restart ID_OR_PREFIX|all` and `/ompi restart [ID_OR_PREFIX|all]` replaces each selected terminal's native `ompi` wrapper as well as OMP. After OMP settles and exits successfully, the wrapper executes its installed replacement and asks OMP to resume the recorded transcript path in its working directory with the adapter reloaded. The recovery slot and its lock survive native replacement; a fresh control identity identifies the new OMP launch. Bare `/ompi restart` selects only the invoking terminal; explicit IDs and `all` retain their profile/config-root scope.
 
 Prompts typed while busy, including `/queue` and `=>` input, belong to OMP's normal follow-up queue. OMP drains that queue before shutdown; ompi neither copies it into a checkpoint nor submits it again after relaunch. A finished turn alone is not proof of settlement: OMP also accounts for admitted submissions and pending async-result delivery. This is a normal settled-restart guarantee, not a claim that arbitrary subprocesses or in-memory work survive crashes.
 
@@ -206,7 +206,7 @@ With the plugin loaded in ordinary `omp` and the native `ompi` executable on `PA
 /ompi take-over
 ```
 
-Copy the shell command from the dialog, then confirm graceful exit. After OMP has exited and your shell prompt returns, paste that command once in the same terminal. It resumes the exact saved session under `ompi`, preserving its current working directory, profile, config root, default-profile agent-directory override, and runtime-directory scope.
+Copy the shell command from the dialog, then confirm graceful exit. After OMP has exited and your shell prompt returns, paste that command once in the same terminal. It passes the saved session path to OMP under `ompi`, preserving the working directory, profile, config root, default-profile agent-directory override, and runtime-directory scope.
 
 The command is a snapshot of the session you selected; do not switch sessions while waiting for exit. Preparation is saved in session metadata without starting a model turn. Cancelling the dialog or changing sessions before confirmation leaves OMP running. Missing, empty, or ephemeral session files, an unavailable `ompi`, and control characters in command values are refused before shutdown. Already wrapped sessions use `/ompi restart` instead.
 
@@ -223,6 +223,10 @@ ompi control restore
 ```
 
 Select a slot and confirm its exact session ID and working directory. `ompi control restore list` lists candidates; add `--json` for structured output. Use `ompi control restore slot FULL_SLOT_ID` to select directly and `--profile work` explicitly for another OMP profile. Recovery runs only in the terminal where you invoke it; it does not open terminal windows or modify shell startup.
+
+Managed recovery reopens the conversation for inspection; it does **not** ask OMP to continue interrupted turns or subagents. Check which conversation opened before asking it to continue. OMP 19.0.1 may follow a newer continuation of the selected transcript even when given its absolute path. Native `omp --restore` can resume unfinished work, including tool calls, and is not a substitute for inspecting a managed slot. Normal graceful restart still waits for OMP to settle.
+
+If you launched an older wrapper with `--restore`, exit normally rather than requesting a restart. Version 1.2.1 omits the old flag when reading a saved slot. It refuses pending or failed restart handoffs that still request native restore. If your handoff is refused, wait until the original processes have stopped, then use a fresh wrapper in the original project and profile with `-r /absolute/path/to/session.jsonl`. Do not edit a recovery record to bypass a refusal.
 
 Optional names remain available:
 
