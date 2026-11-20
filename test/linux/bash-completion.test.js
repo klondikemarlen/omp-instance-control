@@ -102,6 +102,46 @@ for (const { condition, words, expected } of [
     expected: [],
   },
   {
+    condition: "the work command is typed",
+    words: ["ompi", "control", "wo"],
+    expected: ["work"],
+  },
+  {
+    condition: "help is requested for work",
+    words: ["ompi", "control", "help", "wo"],
+    expected: ["work"],
+  },
+  {
+    condition: "a work operation is not yet selected",
+    words: ["ompi", "control", "work", ""],
+    expected: ["list", "find", "set", "clear", "help", "--help"],
+  },
+  {
+    condition: "a work set target is not yet selected",
+    words: ["ompi", "control", "work", "set", "--"],
+    expected: ["--profile", "--json", "--branch"],
+  },
+  {
+    condition: "a work set branch has already been supplied",
+    words: ["ompi", "control", "work", "set", "--branch=work", "--"],
+    expected: ["--profile", "--json"],
+  },
+  {
+    condition: "a work set branch value is pending",
+    words: ["ompi", "control", "work", "set", "--branch", "--"],
+    expected: [],
+  },
+  {
+    condition: "a work clear target is not yet selected",
+    words: ["ompi", "control", "work", "clear", "--"],
+    expected: ["--profile", "--json"],
+  },
+  {
+    condition: "a work set summary starts with an option",
+    words: ["ompi", "control", "work", "set", "aaa", "https://github.com/org/repo/issues/1", "--"],
+    expected: [],
+  },
+  {
     condition: "a checkpoint operation is selected",
     words: ["ompi", "control", "restore", "checkpoint", "--"],
     expected: ["--profile"],
