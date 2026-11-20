@@ -7,6 +7,7 @@ import { parseArgs, promisify } from "node:util"
 import { validateInstanceId } from "../protocol/index.js"
 
 const execFileAsync = promisify(execFile)
+// The native work help banner distinguishes a capable wrapper from an older ompi on PATH.
 const WORK_HELP_MARKER = "Usage: ompi control work"
 
 const WORK_USAGE = {
@@ -83,17 +84,23 @@ function parseWorkArguments(args) {
   const tokens = args.matchAll(/\S+/g)
   tokens.next() // work
   const name = tokens.next().value?.[0]
-  if (!name || ["help", "--help", "-h"].includes(name)) return null
+  if (!name || ["help", "--help", "-h"].includes(name)) {
+    return null
+  }
 
   if (!WORK_OPERATIONS.includes(name)) {
     throw new Error(`Unknown /ompi work operation: ${name}; use /ompi help work.`)
   }
 
   const argument = tokens.next().value
-  if (["--help", "-h"].includes(argument?.[0]) && tokens.next().done) return null
+  if (["--help", "-h"].includes(argument?.[0]) && tokens.next().done) {
+    return null
+  }
 
   if (name === "clear") {
-    if (argument) throw new Error(`Usage: ${WORK_USAGE.clear} (this managed session only).`)
+    if (argument) {
+      throw new Error(`Usage: ${WORK_USAGE.clear} (this managed session only).`)
+    }
 
     return {
       name,
@@ -101,10 +108,16 @@ function parseWorkArguments(args) {
       positionals: [],
     }
   }
-  if (name === "set") return parseWorkSet(args, argument, tokens)
+  if (name === "set") {
+    return parseWorkSet(args, argument, tokens)
+  }
 
+  const optionTokens = argument ? [argument[0]] : []
+  for (const [token] of tokens) {
+    optionTokens.push(token)
+  }
   const { values, positionals } = parseArgs({
-    args: argument ? [argument[0], ...Array.from(tokens, (token) => token[0])] : [],
+    args: optionTokens,
     options: {
       profile: {
         type: "string",
@@ -136,7 +149,9 @@ function parseWorkSet(args, firstArgument, tokens) {
   let url = firstArgument
   if (firstArgument?.[0] === "--branch") {
     const branch = tokens.next().value?.[0]
-    if (!branch || branch.startsWith("-")) throw new Error("--branch requires a branch name.")
+    if (!branch || branch.startsWith("-")) {
+      throw new Error("--branch requires a branch name.")
+    }
 
     options.push(`--branch=${branch}`)
     url = tokens.next().value
@@ -146,7 +161,9 @@ function parseWorkSet(args, firstArgument, tokens) {
   }
 
   const summary = args.slice(url.index + url[0].length + 1)
-  if (!summary.trim()) throw new Error("/ompi work set requires a nonempty summary after URL.")
+  if (!summary.trim()) {
+    throw new Error("/ompi work set requires a nonempty summary after URL.")
+  }
 
   return {
     name: "set",

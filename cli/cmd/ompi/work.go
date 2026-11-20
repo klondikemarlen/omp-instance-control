@@ -14,6 +14,7 @@ import (
 	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
 
+// The adapter probes the first line for WORK_HELP_MARKER in omp/work-command.js.
 const workHelp = `Usage: ompi control work COMMAND [OPTIONS]
   ompi control work list [--profile NAME] [--json]
   ompi control work find [--profile NAME] [--json] URL

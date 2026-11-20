@@ -616,18 +616,27 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
   if (operation === "set" && tokens.length === 0 && tokenPrefix.startsWith("-")) {
     return completionValues([completionItem("--branch")], completedTokens, tokenPrefix)
   }
-  if (operation !== "list" && operation !== "find") return []
+  if (operation !== "list" && operation !== "find") {
+    return []
+  }
 
   const context = completionContext(tokens)
   const maximumPositionals = operation === "find" ? 1 : 0
-  if (context.ended || context.positionals.length > maximumPositionals) return []
+  const unsupportedOption = [...context.options].some(
+    (name) => !LIST_COMPLETIONS.includes(`--${name}`)
+  )
+  if (context.ended || unsupportedOption || context.positionals.length > maximumPositionals) {
+    return []
+  }
 
   const inlineProfile = tokenPrefix.startsWith("--profile=")
 
   if (context.pendingValue === "profile" || inlineProfile) {
     return completionValues(
       profileNames.map((name) => {
-        if (inlineProfile) return completionItem(`--profile=${name}`, name)
+        if (inlineProfile) {
+          return completionItem(`--profile=${name}`, name)
+        }
 
         return completionItem(name)
       }),
@@ -635,7 +644,9 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
       tokenPrefix
     )
   }
-  if (!tokenPrefix.startsWith("-")) return []
+  if (!tokenPrefix.startsWith("-")) {
+    return []
+  }
 
   return completionValues(
     LIST_COMPLETIONS.filter((option) => !context.options.has(option.slice(2))).map((value) =>
