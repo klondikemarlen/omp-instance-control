@@ -98,7 +98,7 @@ Use OMP's `/restart` in the current terminal when only OMP needs to pick up an u
 
 ## Host API Dependency
 
-In OMP 19.0.1, native peers join a [room for their project directory](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/irc/mesh.ts#L136-L145). Its [PID roster and agent outputs](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/internal-urls/agent-protocol.ts#L342-L380) support collaboration, not selection across projects or proof that a particular restart completed. ompi checks the replacement's operation ID and previous launch ID, not its PID. See the [wrapper removal criteria](README.md#temporary-ownership-and-upstream-removal) and the [upstream request for scoped reload](https://github.com/can1357/oh-my-pi/issues/6458).
+In OMP 19.0.1, native peers join a [room for their project directory](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/irc/mesh.ts#L136-L145). Its [PID roster and agent outputs](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/internal-urls/agent-protocol.ts#L342-L380) support collaboration, not selection across projects or proof that a particular restart completed. A PID alone is insufficient: ompi requires the live replacement to report the expected operation ID and previous launch ID. See the [wrapper removal criteria](README.md#temporary-ownership-and-upstream-removal) and the [upstream request for scoped reload](https://github.com/can1357/oh-my-pi/issues/6458).
 
 Versioned source contracts:
 
