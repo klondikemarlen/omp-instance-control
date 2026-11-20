@@ -68,10 +68,14 @@ export async function workCommand(args, ctx, getRuntime) {
     return stdout.trimEnd()
   } catch (error) {
     if (error.code === "ENOENT") {
-      throw new Error("The native ompi executable or current working directory disappeared.")
+      throw new Error("The native ompi executable or current working directory disappeared.", {
+        cause: error,
+      })
     }
     const diagnostic = error.stderr?.trim()
-    throw new Error(diagnostic || `Native ompi work failed (${error.code ?? "unknown error"}).`)
+    throw new Error(diagnostic || `Native ompi work failed (${error.code ?? "unknown error"}).`, {
+      cause: error,
+    })
   }
 }
 
@@ -191,7 +195,12 @@ async function requireWorkingDirectory(cwd) {
 
     await access(cwd, constants.X_OK)
   } catch (error) {
-    throw new Error(`The current working directory for /ompi work is unavailable: ${error.message}`)
+    throw new Error(
+      `The current working directory for /ompi work is unavailable: ${error.message}`,
+      {
+        cause: error,
+      }
+    )
   }
 }
 
@@ -264,7 +273,9 @@ async function requireWorkSupport(executable, { cwd, env }) {
     if (stdout.startsWith(WORK_HELP_MARKER)) return
   } catch (error) {
     if (error.code === "ENOENT") {
-      throw new Error("The native ompi executable or current working directory disappeared.")
+      throw new Error("The native ompi executable or current working directory disappeared.", {
+        cause: error,
+      })
     }
   }
   throw new Error(
