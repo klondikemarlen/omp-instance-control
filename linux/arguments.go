@@ -6,10 +6,13 @@ import (
 	"strings"
 )
 
-// restartArguments mirrors OMP's public v18.8.7 flag tables. Unknown long
-// flags followed by a value-like token are deliberately ambiguous: that token
-// may be a string flag's value or the initial prompt, so neither is replayed.
+// Unknown long flags followed by a value-like token are deliberately
+// ambiguous: that token may be an extension flag's value or a startup prompt.
 func restartArguments(args []string, initialCwd string, builtinFlags *[]string) ([]string, string, string, error) {
+	return projectRestartArguments(args, initialCwd, builtinFlags, nil)
+}
+
+func projectRestartArguments(args []string, initialCwd string, builtinFlags *[]string, legacyRestoreIndexes *[]int) ([]string, string, string, error) {
 	profile := ""
 	cwd := initialCwd
 	var kept []string
@@ -54,6 +57,11 @@ func restartArguments(args []string, initialCwd string, builtinFlags *[]string) 
 			cwd = absolutePath(initialCwd, value)
 		}
 		if isSessionSource(name) || name == "--goal" || name == "--cwd" {
+			// Older v1 slots could contain a bare or inline --restore, but
+			// their unknown-string guard rejected the spaced selector form.
+			if legacyRestoreIndexes != nil && name == "--restore" && !consumesNext {
+				*legacyRestoreIndexes = append(*legacyRestoreIndexes, i)
+			}
 			continue
 		}
 		if (kind == valueRequired || kind == valuePlan) && !present && restartError == nil {
@@ -124,7 +132,7 @@ func flagValueKind(name string) valueKind {
 		return valueRequired
 	case "--plan":
 		return valuePlan
-	case "--resume", "-r", "--session":
+	case "--resume", "-r", "--session", "--restore":
 		return valueOptional
 	case "--help", "-h", "--version", "-v", "--allow-home", "--continue", "-c", "--from-claude", "--from-codex", "--no-session", "--no-tools", "--no-lsp", "--no-pty", "--hide-thinking", "--advisor", "--external-thinking", "--prewalk", "--no-prewalk", "--plan-yolo", "--print", "--print-thoughts", "--no-extensions", "--no-skills", "--no-rules", "--no-title", "--no-ui", "--auto-approve", "--yolo":
 		return valueBoolean
@@ -138,7 +146,7 @@ func flagValueKind(name string) valueKind {
 
 func isSessionSource(name string) bool {
 	switch name {
-	case "--resume", "-r", "--session", "--continue", "-c", "--fork", "--from-claude", "--from-codex":
+	case "--resume", "-r", "--session", "--restore", "--continue", "-c", "--fork", "--from-claude", "--from-codex":
 		return true
 	default:
 		return false

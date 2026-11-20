@@ -112,7 +112,7 @@ func readFailedRestart(file string) (failedRestartRecord, error) {
 	if file != failedRestartPath(session.Scope, record.Restart.OperationID) {
 		return record, errors.New("restart recovery record path does not match its original scope and operation")
 	}
-	if err := validateSavedSession(session, session.Scope, session.RestoreID, false); err != nil {
+	if err := validateSavedSession(session, session.Scope, session.RestoreID, false, nil); err != nil {
 		return record, err
 	}
 	request := protocol.Request{
@@ -127,7 +127,7 @@ func readFailedRestart(file string) (failedRestartRecord, error) {
 
 func validateFailedRestartTarget(record failedRestartRecord) error {
 	session := record.Session
-	if err := validateSavedSession(session, session.Scope, session.RestoreID, true); err != nil {
+	if err := validateSavedSession(session, session.Scope, session.RestoreID, true, nil); err != nil {
 		return err
 	}
 	identity, err := restartPathIdentity(session.SessionFile, false)

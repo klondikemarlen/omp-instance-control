@@ -284,13 +284,13 @@ func readSavedSession(directories restoreDirectories, scope protocol.Scope, rest
 	if err := readRestoreJSON(file, &session); err != nil {
 		return protocol.SavedSession{}, err
 	}
-	if err := validateSavedSession(session, scope, restoreID, validateFiles); err != nil {
+	if err := validateSavedSession(session, scope, restoreID, validateFiles, &session.ResumeArgs); err != nil {
 		return protocol.SavedSession{}, err
 	}
 	return session, nil
 }
 
-func validateSavedSession(session protocol.SavedSession, scope protocol.Scope, restoreID string, validateFiles bool) error {
+func validateSavedSession(session protocol.SavedSession, scope protocol.Scope, restoreID string, validateFiles bool, slotResumeArgs *[]string) error {
 	if session.Version != 1 || session.RestoreID != restoreID || session.Scope != scope {
 		return errors.New("snapshot version, restore ID, or scope does not match")
 	}
@@ -337,17 +337,44 @@ func validateSavedSession(session protocol.SavedSession, scope protocol.Scope, r
 		}
 	}
 
-	normalizedArgs, profile, cwd, err := restartArguments(session.ResumeArgs, session.CWD, nil)
+	var legacyRestoreIndexes []int
+	var ignoredIndexes *[]int
+	if slotResumeArgs != nil {
+		ignoredIndexes = &legacyRestoreIndexes
+	}
+	normalizedArgs, profile, cwd, err := projectRestartArguments(session.ResumeArgs, session.CWD, nil, ignoredIndexes)
 	if err != nil {
 		return fmt.Errorf("snapshot launch options are unsafe: %w", err)
 	}
-	if !slices.Equal(normalizedArgs, session.ResumeArgs) || cwd != session.CWD {
+	if !equalSavedResumeArgs(normalizedArgs, session.ResumeArgs, legacyRestoreIndexes) || cwd != session.CWD {
 		return errors.New("snapshot launch options are not safely normalized or include a startup prompt")
 	}
 	if profile != "" && strings.TrimSpace(profile) != session.Scope.Profile {
 		return errors.New("snapshot launch options select a different OMP profile")
 	}
+	if len(legacyRestoreIndexes) > 0 {
+		if normalizedArgs == nil {
+			normalizedArgs = []string{}
+		}
+		*slotResumeArgs = normalizedArgs
+	}
 	return nil
+}
+
+func equalSavedResumeArgs(normalized, persisted []string, legacyRestoreIndexes []int) bool {
+	if len(normalized)+len(legacyRestoreIndexes) != len(persisted) {
+		return false
+	}
+	start := 0
+	for _, index := range legacyRestoreIndexes {
+		length := index - start
+		if !slices.Equal(normalized[:length], persisted[start:index]) {
+			return false
+		}
+		start = index + 1
+		normalized = normalized[length:]
+	}
+	return slices.Equal(normalized, persisted[start:])
 }
 
 func validateRestorePath(path string, directory bool) error {
