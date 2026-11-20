@@ -17,7 +17,7 @@ import { prepareTakeover } from "./take-over.js"
 import { listRecoveryCheckpoints, listRecoverySlotIds } from "../linux/recovery.js"
 import { createRestoreCommand, getRestoreScope } from "./recovery-command.js"
 import { requestWrapperRestart } from "./restart.js"
-import { WORK_HELP, WORK_OPERATIONS, workCommand } from "./work-command.js"
+import { parseWorkLookupOptions, WORK_HELP, WORK_OPERATIONS, workCommand } from "./work-command.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
@@ -620,18 +620,25 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
     return []
   }
 
-  const context = completionContext(tokens)
+  if (tokens.includes("--")) {
+    return []
+  }
+  const pendingProfile = tokens.at(-1) === "--profile"
+  const completeOptions = pendingProfile ? tokens.slice(0, -1) : tokens
+  let parsed
+  try {
+    parsed = parseWorkLookupOptions(completeOptions)
+  } catch {
+    return []
+  }
   const maximumPositionals = operation === "find" ? 1 : 0
-  const unsupportedOption = [...context.options].some(
-    (name) => !LIST_COMPLETIONS.includes(`--${name}`)
-  )
-  if (context.ended || unsupportedOption || context.positionals.length > maximumPositionals) {
+  if (parsed.positionals.length > maximumPositionals) {
     return []
   }
 
   const inlineProfile = tokenPrefix.startsWith("--profile=")
 
-  if (context.pendingValue === "profile" || inlineProfile) {
+  if (pendingProfile || inlineProfile) {
     return completionValues(
       profileNames.map((name) => {
         if (inlineProfile) {
@@ -649,8 +656,8 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
   }
 
   return completionValues(
-    LIST_COMPLETIONS.filter((option) => !context.options.has(option.slice(2))).map((value) =>
-      completionItem(value)
+    LIST_COMPLETIONS.filter((option) => !Object.hasOwn(parsed.values, option.slice(2))).map(
+      (value) => completionItem(value)
     ),
     completedTokens,
     tokenPrefix

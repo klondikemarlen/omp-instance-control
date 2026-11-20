@@ -7,7 +7,7 @@ import { parseArgs, promisify } from "node:util"
 import { validateInstanceId } from "../protocol/index.js"
 
 const execFileAsync = promisify(execFile)
-// The native work help banner distinguishes a capable wrapper from an older ompi on PATH.
+// Keep in sync with the first line of workHelp in cli/cmd/ompi/work.go.
 const WORK_HELP_MARKER = "Usage: ompi control work"
 
 const WORK_USAGE = {
@@ -30,7 +30,9 @@ export const WORK_HELP = [
 
 export async function workCommand(args, ctx, getRuntime) {
   const operation = parseWorkArguments(args)
-  if (operation === null) return WORK_HELP.join("\n")
+  if (operation === null) {
+    return WORK_HELP.join("\n")
+  }
 
   const cwd = ctx.cwd
   const runtime = getRuntime()
@@ -43,7 +45,9 @@ export async function workCommand(args, ctx, getRuntime) {
   }
 
   argv.push(...operation.options, "--")
-  if (isMutation) argv.push(runtime.instanceId)
+  if (isMutation) {
+    argv.push(runtime.instanceId)
+  }
   argv.push(...operation.positionals)
 
   await requireWorkingDirectory(cwd)
@@ -116,8 +120,30 @@ function parseWorkArguments(args) {
   for (const [token] of tokens) {
     optionTokens.push(token)
   }
-  const { values, positionals } = parseArgs({
-    args: optionTokens,
+  const { values, positionals } = parseWorkLookupOptions(optionTokens)
+  if (positionals.length !== (name === "find" ? 1 : 0)) {
+    throw new Error(`Usage: ${WORK_USAGE[name]}`)
+  }
+
+  const options = []
+  if (values.profile !== undefined) {
+    options.push(`--profile=${values.profile}`)
+  }
+  if (values.json) {
+    options.push("--json")
+  }
+
+  return {
+    name,
+    options,
+    positionals,
+    profile: values.profile,
+  }
+}
+
+export function parseWorkLookupOptions(args) {
+  return parseArgs({
+    args,
     options: {
       profile: {
         type: "string",
@@ -128,20 +154,6 @@ function parseWorkArguments(args) {
     },
     allowPositionals: true,
   })
-  if (positionals.length !== (name === "find" ? 1 : 0)) {
-    throw new Error(`Usage: ${WORK_USAGE[name]}`)
-  }
-
-  const options = []
-  if (values.profile !== undefined) options.push(`--profile=${values.profile}`)
-  if (values.json) options.push("--json")
-
-  return {
-    name,
-    options,
-    positionals,
-    profile: values.profile,
-  }
 }
 
 function parseWorkSet(args, firstArgument, tokens) {
@@ -208,7 +220,9 @@ async function requireWorkingDirectory(cwd) {
   }
 
   try {
-    if (!(await stat(cwd)).isDirectory()) throw new Error("not a directory")
+    if (!(await stat(cwd)).isDirectory()) {
+      throw new Error("not a directory")
+    }
 
     await access(cwd, constants.X_OK)
   } catch (error) {
@@ -260,17 +274,23 @@ async function resolveNativeExecutable(runtime, env) {
 
   for (const directory of (env.PATH ?? "").split(path.delimiter)) {
     // Do not search the conversation directory for a standalone controller.
-    if (!path.isAbsolute(directory)) continue
+    if (!path.isAbsolute(directory)) {
+      continue
+    }
 
     const candidate = path.join(directory, "ompi")
-    if (await isExecutable(candidate)) return candidate
+    if (await isExecutable(candidate)) {
+      return candidate
+    }
   }
   throw new Error("Native ompi was not found on PATH; install an ompi version with work support.")
 }
 
 async function isExecutable(executable) {
   try {
-    if (!(await stat(executable)).isFile()) return false
+    if (!(await stat(executable)).isFile()) {
+      return false
+    }
 
     await access(executable, constants.X_OK)
     return true
@@ -287,7 +307,9 @@ async function requireWorkSupport(executable, { cwd, env }) {
       timeout: 2_000,
       maxBuffer: 16 * 1024,
     })
-    if (stdout.startsWith(WORK_HELP_MARKER)) return
+    if (stdout.startsWith(WORK_HELP_MARKER)) {
+      return
+    }
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error("The native ompi executable or current working directory disappeared.", {
