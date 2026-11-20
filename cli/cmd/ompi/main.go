@@ -24,6 +24,7 @@ const controlHelp = `Usage:
   ompi control steer [--profile NAME] [--json] ID MESSAGE
   ompi control cleanup [--profile NAME] [--json]
   ompi control restore ...
+  ompi control work ...
   ompi control recover FILE
 
 Restart IDs may be unique lowercase hexadecimal prefixes.
@@ -72,7 +73,7 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 	if code == 0 && len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nMessages: ompi control send|steer ID MESSAGE\nSaved sessions: ompi control restore")
+		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nMessages: ompi control send|steer ID MESSAGE\nSaved sessions: ompi control restore\nWork claims: ompi control work")
 	}
 	return code, nil
 }
@@ -114,6 +115,8 @@ func runControl(args []string) (int, error) {
 			fmt.Println("Usage: ompi control cleanup [--profile NAME] [--json]")
 		case "restore":
 			fmt.Print(restoreHelp)
+		case "work":
+			fmt.Print(workHelp)
 		case "recover":
 			fmt.Print(recoverHelp)
 		case "version":
@@ -132,6 +135,9 @@ func runControl(args []string) (int, error) {
 	}
 	if args[0] == "restore" {
 		return runRestore(args[1:])
+	}
+	if args[0] == "work" {
+		return runWork(os.Stdout, args[1:])
 	}
 	if args[0] == "recover" {
 		return runRecover(args[1:])

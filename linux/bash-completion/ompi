@@ -22,6 +22,62 @@ _ompi_omp_completion()
     fi
 }
 
+_ompi_work_completion()
+{
+    if (( cword == 3 )); then
+        mapfile -t COMPREPLY < <(compgen -W 'list find set clear help --help' -- "$cur")
+        return 0
+    fi
+
+    local operation=${words[3]} options='--profile --json'
+    case $operation in
+        list|find|clear) ;;
+        set) options+=' --branch' ;;
+        *) return 0 ;;
+    esac
+
+    local index token option id state _remainder
+    local end_options=false
+    local -a profile_args=() candidates=()
+    local -A consumed=()
+    for (( index=4; index<cword; index++ )); do
+        token=${words[index]}
+        option=${token%%=*}
+        case $option in
+            --)
+                (( index+1 == cword )) || return 0
+                end_options=true
+                break
+                ;;
+            --profile|--branch)
+                [[ " $options " == *" $option "* ]] || return 0
+                consumed[$option]=1
+                if [[ $token == *=* ]]; then
+                    [[ $option == --profile ]] && profile_args=(--profile "${token#*=}")
+                    continue
+                fi
+                (( index+1 < cword )) || return 0
+                (( index++ ))
+                [[ $option == --profile ]] && profile_args=(--profile "${words[index]}")
+                ;;
+            --json) consumed[$option]=1 ;;
+            *) return 0 ;;
+        esac
+    done
+
+    if [[ $cur == -* && $end_options == false ]]; then
+        for option in $options; do
+            [[ -n ${consumed[$option]} ]] || candidates+=("$option")
+        done
+    elif [[ $operation == set || $operation == clear ]]; then
+        while read -r id state _remainder; do
+            [[ $id =~ ^[a-f0-9]{12,32}$ && $state == running ]] && candidates+=("$id")
+        done < <(command ompi control list "${profile_args[@]}" 2>/dev/null)
+    fi
+    mapfile -t COMPREPLY < <(compgen -W "${candidates[*]}" -- "$cur")
+    return 0
+}
+
 _ompi_control_completion()
 {
     # _comp_initialize populates prev through Bash dynamic scope; keep it local.
@@ -30,14 +86,18 @@ _ompi_control_completion()
     _comp_initialize -n = || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover cleanup help version' -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover cleanup version' -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup version' -- "$cur")
         fi
+        return 0
+    fi
+    if [[ $action == work ]]; then
+        _ompi_work_completion
         return 0
     fi
     if [[ $action == recover ]]; then

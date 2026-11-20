@@ -17,20 +17,21 @@ import { prepareTakeover } from "./take-over.js"
 import { listRecoveryCheckpoints, listRecoverySlotIds } from "../linux/recovery.js"
 import { createRestoreCommand, getRestoreScope } from "./recovery-command.js"
 import { requestWrapperRestart } from "./restart.js"
+import { parseWorkLookupOptions, WORK_HELP, WORK_OPERATIONS, workCommand } from "./work-command.js"
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
-const ROOT_COMPLETIONS = [
-  "help",
-  "version",
+const ACTION_COMPLETIONS = [
   "list",
   "restart",
   "send",
   "steer",
   "cleanup",
   "restore",
+  "work",
   "take-over",
 ]
+const ROOT_COMPLETIONS = ["help", "version", ...ACTION_COMPLETIONS]
 const LIST_COMPLETIONS = ["--profile", "--json"]
 const RESTORE_OPERATIONS = [
   "list",
@@ -156,12 +157,9 @@ function parseOmpiArguments(args) {
     if (
       positionals.length > 2 ||
       [...present].some((name) => !["help", "version"].includes(name)) ||
-      (positionals.length === 2 &&
-        !["list", "restart", "send", "steer", "cleanup", "restore", "take-over"].includes(
-          positionals[1]
-        ))
+      (positionals.length === 2 && !ACTION_COMPLETIONS.includes(positionals[1]))
     ) {
-      throw new Error("Usage: /ompi help [list|restart|send|steer|cleanup|restore|take-over]")
+      throw new Error(`Usage: /ompi help [${ACTION_COMPLETIONS.join("|")}]`)
     }
     return {
       action: "help",
@@ -527,7 +525,8 @@ function getArgumentCompletions(
   profileNames,
   cwd,
   defaultScope,
-  recoveryIds
+  recoveryIds,
+  workProfileNames
 ) {
   const trailingSpace = /\s$/.test(argumentText)
   const tokens = argumentText.trim() ? argumentText.trim().split(/\s+/) : []
@@ -535,6 +534,9 @@ function getArgumentCompletions(
   const completedTokens = trailingSpace ? tokens : [...tokens]
   if (SEND_ACTIONS.has(completedTokens[0])) {
     return getSendCompletions(completedTokens, tokenPrefix, completionIds, profileNames, cwd)
+  }
+  if (completedTokens[0] === "work") {
+    return getWorkCompletions(completedTokens, tokenPrefix, workProfileNames)
   }
   const context = completionContext(completedTokens.slice(1))
   if (context.ended || context.options.has("help") || context.options.has("version")) return []
@@ -550,9 +552,7 @@ function getArgumentCompletions(
   if (command === "help") {
     if (completedTokens.length > 1) return []
     return completionValues(
-      ["list", "restart", "send", "steer", "cleanup", "restore", "take-over"].map((value) =>
-        completionItem(value)
-      ),
+      ACTION_COMPLETIONS.map((value) => completionItem(value)),
       completedTokens,
       tokenPrefix
     )
@@ -599,6 +599,66 @@ function getArgumentCompletions(
     candidates
       .filter((option) => !context.options.has(option.slice(2)))
       .map((value) => completionItem(value)),
+    completedTokens,
+    tokenPrefix
+  )
+}
+
+function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
+  const [, operation, ...tokens] = completedTokens
+  if (!operation) {
+    return completionValues(
+      WORK_OPERATIONS.map((value) => completionItem(value)),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (operation === "set" && tokens.length === 0 && tokenPrefix.startsWith("-")) {
+    return completionValues([completionItem("--branch")], completedTokens, tokenPrefix)
+  }
+  if (operation !== "list" && operation !== "find") {
+    return []
+  }
+
+  if (tokens.includes("--")) {
+    return []
+  }
+  const pendingProfile = tokens.at(-1) === "--profile"
+  const completeOptions = pendingProfile ? tokens.slice(0, -1) : tokens
+  let parsed
+  try {
+    parsed = parseWorkLookupOptions(completeOptions)
+  } catch {
+    return []
+  }
+  const maximumPositionals = operation === "find" ? 1 : 0
+  if (parsed.positionals.length > maximumPositionals) {
+    return []
+  }
+
+  const inlineProfile = !pendingProfile && tokenPrefix.startsWith("--profile=")
+
+  if (pendingProfile || inlineProfile) {
+    return completionValues(
+      profileNames.map((name) => {
+        if (inlineProfile) {
+          return completionItem(`--profile=${name}`, name)
+        }
+
+        return completionItem(name)
+      }),
+      completedTokens,
+      tokenPrefix
+    )
+  }
+  if (!tokenPrefix.startsWith("-")) {
+    return []
+  }
+
+  return completionValues(
+    LIST_COMPLETIONS.filter((option) => !Object.hasOwn(parsed.values, option.slice(2))).map(
+      (value) => completionItem(value)
+    ),
     completedTokens,
     tokenPrefix
   )
@@ -774,6 +834,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   const recoveryIds = new Map()
   let completionCwd
   let profileNames = ["default"]
+  let workProfileNames
 
   async function refreshProfileNames(scope) {
     try {
@@ -815,6 +876,19 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
       scope = getScope({ cwd: ctx.cwd, profile: normalizeProfile(profile) })
       restoreScope = getRestoreScope(profile, getRuntime()?.launch.scope)
       const profiles = await refreshProfileNames(scope)
+      const launchScope = getRuntime()?.launch.scope
+      if (
+        launchScope &&
+        (launchScope.configRoot !== scope.configRoot || launchScope.profile !== scope.profile)
+      ) {
+        try {
+          workProfileNames = await listProfileNames(launchScope)
+        } catch {
+          workProfileNames = [...new Set(["default", launchScope.profile])]
+        }
+      } else {
+        workProfileNames = undefined
+      }
       await refreshSavedNameCompletions(profiles)
       const transport = await createTransport(scope)
       const rows = await listInstances(transport)
@@ -846,7 +920,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
         profileNames,
         completionCwd,
         getRuntime()?.launch.scope,
-        recoveryIds
+        recoveryIds,
+        workProfileNames ?? profileNames
       )
     },
     async handler(args, ctx) {
@@ -857,6 +932,12 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
       completionCwd = ctx.cwd
 
       try {
+        if (/^\s*work(?:\s|$)/.test(args)) {
+          const result = await workCommand(args, ctx, getRuntime)
+          ctx.ui.notify(result.split("\n").map(safeTerminalText).join("\n"), "info")
+          return
+        }
+
         const { action, operation, name, helpTarget, target, message, values } =
           parseOmpiArguments(args)
         if (action === "help") {
@@ -868,6 +949,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "send ID MESSAGE      Queue a follow-up message for a peer",
               "steer ID MESSAGE     Redirect a peer's active work with a message",
               "restore [NAME]       Choose a recoverable conversation",
+              "work list|find|set|clear  Inspect or claim issue and pull-request work",
               "cleanup              Remove safely confirmed stale registrations",
               "take-over            Prepare a plain-OMP session for manual relaunch",
               "help [COMMAND]       Show usage and advanced options",
@@ -897,6 +979,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "Explicit exit suppresses relaunch; Ctrl-C stops watching only.",
             ],
             cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
+            work: WORK_HELP,
             restore: [
               "Usage: /ompi restore [NAME] [--profile NAME]",
               "/ompi restore save NAME [--instance ID] [--profile NAME]",
