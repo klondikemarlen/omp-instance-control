@@ -31,6 +31,10 @@ func TestCaptureRecoveryCheckpointIncludesOnlyMatchingManagedSlots(t *testing.T)
 		t.Fatal(err)
 	}
 	writeRestoreFixtureSnapshot(t, scope, third)
+	legacy := first
+	legacy.RestoreID = strings.Repeat("e", 32)
+	legacy.ResumeArgs = []string{"--restore=original-session"}
+	writeRestoreFixtureSnapshot(t, scope, legacy)
 	transport, err := NewTransport(scope)
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +47,9 @@ func TestCaptureRecoveryCheckpointIncludesOnlyMatchingManagedSlots(t *testing.T)
 	matching.SessionFile = stringPointer(first.SessionFile)
 	duplicate := matching
 	duplicate.InstanceID = strings.Repeat("5", 32)
+	legacyMatching := matching
+	legacyMatching.InstanceID = strings.Repeat("6", 32)
+	legacyMatching.RestoreID = legacy.RestoreID
 	divergent := testRecord(scope, strings.Repeat("2", 32))
 	divergent.RestoreID = second.RestoreID
 	divergent.SessionID = "newer-record-session"
@@ -56,7 +63,7 @@ func TestCaptureRecoveryCheckpointIncludesOnlyMatchingManagedSlots(t *testing.T)
 	unmanaged := testRecord(scope, strings.Repeat("4", 32))
 	unmanaged.LauncherManaged = false
 	unmanaged.RestoreID = strings.Repeat("d", 32)
-	for _, record := range []protocol.Record{matching, duplicate, divergent, fileMismatch, unmanaged} {
+	for _, record := range []protocol.Record{matching, duplicate, legacyMatching, divergent, fileMismatch, unmanaged} {
 		if err := WritePrivateJSON(filepath.Join(transport.directory, record.InstanceID+".json"), record); err != nil {
 			t.Fatal(err)
 		}
@@ -66,16 +73,16 @@ func TestCaptureRecoveryCheckpointIncludesOnlyMatchingManagedSlots(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(checkpoint.Entries) != 1 || checkpoint.Entries[0].RestoreID != first.RestoreID {
-		t.Fatalf("checkpoint included a divergent or unmanaged slot: %#v", checkpoint.Entries)
+	if len(checkpoint.Entries) != 2 || checkpoint.Entries[0].RestoreID != first.RestoreID || checkpoint.Entries[1].RestoreID != legacy.RestoreID {
+		t.Fatalf("checkpoint did not retain both matching slots: %#v", checkpoint.Entries)
 	}
 
 	excluded, err := CaptureRecoveryCheckpoint(scope, "automatic", first.RestoreID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(excluded.Entries) != 0 {
-		t.Fatalf("graceful-shutdown checkpoint retained the closing slot: %#v", excluded.Entries)
+	if len(excluded.Entries) != 1 || excluded.Entries[0].RestoreID != legacy.RestoreID {
+		t.Fatalf("graceful-shutdown checkpoint did not retain only the surviving legacy slot: %#v", excluded.Entries)
 	}
 }
 

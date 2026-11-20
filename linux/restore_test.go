@@ -177,6 +177,65 @@ func TestRestoreNamedSessionHoldsExactCWDAndNormalizedResumeArguments(t *testing
 	}
 }
 
+func TestMixedSavedSlotsListAndResumeWithoutReplayingNativeRestore(t *testing.T) {
+	scope, clean := newRestoreFixture(t, strings.Repeat("c", 32), stoppedRestoreOwner())
+	clean.ResumeArgs = []string{"--no-tools"}
+	writeRestoreFixtureSnapshot(t, scope, clean)
+	writeRestoreFixtureName(t, scope, "clean", clean.RestoreID)
+
+	legacy := clean
+	legacy.RestoreID = strings.Repeat("d", 32)
+	legacy.ResumeArgs = []string{"--restore", "--system-prompt=--restore", "--restore=original-session"}
+	writeRestoreFixtureSnapshot(t, scope, legacy)
+	writeRestoreFixtureName(t, scope, "legacy", legacy.RestoreID)
+
+	sessions, err := ListSavedSessions(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 || sessions[0].Name != "clean" || sessions[1].Name != "legacy" {
+		t.Fatalf("expected both saved names to remain selectable: %#v", sessions)
+	}
+	wantOptions := [][]string{{"--no-tools"}, {"--system-prompt=--restore"}}
+	adapter := filepath.Join(clean.CWD, "adapter.js")
+	for index, named := range sessions {
+		t.Run(named.Name, func(t *testing.T) {
+			launchCalls := 0
+			want := append(wantOptions[index], "-r", named.Session.SessionFile)
+			_, err := restoreNamedSessionWithExpected(scope, named.Name, adapter, &named.Session, true,
+				func(args []string, _, _ string, _ *os.File) (int, error) {
+					launchCalls++
+					if !reflect.DeepEqual(args, want) {
+						t.Fatalf("resume argv = %#v, want %#v", args, want)
+					}
+					return 0, nil
+				})
+			if err != nil || launchCalls != 1 {
+				t.Fatalf("named slot did not reach normal resume: calls=%d err=%v", launchCalls, err)
+			}
+		})
+	}
+}
+
+func TestSavedSlotCompatibilityDoesNotAcceptOtherUnsafeArguments(t *testing.T) {
+	scope, session := newRestoreFixture(t, strings.Repeat("c", 32), stoppedRestoreOwner())
+	for _, args := range [][]string{
+		{"--restore", "ambiguous-session"},
+		{"--restore=original-session", "injected prompt"},
+		{"--restore=original-session", "--config=relative.json"},
+		{"--restore=original-session", "--profile=other"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			session.ResumeArgs = args
+			writeRestoreFixtureSnapshot(t, scope, session)
+
+			if _, err := SavedSessionForRestoreID(scope, session.RestoreID); err == nil {
+				t.Fatal("legacy compatibility accepted unsafe saved options")
+			}
+		})
+	}
+}
+
 func TestRestoreNamedSessionRefusesLiveOwnerWithoutLaunching(t *testing.T) {
 	owner, err := NewRestoreOwner(os.Getpid())
 	if err != nil {

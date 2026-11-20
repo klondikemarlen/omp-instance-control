@@ -84,7 +84,7 @@ func TestFailedRestartRecoveryPreservesExactScopeArgumentsAndLock(t *testing.T) 
 }
 
 func TestFailedRestartRecoveryRejectsChangedUnavailableOrActiveTarget(t *testing.T) {
-	for _, condition := range []string{"missing transcript", "replaced transcript", "changed session ID", "replaced cwd", "missing cwd", "changed slot", "live owner", "unsafe record", "no terminal"} {
+	for _, condition := range []string{"missing transcript", "replaced transcript", "changed session ID", "replaced cwd", "missing cwd", "changed slot", "live owner", "unsafe record", "no terminal", "persisted native restore"} {
 		t.Run(condition, func(t *testing.T) {
 			file, record := failedRestartFixture(t)
 			session := record.Session
@@ -116,6 +116,11 @@ func TestFailedRestartRecoveryRejectsChangedUnavailableOrActiveTarget(t *testing
 				}
 			case "unsafe record":
 				err = os.Chmod(file, 0644)
+			case "persisted native restore":
+				session.ResumeArgs = append(session.ResumeArgs, "--restore=original-session")
+				writeRestoreFixtureSnapshot(t, session.Scope, session)
+				record.Session = session
+				err = WritePrivateJSON(file, record)
 			}
 			if err != nil {
 				t.Fatal(err)

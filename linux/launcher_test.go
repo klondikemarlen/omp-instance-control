@@ -47,6 +47,30 @@ func TestRestartArgumentsDropsStartupSourcesAndNormalizesPaths(t *testing.T) {
 	}
 }
 
+func TestRestartArgumentsDropsNativeRestoreSources(t *testing.T) {
+	for _, restore := range [][]string{
+		{"--restore"},
+		{"--restore=session"},
+		{"--restore", "session"},
+		{"--session", "session", "--restore"},
+		{"--restore", "--resume=session"},
+		{"-r", "session", "--restore"},
+	} {
+		t.Run(strings.Join(restore, " "), func(t *testing.T) {
+			var builtinFlags []string
+			args := append(restore, "--no-tools", "--system-prompt=--restore", "--custom=--restore")
+			got, _, _, err := restartArguments(args, "/initial", &builtinFlags)
+			want := []string{"--no-tools", "--system-prompt=--restore", "--custom=--restore"}
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("restart argv = %#v, want %#v; err=%v", got, want, err)
+			}
+			if !contains(builtinFlags, "restore") {
+				t.Fatalf("native restore missing from the extension collision guard: %#v", builtinFlags)
+			}
+		})
+	}
+}
+
 func TestRestartArgumentsDoesNotTreatAliasAsProfile(t *testing.T) {
 	_, profile, _, err := restartArguments([]string{"--alias", "command"}, t.TempDir(), nil)
 	if err != nil {
