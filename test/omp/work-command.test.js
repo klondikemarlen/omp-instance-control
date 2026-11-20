@@ -356,6 +356,7 @@ test("when completing slash work, selector options stop before a mutation's lite
     ["work ", ["work list", "work find", "work set", "work clear"]],
     ["work list --", ["work list --profile", "work list --json"]],
     ["work list --help --", []],
+    ["work list --json=false --", []],
     ["work find --branch feature --", []],
     ["work find --profile=de", ["work find --profile=default"]],
     ["work set --", ["work set --branch"]],
