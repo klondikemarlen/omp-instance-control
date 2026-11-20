@@ -18,6 +18,12 @@ A control endpoint belongs to a main interactive launch, not a subagent or persi
 
 A user-facing restart selector may be a unique lowercase hexadecimal prefix of the current instance ID. The client resolves it against one profile/config-root-scoped discovery snapshot, retaining stale registrations when checking ambiguity. No lifecycle request is sent until exactly one record matches; protocol requests, result identities, and restart correlation continue using full 32-character IDs. A session ID identifies the persisted conversation instead and is not a restart selector.
 
+## Work Claims
+
+A work claim records what one saved conversation says it owns. The key is the scope, session ID, and absolute session file; a launch ID is **not** part of that key. A managed restart can therefore replace the launch without rewriting the claim. A fork, another profile, or another transcript with the same title does not inherit it.
+
+The issue or pull request URL is a lookup key, not an exclusive lock. Two conversations may claim the same work; lookup reports both. Current live status supplies possible message destinations. A stored claim alone cannot establish that its owner is reachable. A claim older than 24 hours remains visible as stale until the owner updates or clears it; reaching a terminal does not refresh its assertion. No claim grants authority to act on a repository.
+
 ## Settled Restart Handoff
 
 1. The client reads a profile/config-root-scoped snapshot and sends one request per selected instance.

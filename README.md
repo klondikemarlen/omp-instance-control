@@ -147,6 +147,27 @@ Use `--` before flag-shaped initial messages. Initial messages and startup sessi
 
 The wrapper does not register or shadow OMP flags. A parsed extension value sharing a built-in option used by the launch makes controlled restart unavailable rather than guessing its parsing or changing the original invocation. Ordinary spaced options such as `--model MODEL` remain supported.
 
+### Finding Who Owns an Issue or Pull Request
+
+In the managed terminal doing the work, register the GitHub issue or pull request and a short description:
+
+```text
+/ompi work set --branch issue-93/session-work https://github.com/klondikemarlen/omp-instance-control/issues/93 Implement ownership lookup
+```
+
+`set` replaces this conversation's previous claim. Repeat it to refresh the timestamp, or use `/ompi work clear` when you hand off the task. The working directory comes from the live terminal; the branch and summary are your assertions, not inferred Git state. Omit `--branch` if it is not relevant. Use public or local-safe descriptions: don't include credentials, prompts, or private review text.
+
+From another project, look up the qualified URL rather than guessing from a title or issue number:
+
+```bash
+ompi control work list
+ompi control work find --json https://github.com/klondikemarlen/omp-instance-control/issues/93
+```
+
+`find --json` returns an array, not a single recipient. Check `availability`, `stale`, `conflict`, and `updatedAt` before choosing an ID from `instanceIds`. A claim is stale after 24 hours. An empty array means no conversation registered that URL in this scope, not that nobody is working on it. If ownership is unclear, don't send. Lookup never sends a message.
+
+The native CLI can also set or clear a claim for an explicitly selected live ID: `ompi control work set ID URL 'Summary with spaces'` or `ompi control work clear ID`. The slash forms mutate only the invoking managed session. Both command surfaces require the work-capable native `ompi` executable.
+
 ### Sending Peer Messages
 
 **Known peer in the same folder:** On OMP 19, if both interactive sessions have [`task.crossInstance`](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/task/settings.ts#L508-L519) enabled, an agent can read `agent://peers` and write a message to `agent://<pid>` for the intended main agent. The roster shows PIDs and status, not session titles. This setting is off by default: opting in also lets participating peers read subagent outputs and send messages that can wake agents.

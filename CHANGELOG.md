@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 - 2026-11-20
+
+### Added
+
+- `ompi control work` and `/ompi work` let a conversation claim a GitHub issue or pull request. Lookups show current launch IDs, conflicts, and offline claims without sending a message.
+
 ## 1.1.0 - 2026-11-19
 
 ### Added
