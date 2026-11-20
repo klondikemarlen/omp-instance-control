@@ -149,7 +149,9 @@ The wrapper does not register or shadow OMP flags. A parsed extension value shar
 
 ### Sending Peer Messages
 
-Use `ompi control list` (or `/ompi list`) to find the receiving project. When several online instances share a working directory, compare their live OMP session titles. Give your own conversation a useful title with OMP's `/rename`, for example `/rename Review CSV exports`. Re-list after a rename or restart. Titles can be absent, duplicated, or out of date with the work; if the intended recipient is still unclear, do not send.
+**Known peer in the same folder:** On OMP 19, if both interactive sessions have [`task.crossInstance`](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/task/settings.ts#L508-L519) enabled, an agent can read `agent://peers` and write a message to `agent://<pid>` for the intended main agent. The roster shows PIDs and status, not session titles. This setting is off by default: opting in also lets participating peers read subagent outputs and send messages that can wake agents.
+
+**Peer in another project, or several sessions in one folder:** Use `ompi control list` (or `/ompi list`) to compare working directories and live session titles. Address the chosen session by launch ID, not PID or title. Give your own conversation a useful title with OMP's `/rename`, for example `/rename Review CSV exports`. Re-list after a rename or restart. Titles can be absent, duplicated, or out of date with the work; if the intended recipient is still unclear, do not send.
 
 For a compact project directory, list online peers with their full launch IDs, working directories, and titles:
 
@@ -259,7 +261,7 @@ Track [can1357/oh-my-pi#6458](https://github.com/can1357/oh-my-pi/issues/6458). 
 | Scoped instance discovery, Unix sockets, and request dispatch        | OMP exposes supported same-user discovery/control preserving profile/config-root boundaries and per-launch identities. |
 | The `ompi` executable/package                                        | Standard `omp` supplies all required instance-control commands; migrate usage and remove the redundant wrapper.        |
 
-The [OMP 18.17.0 compatibility assessment](CONCEPTS.md#host-api-dependency), including its auto-updater, found no fully satisfied removal criterion. OMP owns installing its updates, but that does not replace ompi's explicit settled restart, native-wrapper replacement, peer control, or exact failed-restart recovery.
+As of [OMP 19.0.1](CONCEPTS.md#host-api-dependency), same-folder agent messaging and local `/restart` cover part of this workflow. Neither replaces cross-project launch selection, settled remote restart with a confirmed replacement, or managed recovery. No wrapper responsibility in the table can yet be removed in full.
 
 Resource refresh is not loaded-extension re-evaluation or executable upgrade. Do not replace public host contracts with private imports, terminal injection, or PID-based lifecycle guesses. See [Concepts](CONCEPTS.md) and [Changelog](CHANGELOG.md).
 
