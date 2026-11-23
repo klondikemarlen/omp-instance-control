@@ -11,7 +11,8 @@ function usageDirectory(scope) {
   return path.join(scope.agentDir, "instance-control", "usage-v1")
 }
 
-test("slash usage is opt-in and does not count help, completion, malformed input, or retired import", async (t) => {
+test("when no countable command is dispatched with opt-in, slash creates no usage state", async (t) => {
+  // Arrange
   const fixture = await createFixture()
   t.after(() => fixture.close())
   const ctx = createContext(fixture.cwd)
@@ -19,6 +20,7 @@ test("slash usage is opt-in and does not count help, completion, malformed input
   const scope = getScope({ cwd: fixture.cwd })
   const directory = usageDirectory(scope)
 
+  // Act
   for (const setting of [undefined, "0", "true"]) {
     if (setting === undefined) delete process.env.OMPI_USAGE
     else process.env.OMPI_USAGE = setting
@@ -35,6 +37,7 @@ test("slash usage is opt-in and does not count help, completion, malformed input
   await ui.command.handler("work list --help", ctx)
   await ui.command.handler("list invalid", ctx)
   await ui.command.handler("restore import-legacy", ctx)
+  // Assert
   assert.equal(ui.notifications.at(-1).level, "error")
   assert.match(ui.notifications.at(-1).message, /Legacy import has been removed/)
 
@@ -43,7 +46,8 @@ test("slash usage is opt-in and does not count help, completion, malformed input
   })
 })
 
-test("plain OMP counts only fixed dispatch names, in the invoking scope even for cross-profile commands", async (t) => {
+test("when plain OMP dispatches commands, only fixed categories accumulate in its own scope", async (t) => {
+  // Arrange
   const fixture = await createFixture()
   t.after(() => fixture.close())
   process.env.OMPI_USAGE = "1"
@@ -81,6 +85,7 @@ test("plain OMP counts only fixed dispatch names, in the invoking scope even for
     `restore from ${id}`,
   ]
 
+  // Act
   for (const command of commands) {
     await ui.command.handler(command, ctx)
   }
@@ -89,6 +94,7 @@ test("plain OMP counts only fixed dispatch names, in the invoking scope even for
     Array.from({ length: concurrentListCount }, () => ui.command.handler("list --json", ctx))
   )
 
+  // Assert
   const features = [
     "cleanup",
     "list",
@@ -131,7 +137,8 @@ test("plain OMP counts only fixed dispatch names, in the invoking scope even for
   })
 })
 
-test("plain OMP resolves a relative agent override at the process cwd, not the conversation cwd", async (t) => {
+test("when the agent directory is relative, slash counters use the process working directory", async (t) => {
+  // Arrange
   const fixture = await createFixture()
   t.after(() => fixture.close())
   const agentDir = path.join(fixture.root, "launch-agent")
@@ -140,13 +147,16 @@ test("plain OMP resolves a relative agent override at the process cwd, not the c
   const ctx = createContext(fixture.cwd)
   const ui = createCommand(ctx)
 
+  // Act
   await ui.command.handler("restart", ctx)
 
+  // Assert
   const counter = path.join(agentDir, "instance-control", "usage-v1", "slash.restart")
   assert.deepEqual(await readFile(counter), Buffer.from([0]))
 })
 
-test("slash usage rejects symlinked directories and linked counter files without changing command results", async (t) => {
+test("when usage storage contains links, slash commands leave the linked targets untouched", async (t) => {
+  // Arrange
   const fixture = await createFixture()
   t.after(() => fixture.close())
   process.env.OMPI_USAGE = "1"
@@ -163,7 +173,9 @@ test("slash usage rejects symlinked directories and linked counter files without
     mode: 0o700,
   })
   await symlink(outside, directory)
+  // Act
   await ui.command.handler("list --json", ctx)
+  // Assert
   assert.equal(ui.notifications.at(-1).level, "info")
   assert.deepEqual(await readdir(outside), [])
 

@@ -29,7 +29,8 @@ async function createFixture(t) {
   return { root, scope }
 }
 
-test("retained legacy history, listing, and export preserve exact title-prefixed transcripts and original source files", async (t) => {
+test("when a checkpoint contains a title-prefixed legacy transcript, it remains reviewable and exportable", async (t) => {
+  // Arrange
   const { root, scope } = await createFixture(t)
   const cwd = path.join(root, "work'folder")
   const sessionDirectory = path.join(scope.agentDir, "sessions")
@@ -88,12 +89,14 @@ test("retained legacy history, listing, and export preserve exact title-prefixed
     else process.env.PATH = previousPath
   })
 
+  // Act
   const history = await listRecoveryCheckpoints(scope)
   const sessions = await listRecoverySessions(scope, {
     checkpointId,
   })
   const exported = await exportRecoveryCommands(scope, sessions)
 
+  // Assert
   assert.deepEqual(history, [checkpoint])
   assert.deepEqual(sessions, [
     {
@@ -106,7 +109,8 @@ test("retained legacy history, listing, and export preserve exact title-prefixed
   assert.equal(await readFile(sourcePath, "utf8"), source)
 })
 
-test("legacy validation rejects changed session IDs, unrelated prefix records, and oversized headers", async (t) => {
+test("when a retained transcript changes identity or loses its header, legacy validation refuses it", async (t) => {
+  // Arrange
   const { root, scope } = await createFixture(t)
   const sessionDirectory = path.join(scope.agentDir, "sessions")
   await mkdir(sessionDirectory)
@@ -129,10 +133,12 @@ test("legacy validation rejects changed session IDs, unrelated prefix records, a
     ],
   ]
 
+  // Act
   for (const [header, error] of headers) {
     await writeFile(sessionFile, header, {
       mode: 0o600,
     })
+    // Assert
     await assert.rejects(() => validateLegacyRecoveryEntry(scope, entry), error)
   }
 })
