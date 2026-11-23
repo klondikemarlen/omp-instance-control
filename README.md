@@ -147,6 +147,20 @@ Use `--` before flag-shaped initial messages. Initial messages and startup sessi
 
 The wrapper does not register or shadow OMP flags. A parsed extension value sharing a built-in option used by the launch makes controlled restart unavailable rather than guessing its parsing or changing the original invocation. Ordinary spaced options such as `--model MODEL` remain supported.
 
+### Measuring Local Feature Use
+
+Collection is off by default. To measure a month of use, opt in in the shells from which you run native commands and start fresh OMP sessions:
+
+```bash
+export OMPI_USAGE=1
+ompi control usage           # Read your baseline; reporting does not count.
+ompi control usage --json    # Read again at the monthly review.
+```
+
+Counts accumulate by feature and surface (native CLI or slash command) in the invoking profile’s effective agent directory under `instance-control/usage-v1/`. Compare two local reports for a period; there is no dated event history. Counts measure attempts, not successes or distinct people. Completion, internal checks and help are not feature use. Run scripts and QA with `OMPI_USAGE=0` if they inherit your shell environment. Collection stores no arguments, message text, identifiers, or project paths and sends nothing over the network. The [monthly review](https://github.com/klondikemarlen/omp-instance-control/issues/105) does not read your counters.
+
+Unset `OMPI_USAGE` for future commands and start fresh terminals without it to stop collection. Previously opted-in processes retain their environment. To erase counts, remove only that scope’s `usage-v1` directory after stopping collection; leave sibling recovery and work state alone.
+
 ### Finding Who Owns an Issue or Pull Request
 
 In the managed terminal doing the work, register the GitHub issue or pull request and a short description:
@@ -248,19 +262,9 @@ Ptyxis restores layout, profile, and cwd, but does not supply a durable per-tab 
 
 Start a fresh `ompi` launcher after upgrading: launchers started before 0.9.0 cannot supply restore metadata merely by restarting their OMP child. Resume the existing session under the new launcher before naming its slot.
 
-### Migrating Legacy Recovery Snapshots
+### Reading Previously Imported Checkpoints
 
-`ompi control restore import-legacy` imports the old helper's `~/.local/state/omp-session-resume-helper/snapshots/*.txt` and `active-sessions.txt`, leaving the originals untouched. Supply a path to import one snapshot. Only the helper's strictly quoted command format is parsed; shell text is never evaluated. Transcript IDs must resolve uniquely to an owned file within the selected profile's session tree. Unsupported, missing, or ambiguous entries are reported.
-
-Imports appear in `ompi control restore history` as legacy checkpoints, not default automatic recovery. They cannot acquire invented managed-slot ownership or launch automatically. Inspect one with `ompi control restore list --from CHECKPOINT_ID` and export manual commands with:
-
-```bash
-ompi control restore export --from CHECKPOINT_ID
-```
-
-Managed exports use `ompi control restore slot` and retain ownership checks; legacy exports are explicitly unowned manual resume commands. Both preserve the selected config root, profile, and effective agent directory while using the terminal's current runtime directory, not a stored path from a previous boot.
-
-Version 0.10.1 also recognizes OMP's [256-byte title slot](https://github.com/can1357/oh-my-pi/blob/main/docs/session.md#file-format) before the session header. If 0.10.0 reported existing transcripts as missing, re-import their legacy source after upgrading; the corrected import does not overwrite older immutable checkpoints. Re-importing a source already retained by the same reader revision reuses its checkpoint. Pruned imports can be recreated and remain subject to the bounded history policy.
+The legacy importer was removed in 2.0. Original helper files are left untouched. Checkpoints already imported remain visible in `ompi control restore history` until normal history pruning. Use `ompi control restore list --from CHECKPOINT_ID` to inspect one or `ompi control restore export --from CHECKPOINT_ID` to print manual resume commands. These entries are not managed slots and cannot launch automatically.
 
 ## Outcomes and Safety
 

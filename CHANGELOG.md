@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0 - 2026-11-23
+
+### Removed
+
+- Removed `restore import-legacy` from the native and slash commands. Existing helper files are untouched; previously imported checkpoints can still be listed and exported.
+
+### Added
+
+- Set `OMPI_USAGE=1` to count local feature invocations. Read totals with `ompi control usage` or `ompi control usage --json`. No arguments are recorded and nothing is uploaded.
+
 ## 1.2.1 - 2026-11-20
 
 ### Fixed
