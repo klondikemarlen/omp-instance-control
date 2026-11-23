@@ -4,6 +4,7 @@ import { access, stat } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs, promisify } from "node:util"
 
+import { recordSlashUsage } from "../linux/usage.js"
 import { validateInstanceId } from "../protocol/index.js"
 
 const execFileAsync = promisify(execFile)
@@ -36,6 +37,8 @@ export async function workCommand(args, ctx, getRuntime) {
 
   const cwd = ctx.cwd
   const runtime = getRuntime()
+  await recordSlashUsage(`work.${operation.name}`, runtime?.launch?.scope)
+
   const isMutation = operation.name === "set" || operation.name === "clear"
   const argv = ["control", "work", operation.name]
   let session
@@ -238,6 +241,7 @@ async function requireWorkingDirectory(cwd) {
 function workEnvironment(cwd, launchScope, profile) {
   const env = {
     ...process.env,
+    OMPI_USAGE: "0",
     PWD: cwd,
   }
   if (launchScope) {

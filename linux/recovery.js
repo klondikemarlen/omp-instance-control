@@ -469,8 +469,3 @@ export async function exportRecoveryCommands(scope, sessions) {
   }
   return `${lines.join("\n")}\n`
 }
-
-export async function importLegacyRecovery(scope, source) {
-  const { importLegacyRecovery: importLegacy } = await import("./legacy-recovery.js")
-  return importLegacy(scope, source)
-}
