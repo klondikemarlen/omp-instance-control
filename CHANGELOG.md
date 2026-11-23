@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 - 2026-11-23
+
+- Native restart progress shows elapsed durations with explicit units instead of clock notation.
+
 ## 2.0.0 - 2026-11-23
 
 ### Removed
