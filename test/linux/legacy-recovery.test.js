@@ -1,11 +1,17 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 
-import { importLegacyRecovery, writeRecoveryCheckpoint } from "../../linux/recovery.js"
+import {
+  exportRecoveryCommands,
+  listRecoveryCheckpoints,
+  listRecoverySessions,
+  writeRecoveryCheckpoint,
+} from "../../linux/recovery.js"
+import { validateLegacyRecoveryEntry } from "../../linux/legacy-recovery.js"
 import { getScope } from "../../protocol/index.js"
 
 async function createFixture(t) {
@@ -23,169 +29,110 @@ async function createFixture(t) {
   return { root, scope }
 }
 
-test("when importing old shell-quoted data, apostrophes and literal backslashes survive without evaluation", async (t) => {
-  // Arrange
+test("retained legacy history, listing, and export preserve exact title-prefixed transcripts and original source files", async (t) => {
   const { root, scope } = await createFixture(t)
   const cwd = path.join(root, "work'folder")
-  await mkdir(cwd)
-  const sessionId = "session\\name'quoted"
   const sessionDirectory = path.join(scope.agentDir, "sessions")
-  await mkdir(sessionDirectory, { recursive: true })
-  const sessionFile = path.join(sessionDirectory, "session.jsonl")
-  await writeFile(
-    sessionFile,
-    `${JSON.stringify({ type: "session", id: sessionId })}\n${JSON.stringify({ id: "not-the-session-header" })}\n`,
-    { mode: 0o600 }
-  )
-  const source = path.join(root, "snapshot.txt")
-  const shellQuotedCwd = `'${cwd.replaceAll("'", "'\\''")}'`
-  const shellQuotedId = `'${sessionId.replaceAll("'", "'\\''")}'`
-  await writeFile(
-    source,
-    `cd ${shellQuotedCwd} && omp --resume ${shellQuotedId}\ncd '/tmp' && omp --resume 'session-id'; touch SHOULD_NOT_EXIST\n`,
-    { mode: 0o600 }
-  )
-
-  // Act
-  const imported = await importLegacyRecovery(scope, source)
-
-  // Assert
-  assert.equal(imported.length, 1)
-  assert.deepEqual(imported[0].legacy, [{ cwd, sessionId, sessionFile }])
-  assert.deepEqual(imported[0].warnings, ["line 2: unsupported legacy command format"])
-})
-
-test("when importing the same legacy source again, the immutable checkpoint is reused", async (t) => {
-  // Arrange
-  const { root, scope } = await createFixture(t)
-  const source = path.join(root, "snapshot.txt")
-  await writeFile(source, "cd '/work' && omp --resume 'session-id'\n", { mode: 0o600 })
-
-  // Act
-  const first = await importLegacyRecovery(scope, source)
-  const second = await importLegacyRecovery(scope, source)
-
-  // Assert
-  assert.equal(first[0].checkpointId, second[0].checkpointId)
-  assert.equal(second[0].createdAt, first[0].createdAt)
-})
-
-test("when an imported transcript is large, its bounded session header remains readable", async (t) => {
-  // Arrange
-  const { root, scope } = await createFixture(t)
-  const cwd = path.join(root, "work")
   await mkdir(cwd)
-  const sessionId = "large-session"
-  const sessionDirectory = path.join(scope.agentDir, "sessions")
-  await mkdir(sessionDirectory, { recursive: true })
-  const sessionFile = path.join(sessionDirectory, "large.jsonl")
-  await writeFile(
-    sessionFile,
-    `${JSON.stringify({ type: "session", id: sessionId })}\n${"x".repeat(128 * 1024)}\n`,
-    { mode: 0o600 }
-  )
-  const source = path.join(root, "snapshot.txt")
-  await writeFile(source, `cd '${cwd}' && omp --resume '${sessionId}'\n`, { mode: 0o600 })
-
-  // Act
-  const imported = await importLegacyRecovery(scope, source)
-
-  // Assert
-  assert.equal(imported.length, 1)
-  assert.deepEqual(imported[0].legacy, [{ cwd, sessionId, sessionFile }])
-})
-
-test("when an old import missed a title-prefixed transcript, reimport resolves its exact path", async (t) => {
-  // Arrange
-  const { root, scope } = await createFixture(t)
-  const cwd = path.join(root, "work")
-  await mkdir(cwd)
-  const sessionId = "title-session"
-  const sessionDirectory = path.join(scope.agentDir, "sessions")
   await mkdir(sessionDirectory)
+
   const sessionFile = path.join(sessionDirectory, "title.jsonl")
-  const title = JSON.stringify({ type: "title", v: 1, title: "Example" }).padEnd(255)
-  await writeFile(
+  const sessionId = "session\\name'quoted"
+  const title = JSON.stringify({
+    type: "title",
+    v: 1,
+    title: "Example",
+  }).padEnd(255)
+  const header = JSON.stringify({
+    type: "session",
+    version: 3,
+    id: sessionId,
+  })
+  await writeFile(sessionFile, `${title}\n${header}\n${"x".repeat(128 * 1024)}\n`, {
+    mode: 0o600,
+  })
+
+  const sourcePath = path.join(root, "old-snapshot.txt")
+  const source = "historical shell command data; not executed\n"
+  const sourceSha256 = createHash("sha256").update(source).digest("hex")
+  await writeFile(sourcePath, source, {
+    mode: 0o600,
+  })
+  const entry = {
+    cwd,
+    sessionId,
     sessionFile,
-    `${title}\n${JSON.stringify({ type: "session", version: 3, id: sessionId })}\n`,
-    { mode: 0o600 }
-  )
-  const source = path.join(root, "snapshot.txt")
-  const commands = `cd '${cwd}' && omp --resume '${sessionId}'\n`
-  await writeFile(source, commands, { mode: 0o600 })
-  const oldIdentity = createHash("sha256")
-    .update(source)
-    .update("\0")
-    .update(commands)
-    .digest("hex")
-    .slice(0, 32)
-  await writeRecoveryCheckpoint(scope, {
+  }
+  const checkpointId = "a".repeat(32)
+  const checkpoint = {
     version: 1,
-    checkpointId: oldIdentity,
+    checkpointId,
     scope,
     bootId: "legacy",
     createdAt: new Date().toISOString(),
     reason: "legacy",
     entries: [],
-    legacy: [
-      {
-        cwd,
-        sessionId,
-        unavailable: "No transcript with this session ID exists in the selected OMP scope.",
-      },
-    ],
-    sourcePath: source,
-    sourceSha256: createHash("sha256").update(commands).digest("hex"),
+    legacy: [entry],
+    sourcePath,
+    sourceSha256,
+  }
+  await writeRecoveryCheckpoint(scope, checkpoint)
+  const executable = path.join(root, "ompi")
+  await writeFile(executable, "not executed\n", {
+    mode: 0o700,
+  })
+  const previousPath = process.env.PATH
+  process.env.PATH = root
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH
+    else process.env.PATH = previousPath
   })
 
-  // Act
-  const imported = await importLegacyRecovery(scope, source)
+  const history = await listRecoveryCheckpoints(scope)
+  const sessions = await listRecoverySessions(scope, {
+    checkpointId,
+  })
+  const exported = await exportRecoveryCommands(scope, sessions)
 
-  // Assert
-  assert.deepEqual(imported[0].legacy, [{ cwd, sessionId, sessionFile }])
+  assert.deepEqual(history, [checkpoint])
+  assert.deepEqual(sessions, [
+    {
+      legacy: entry,
+    },
+  ])
+  assert.ok(exported.includes(`# Imported legacy session (unowned): ${sessionId}`))
+  assert.ok(exported.includes(`cd '${cwd.replaceAll("'", "'\\''")}' && env `))
+  assert.ok(exported.includes(` '${executable}' -r '${sessionFile}'\n`))
+  assert.equal(await readFile(sourcePath, "utf8"), source)
 })
 
-test("when unrelated records precede a session header, import does not guess its identity", async (t) => {
-  // Arrange
+test("legacy validation rejects changed session IDs, unrelated prefix records, and oversized headers", async (t) => {
   const { root, scope } = await createFixture(t)
-  const cwd = path.join(root, "work")
-  await mkdir(cwd)
   const sessionDirectory = path.join(scope.agentDir, "sessions")
   await mkdir(sessionDirectory)
-  await writeFile(
-    path.join(sessionDirectory, "unrelated.jsonl"),
-    '{"type":"message"}\n{"type":"session","id":"hidden-session"}\n',
-    { mode: 0o600 }
-  )
-  const source = path.join(root, "snapshot.txt")
-  await writeFile(source, `cd '${cwd}' && omp --resume 'hidden-session'\n`, { mode: 0o600 })
 
-  // Act
-  const imported = await importLegacyRecovery(scope, source)
+  const sessionFile = path.join(sessionDirectory, "test.jsonl")
+  const entry = {
+    cwd: root,
+    sessionId: "retained",
+    sessionFile,
+  }
+  const headers = [
+    ['{"type":"session","id":"other"}\n', /Legacy transcript ID changed/],
+    [
+      '{"type":"message"}\n{"type":"session","id":"retained"}\n',
+      /Legacy transcript header is invalid/,
+    ],
+    [
+      `{"type":"session","id":"retained","padding":"${"x".repeat(64 * 1024)}"}\n`,
+      /Legacy transcript header is invalid/,
+    ],
+  ]
 
-  // Assert
-  assert.equal(imported[0].legacy[0].sessionFile, undefined)
-})
-
-test("when the title and session header exceed the prefix bound, import leaves the entry unavailable", async (t) => {
-  // Arrange
-  const { root, scope } = await createFixture(t)
-  const cwd = path.join(root, "work")
-  await mkdir(cwd)
-  const sessionDirectory = path.join(scope.agentDir, "sessions")
-  await mkdir(sessionDirectory)
-  const title = JSON.stringify({ type: "title", v: 1, title: "Example" }).padEnd(255)
-  await writeFile(
-    path.join(sessionDirectory, "large-prefix.jsonl"),
-    `${title}\n${JSON.stringify({ type: "session", id: "bounded-session", padding: "x".repeat(64 * 1024 - 256) })}\n`,
-    { mode: 0o600 }
-  )
-  const source = path.join(root, "snapshot.txt")
-  await writeFile(source, `cd '${cwd}' && omp --resume 'bounded-session'\n`, { mode: 0o600 })
-
-  // Act
-  const imported = await importLegacyRecovery(scope, source)
-
-  // Assert
-  assert.equal(imported[0].legacy[0].sessionFile, undefined)
+  for (const [header, error] of headers) {
+    await writeFile(sessionFile, header, {
+      mode: 0o600,
+    })
+    await assert.rejects(() => validateLegacyRecoveryEntry(scope, entry), error)
+  }
 })
