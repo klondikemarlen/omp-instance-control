@@ -290,21 +290,21 @@ func (renderer *restartRenderer) terminalFrame(terminalRows int) []progressLine 
 	}
 	if terminalRows <= 2 {
 		text := fmt.Sprintf(
-			"%c %d/%d restarted, %d pending, %d issues, %d hidden, %s | %s",
+			"%c %d/%d restarted, %d pending, %d issues, %s elapsed, %d hidden | %s",
 			loaderFrames[renderer.frameNumber%len(loaderFrames)],
 			counts.restarted,
 			counts.total,
 			counts.pending,
 			counts.failed,
-			counts.total,
 			renderer.elapsed(),
+			counts.total,
 			footer,
 		)
 		return []progressLine{{text: text}}
 	}
 
 	header := fmt.Sprintf(
-		"%d/%d restarted | %d pending | %d issues | %s",
+		"%d/%d restarted | %d pending | %d issues | %s elapsed",
 		counts.restarted,
 		counts.total,
 		counts.pending,
@@ -338,7 +338,7 @@ func (renderer *restartRenderer) terminalFrame(terminalRows int) []progressLine 
 func (renderer *restartRenderer) plainFrame() []progressLine {
 	counts := renderer.counts
 	header := fmt.Sprintf(
-		"Restart progress | %d/%d restarted | %d pending | %d issues | %s",
+		"Restart progress | %d/%d restarted | %d pending | %d issues | %s elapsed",
 		counts.restarted,
 		counts.total,
 		counts.pending,
@@ -432,12 +432,8 @@ func (renderer *restartRenderer) appendTransitions(lines []string) {
 	renderer.previous = append(renderer.previous[:0], lines...)
 }
 
-func (renderer *restartRenderer) elapsed() string {
-	seconds := int64(time.Since(renderer.startedAt).Seconds())
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	remainder := seconds % 60
-	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, remainder)
+func (renderer *restartRenderer) elapsed() time.Duration {
+	return time.Since(renderer.startedAt).Truncate(time.Second)
 }
 
 func (renderer *restartRenderer) close() {

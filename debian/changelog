@@ -1,3 +1,9 @@
+omp-instance-control (2.0.1~ppa1) resolute; urgency=medium
+
+  * Show restart observation time with explicit duration units.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Mon, 23 Nov 2026 14:50:13 -0700
+
 omp-instance-control (2.0.0~ppa1) resolute; urgency=medium
 
   * Retire legacy snapshot import; preserve retained history and export.

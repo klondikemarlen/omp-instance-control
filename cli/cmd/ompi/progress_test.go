@@ -5,11 +5,31 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 	"unicode/utf8"
 
 	"github.com/klondikemarlen/omp-instance-control/cli"
 	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
+
+func TestRestartProgressReportsElapsedDuration(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		renderer := restartRenderer{startedAt: time.Now()}
+		time.Sleep(9*time.Minute + 53*time.Second + 750*time.Millisecond)
+
+		const terminalColumns = 60
+		for _, header := range []string{
+			progressLineText(renderer.terminalFrame(24)[0], terminalColumns-1),
+			progressLineText(renderer.terminalFrame(2)[0], terminalColumns-1),
+			renderer.plainFrame()[0].text,
+		} {
+			if !strings.Contains(header, "9m53s elapsed") {
+				t.Errorf("expected elapsed observation time in restart header: %q", header)
+			}
+		}
+	})
+}
 
 func TestTruncateTerminalTextKeepsUnicodeRunesIntact(t *testing.T) {
 	truncated := truncateTerminalText("猫猫猫", 5)

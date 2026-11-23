@@ -68,7 +68,7 @@ ompi control help
 ompi control help restart
 ```
 
-External restart waits until every accepted target has a verified live replacement. Each pending target has an animated loader; the header shows elapsed time, restarted/pending counts, and issues. Rows update in place with semantic colors, safely shortened paths, and a pending-first viewport when the terminal is too small. Resizing and Unicode paths do not disable live progress. `NO_COLOR` disables colors, not animation; redirected output and `TERM=dumb` log plain state transitions without cursor controls.
+External restart waits until every accepted target has a verified live replacement. Each pending target has an animated loader; the header shows total observation time (for example, `9m53s elapsed`), restarted/pending counts, and issues. Rows update in place with semantic colors, safely shortened paths, and a pending-first viewport when the terminal is too small. Resizing and Unicode paths do not disable live progress. `NO_COLOR` disables colors, not animation; redirected output and `TERM=dumb` log plain state transitions without cursor controls.
 
 Long project paths shorten from the left to retain the project-name ending; duplicate working directories show a short session suffix. Failed restart rows retain the original project/session record, including in JSON.
 
