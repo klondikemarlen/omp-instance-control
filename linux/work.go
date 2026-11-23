@@ -156,9 +156,7 @@ func checkWorkClaimsDirectory(directory string) error {
 			}
 			continue
 		}
-		trustedOwner := uid == 0 || uid == uint32(os.Getuid())
-		stickyTmp := current == "/tmp" && uid == 0 && info.Mode()&os.ModeSticky != 0
-		if !trustedOwner || (info.Mode().Perm()&0o022 != 0 && !stickyTmp) {
+		if !isTrustedDirectoryAncestor(current, uid, info.Mode().Perm()&0o022 != 0, info.Mode()&os.ModeSticky != 0) {
 			return fmt.Errorf("unsafe work claim directory ancestor: %q", current)
 		}
 	}

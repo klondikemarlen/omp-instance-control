@@ -103,12 +103,16 @@ func inspectDirectory(directory string, privateLeaf bool) error {
 		}
 		return nil
 	}
-	trustedOwner := uid == 0 || uid == uint32(os.Getuid())
-	stickyTmp := directory == "/tmp" && uid == 0 && info.Mode()&os.ModeSticky != 0
-	if !trustedOwner || (info.Mode().Perm()&0o022 != 0 && !stickyTmp) {
+	if !isTrustedDirectoryAncestor(directory, uid, info.Mode().Perm()&0o022 != 0, info.Mode()&os.ModeSticky != 0) {
 		return fmt.Errorf("Unsafe runtime directory ancestor: %s", directory)
 	}
 	return nil
+}
+
+func isTrustedDirectoryAncestor(path string, uid uint32, writableByOthers, sticky bool) bool {
+	trustedOwner := uid == 0 || uid == uint32(os.Getuid())
+	stickyTmp := path == "/tmp" && uid == 0 && sticky
+	return trustedOwner && (!writableByOthers || stickyTmp)
 }
 
 func fileOwnerUID(info os.FileInfo) (uint32, error) {

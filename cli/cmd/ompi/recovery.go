@@ -16,29 +16,20 @@ import (
 )
 
 func validateRecoveryOptions(options restoreOptions) error {
-	operations := 0
-	for _, selected := range []bool{options.list, options.history, options.checkpoint, options.export, options.importLegacy} {
-		if selected {
-			operations++
-		}
-	}
-	if operations > 1 {
-		return errors.New("choose one recovery operation: list, history, checkpoint, export, or import-legacy")
-	}
 	if options.json && !options.list && !options.history {
 		return errors.New("--json is only valid with list or history")
 	}
 	if options.from != "" && !options.fromOperation && !options.list && !options.export {
 		return errors.New("--from is only valid with list or export")
 	}
-	if options.slot != "" && (operations != 0 || options.from != "" || len(options.positionals) != 1 || options.positionals[0] != "slot") {
+	if options.slot != "" && (options.from != "" || len(options.positionals) != 1 || options.positionals[0] != "slot") {
 		return errors.New("slot ID cannot be combined with another recovery operation")
 	}
-	if options.name && (operations != 0 || options.from != "" || options.slot != "" || options.instance != "" || options.json) {
+	if options.name && (options.from != "" || options.slot != "" || options.instance != "" || options.json) {
 		return errors.New("name NAME cannot be combined with recovery modifiers")
 	}
 	if len(options.positionals) == 2 && options.positionals[0] == "save" {
-		if operations != 0 || options.from != "" || options.slot != "" || options.json {
+		if options.from != "" || options.slot != "" || options.json {
 			return errors.New("save NAME cannot be combined with recovery modifiers")
 		}
 	}
@@ -52,25 +43,6 @@ func runRecovery(scope protocol.Scope, options restoreOptions) (int, error) {
 			return 1, err
 		}
 		fmt.Printf("Saved checkpoint %s (%d managed sessions).\n", checkpoint.CheckpointID, len(checkpoint.Entries))
-		return 0, nil
-	}
-	if options.importLegacy {
-		checkpoints, err := linux.ImportLegacyRecovery(scope, options.importPath)
-		if err != nil {
-			return 1, err
-		}
-		for _, checkpoint := range checkpoints {
-			fmt.Printf("Imported legacy checkpoint %s (%d entries; review/export only).\n", checkpoint.CheckpointID, len(checkpoint.Legacy))
-			printCheckpointWarnings(checkpoint)
-			for index, entry := range checkpoint.Legacy {
-				if entry.Unavailable != "" {
-					printRecoverySession(os.Stdout, index, protocol.RecoverySession{Legacy: &entry})
-				}
-			}
-		}
-		if len(checkpoints) == 0 {
-			fmt.Println("No new legacy recovery checkpoints were imported.")
-		}
 		return 0, nil
 	}
 	if options.history {

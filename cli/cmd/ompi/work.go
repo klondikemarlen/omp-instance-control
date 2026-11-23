@@ -56,6 +56,9 @@ func runWork(output io.Writer, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if options.expectSessionID == "" {
+		recordCLIUsage("work."+options.action, scope, options.profile)
+	}
 	transport, err := linux.NewTransport(scope)
 	if err != nil {
 		return 1, err

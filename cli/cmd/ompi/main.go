@@ -26,6 +26,7 @@ const controlHelp = `Usage:
   ompi control restore ...
   ompi control work ...
   ompi control recover FILE
+  ompi control usage [--json]
 
 Restart IDs may be unique lowercase hexadecimal prefixes.
 Every target replaces its native ompi wrapper and OMP using the installed code.
@@ -119,6 +120,8 @@ func runControl(args []string) (int, error) {
 			fmt.Print(workHelp)
 		case "recover":
 			fmt.Print(recoverHelp)
+		case "usage":
+			fmt.Println(usageHelp)
 		case "version":
 			fmt.Println("Usage: ompi control version")
 		default:
@@ -141,6 +144,9 @@ func runControl(args []string) (int, error) {
 	}
 	if args[0] == "recover" {
 		return runRecover(args[1:])
+	}
+	if args[0] == "usage" {
+		return runUsage(os.Stdout, args[1:])
 	}
 	return runControlAction(args)
 }
@@ -267,6 +273,7 @@ func runControlAction(args []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	recordCLIUsage(action, scope, *profile)
 	transport, err := linux.NewTransport(scope)
 	if err != nil {
 		return 0, err
