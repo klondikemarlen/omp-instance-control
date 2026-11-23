@@ -16,6 +16,6 @@ Restart completion is a live replacement whose `lastRestart` matches the accepte
 
 `send ID MESSAGE` selects follow-up delivery; `steer ID MESSAGE` selects steering. Both parse leading profile/output options and preserve the single literal message argument after the target. They share the existing client and wire `send` action; command vocabulary does not add another transport or scheduling owner.
 
-Recovery adds an explicit shell menu for automatically captured managed slots, optional immutable names, checkpoint history, and reviewed imports/exports. The CLI confirms the selected exact session; persistent validation, process identity, and per-slot locking remain in `linux/`. Options and completion mirror the host command without automatic shell startup or terminal launching. Legacy data remains review/export-only because it has no verified managed ownership.
+Recovery adds an explicit shell menu for automatically captured managed slots, optional immutable names, checkpoint history, and export. The CLI confirms the selected session; persistent validation, process identity, and per-slot locking remain in `linux/`. Retained legacy checkpoints are review/export-only because they have no verified managed ownership.
 
 `cmd/ompi/cleanup.go` renders explicit Linux cleanup outcomes with full JSON identities/reasons and nonzero failure exits. The native and OMP commands invoke their platform transport's cleanup operation; shared listing and restart clients remain read-only apart from explicit restart dispatch.
