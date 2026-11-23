@@ -23,13 +23,12 @@ const restoreHelp = `Usage:
   ompi control restore checkpoint [--profile NAME]
   ompi control restore history [--json] [--profile NAME]
   ompi control restore export [--from ID] [--profile NAME]
-  ompi control restore import-legacy [PATH] [--profile NAME]
   ompi control restore from ID [--profile NAME]
   ompi control restore --help | --version
 
 Recovery automatically captures persisted managed ompi slots. Names are optional.
 Checkpoints retain slot membership, not frozen transcript contents.
-Legacy imports are review/export data and never acquire invented ownership.
+Previously imported legacy checkpoints remain review/export data without managed ownership.
 Restore uses this terminal only; no terminal windows are opened automatically.
 `
 
@@ -38,13 +37,12 @@ type restoreOptions struct {
 	instance      string
 	slot          string
 	from          string
+	namedTarget   string
 	list          bool
 	json          bool
 	checkpoint    bool
 	history       bool
 	export        bool
-	importLegacy  bool
-	importPath    string
 	name          bool
 	fromOperation bool
 	help          bool
@@ -72,20 +70,37 @@ func runRestore(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	recordCLIUsage(options.usageFeature(), scope, options.profile)
 	if options.instance != "" {
 		return saveNamedSession(scope, options.positionals[1], options.instance)
 	}
-	if options.name {
-		return restoreNamedSession(scope, options.positionals[1])
-	}
-	if len(options.positionals) == 1 {
-		switch options.positionals[0] {
-		case "list", "history", "checkpoint", "export", "import-legacy", "slot", "from":
-		default:
-			return restoreNamedSession(scope, options.positionals[0])
-		}
+	if options.namedTarget != "" {
+		return restoreNamedSession(scope, options.namedTarget)
 	}
 	return runRecovery(scope, options)
+}
+
+func (options restoreOptions) usageFeature() string {
+	switch {
+	case options.instance != "":
+		return "restore.save"
+	case options.name:
+		return "restore.name"
+	case options.slot != "":
+		return "restore.slot"
+	case options.list:
+		return "restore.list"
+	case options.checkpoint:
+		return "restore.checkpoint"
+	case options.history:
+		return "restore.history"
+	case options.fromOperation:
+		return "restore.from"
+	case options.export:
+		return "restore.export"
+	default:
+		return "restore.select"
+	}
 }
 
 func restoreNamedSession(scope protocol.Scope, name string) (int, error) {
@@ -197,6 +212,7 @@ func normalizeRestoreWords(options restoreOptions) (restoreOptions, error) {
 			return restoreOptions{}, errors.New("use 'ompi control restore name NAME'")
 		}
 		options.name = true
+		options.namedTarget = words[1]
 	case "save":
 		if len(words) != 2 {
 			return restoreOptions{}, errors.New("use 'ompi control restore save NAME --instance ID'")
@@ -216,14 +232,7 @@ func normalizeRestoreWords(options restoreOptions) (restoreOptions, error) {
 			options.export = true
 		}
 	case "import-legacy":
-		options.importLegacy = true
-		if len(words) > 2 {
-			return restoreOptions{}, errors.New("use 'ompi control restore import-legacy [PATH]'")
-		}
-		if len(words) == 2 {
-			options.importPath = words[1]
-		}
-		options.positionals = words[:1]
+		return restoreOptions{}, errors.New("restore import-legacy has been removed; use 'restore history', 'restore list', or 'restore export' to review retained checkpoints")
 	case "slot", "from":
 		if len(words) != 2 || protocol.ValidateInstanceID(words[1]) != nil {
 			return restoreOptions{}, fmt.Errorf("use 'ompi control restore %s FULL_ID'", words[0])
@@ -238,6 +247,10 @@ func normalizeRestoreWords(options restoreOptions) (restoreOptions, error) {
 			options.fromOperation = true
 		}
 		options.positionals = words[:1]
+	default:
+		if len(words) == 1 {
+			options.namedTarget = words[0]
+		}
 	}
 	return options, nil
 }
@@ -281,7 +294,7 @@ func validateRestoreOptions(options restoreOptions) error {
 		}
 		return protocol.ValidateInstanceID(options.instance)
 	}
-	if len(options.positionals) == 0 || options.list || options.history || options.checkpoint || options.export || options.importLegacy || options.slot != "" || options.from != "" {
+	if len(options.positionals) == 0 || options.list || options.history || options.checkpoint || options.export || options.slot != "" || options.from != "" {
 		return nil
 	}
 	if options.positionals[0] == "save" {

@@ -15,6 +15,7 @@ import { listProfileNames } from "../linux/profiles.js"
 import { listSavedSessions, validateRestoreName } from "../linux/restore.js"
 import { prepareTakeover } from "./take-over.js"
 import { listRecoveryCheckpoints, listRecoverySlotIds } from "../linux/recovery.js"
+import { recordSlashUsage } from "../linux/usage.js"
 import { createRestoreCommand, getRestoreScope } from "./recovery-command.js"
 import { requestWrapperRestart } from "./restart.js"
 import { parseWorkLookupOptions, WORK_HELP, WORK_OPERATIONS, workCommand } from "./work-command.js"
@@ -33,12 +34,12 @@ const ACTION_COMPLETIONS = [
 ]
 const ROOT_COMPLETIONS = ["help", "version", ...ACTION_COMPLETIONS]
 const LIST_COMPLETIONS = ["--profile", "--json"]
+const RETIRED_RESTORE_IMPORT = "import-legacy"
 const RESTORE_OPERATIONS = [
   "list",
   "history",
   "checkpoint",
   "export",
-  "import-legacy",
   "slot",
   "from",
   "save",
@@ -195,6 +196,12 @@ function parseOmpiArguments(args) {
     }
 
     const [word, ...arguments_] = positionals.slice(1)
+    if (word === RETIRED_RESTORE_IMPORT) {
+      throw new Error(
+        "Legacy import has been removed. Use restore history, list, or export for existing checkpoints."
+      )
+    }
+
     const operation = RESTORE_OPERATIONS.includes(word) ? word : word ? "named" : "menu"
     const allowed = new Set(["profile", "help", "version"])
     if (operation === "save") allowed.add("instance")
@@ -207,7 +214,7 @@ function parseOmpiArguments(args) {
       throw new Error("--from requires a full 32-character checkpoint ID.")
     }
     const requiresArgument = ["save", "name", "slot", "from"].includes(operation)
-    const maximumArguments = requiresArgument || operation === "import-legacy" ? 1 : 0
+    const maximumArguments = requiresArgument ? 1 : 0
     if (arguments_.length > maximumArguments || (requiresArgument && arguments_.length !== 1)) {
       throw new Error(`Invalid arguments for /ompi restore ${word ?? ""}.`)
     }
@@ -219,7 +226,7 @@ function parseOmpiArguments(args) {
       }
       return {
         action: "restore",
-        operation: operation === "save" ? "save" : "named",
+        operation,
         name,
         values: parsed.values,
         present,
@@ -231,7 +238,6 @@ function parseOmpiArguments(args) {
       }
       parsed.values[operation] = arguments_[0]
     }
-    if (operation === "import-legacy") parsed.values["import-legacy"] = arguments_[0]
     return {
       action: "restore",
       operation: operation === "menu" ? "menu" : `recovery-${operation}`,
@@ -455,7 +461,7 @@ function getRestoreCompletions(
   if (operation === "export") candidates = ["--from", "--profile"]
   if ([...options].some((option) => !candidates.includes(`--${option}`))) return []
   const needsArgument = ["save", "name", "slot", "from"].includes(operation)
-  const maximumWords = needsArgument || operation === "import-legacy" ? 2 : 1
+  const maximumWords = needsArgument ? 2 : 1
   if (positionals.length > maximumWords) return []
 
   if (pendingValue === "instance" || tokenPrefix.startsWith("--instance=")) {
@@ -505,7 +511,10 @@ function getRestoreCompletions(
   const names = scopeSavedNames(completionNames, completedTokens, defaultScope).map(
     ({ name, unavailable }) =>
       completionItem(
-        operation === "menu" && RESTORE_OPERATIONS.includes(name) ? `name ${name}` : name,
+        operation === "menu" &&
+          (RESTORE_OPERATIONS.includes(name) || name === RETIRED_RESTORE_IMPORT)
+          ? `name ${name}`
+          : name,
         unavailable ? `${name} (unavailable: ${safeTerminalText(unavailable)})` : name
       )
   )
@@ -558,6 +567,7 @@ function getArgumentCompletions(
     )
   }
   if (!["restore", "restart", "list", "cleanup"].includes(command)) return []
+  if (command === "restore" && context.positionals[0] === RETIRED_RESTORE_IMPORT) return []
 
   if (context.pendingValue === "profile" || tokenPrefix.startsWith("--profile=")) {
     const inline = tokenPrefix.startsWith("--profile=")
@@ -990,7 +1000,6 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "/ompi restore slot ID",
               "/ompi restore from CHECKPOINT",
               "/ompi restore export [--from CHECKPOINT]",
-              "/ompi restore import-legacy [PATH]",
               "All recovery operations accept --profile NAME.",
               "Selection prepares a command to copy before graceful exit; paste it at the shell.",
             ],
@@ -1006,6 +1015,21 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           ctx.ui.notify(`omp-instance-control ${packageJson.version}`, "info")
           return
         }
+
+        let feature = action
+        if (action === "restore") {
+          if (operation === "named" || operation === "menu") {
+            feature = "restore.select"
+          } else {
+            feature = `restore.${operation.replace(/^recovery-/, "")}`
+          }
+        } else if (action === "restart-wrapper") {
+          feature = "restart"
+        } else if (action === "send" && values.delivery === "steer") {
+          feature = "steer"
+        }
+        await recordSlashUsage(feature, getRuntime()?.launch?.scope)
+
         if (action === "restore") {
           await restoreCommand(ctx, { operation, name, values })
           return

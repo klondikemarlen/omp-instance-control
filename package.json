@@ -1,6 +1,6 @@
 {
   "name": "omp-instance-control",
-  "version": "1.2.1",
+  "version": "2.0.0",
   "description": "Native ompi wrapper and OMP adapter for scoped settled-boundary restart/resume.",
   "type": "module",
   "license": "MIT",
@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "build": "make build",
-    "test": "go test ./... && node --test",
+    "test": "make test",
     "format": "gofmt -w cli linux protocol test && prettier --write .",
     "lint": "npm run lint:go && npm run lint:js && npm run lint:ruby && npm run lint:shell",
     "lint:go": "golangci-lint run --fix=false ./...",

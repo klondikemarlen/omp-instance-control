@@ -80,20 +80,26 @@ _ompi_work_completion()
 
 _ompi_control_completion()
 {
+    # Candidate lookups are not operator feature invocations.
+    local -x OMPI_USAGE=0
     # _comp_initialize populates prev through Bash dynamic scope; keep it local.
     # shellcheck disable=SC2034
     local cur prev words cword
     _comp_initialize -n = || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup help version' -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup usage help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup version' -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup usage version' -- "$cur")
         fi
+        return 0
+    fi
+    if [[ $action == usage ]]; then
+        (( cword == 3 )) && mapfile -t COMPREPLY < <(compgen -W '--json' -- "$cur")
         return 0
     fi
     if [[ $action == work ]]; then
@@ -194,7 +200,7 @@ _ompi_control_completion()
             name|slot|from) needs_argument=true ;;
         esac
         local maximum=1
-        [[ $needs_argument == true || $operation == import-legacy ]] && maximum=2
+        [[ $needs_argument == true ]] && maximum=2
         (( ${#positionals[@]} > maximum )) && return 0
     elif (( ${#positionals[@]} > 0 )); then
         return 0
@@ -244,17 +250,15 @@ _ompi_control_completion()
             mapfile -t COMPREPLY < <(compgen -W 'all' -- "$cur")
         elif [[ $action == restore && ( ${#positionals[@]} == 0 || ( $operation == name && ${#positionals[@]} == 1 ) ) ]]; then
             local position saved_name _remainder
-            local verbs='list history checkpoint export import-legacy slot from save name'
+            local verbs='list history checkpoint export slot from save name'
             local -a names=()
             [[ -z $operation ]] && read -r -a names <<< "$verbs"
             while read -r position saved_name _remainder; do
                 [[ $position =~ ^[0-9]+\)$ && $saved_name =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || continue
-                [[ -z $operation && " $verbs " == *" $saved_name "* ]] && continue
+                [[ -z $operation && ( $saved_name == import-legacy || " $verbs " == *" $saved_name "* ) ]] && continue
                 names+=("$saved_name")
             done < <(command ompi control restore list "${profile_arguments[@]}" 2>/dev/null)
             mapfile -t COMPREPLY < <(compgen -W "${names[*]}" -- "$cur")
-        elif [[ $action == restore && $operation == import-legacy && ${#positionals[@]} == 1 ]]; then
-            _comp_compgen_filedir
         fi
         return 0
     fi

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/klondikemarlen/omp-instance-control/linux"
+	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
 
 const recoverHelp = `Usage: ompi control recover FILE
@@ -26,6 +27,7 @@ func runRecover(args []string) (int, error) {
 	if len(args) != 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
 		return 0, usageError("use 'ompi control recover FILE'; recovery takes exactly one private record path")
 	}
+	recordCLIUsage("recover", protocol.Scope{}, "")
 	executable, err := os.Executable()
 	if err != nil {
 		return 1, err

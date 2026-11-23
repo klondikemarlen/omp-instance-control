@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { access, mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import path from "node:path"
 import test from "node:test"
@@ -21,6 +21,7 @@ async function writeWorkExecutable(executable) {
     executable,
     [
       `#!${process.execPath}`,
+      'if (process.env.OMPI_USAGE !== "0") process.exit(42)',
       "const argv = process.argv.slice(2)",
       'if (argv.join(" ") === "control work --help") {',
       '  console.log("Usage: ompi control work list|find|set|clear")',
@@ -59,6 +60,7 @@ test("when setting work, slash sends literal summary argv to its managed native 
   const fixture = await createFixture()
   t.after(() => fixture.close())
   process.env.PATH = path.join(fixture.root, "without ompi")
+  process.env.OMPI_USAGE = "1"
   process.env.OMP_PROFILE = "ambient"
   const executable = path.join(fixture.root, "managed bin", "ompi")
   await writeWorkExecutable(executable)
@@ -97,6 +99,9 @@ test("when setting work, slash sends literal summary argv to its managed native 
     profile: "managed",
     agentDir: path.join(fixture.root, "managed config", "profiles", "managed", "agent"),
   })
+  const usageDirectory = path.join(runtime.launch.scope.agentDir, "instance-control", "usage-v1")
+  assert.deepEqual(await readdir(usageDirectory), ["slash.work.set"])
+  assert.deepEqual(await readFile(path.join(usageDirectory, "slash.work.set")), Buffer.from([0]))
 })
 
 test("when clearing work, slash passes only its full launch ID and both saved-session guards", async (t) => {

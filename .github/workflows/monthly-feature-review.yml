@@ -1,0 +1,25 @@
+name: Monthly Feature Usage Review
+
+on:
+  schedule:
+    - cron: "17 17 23 * *"
+
+permissions:
+  issues: write
+
+jobs:
+  remind:
+    if: github.repository == 'klondikemarlen/omp-instance-control'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify the Maintainer on the Review Ticket
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The first review follows the November 2026 baseline by one month.
+          [[ $(date -u +%Y%m) < 202612 ]] && exit 0
+          state=$(gh issue view 105 --json state --jq '.state')
+          [[ $state == OPEN ]] || exit 0
+          gh issue comment 105 --body '@klondikemarlen Monthly feature review: run `ompi control usage` locally and compare with your previous baseline. Consider rare recovery paths separately. Record a decision or link a follow-up, without posting private data.'

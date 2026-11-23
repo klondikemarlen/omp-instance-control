@@ -9,6 +9,7 @@ export { createCommand, createContext, createFixture, createSdk }
 
 const ENVIRONMENT_KEYS = [
   "HOME",
+  "OMPI_USAGE",
   "PATH",
   "PI_CONFIG_DIR",
   "PI_CODING_AGENT_DIR",
@@ -22,10 +23,18 @@ async function createFixture() {
   const configRoot = path.join(root, "config")
   const cwd = path.join(root, "worktree")
   const runtimeRoot = path.join(root, "runtime")
-  await Promise.all([mkdir(configRoot), mkdir(cwd), mkdir(runtimeRoot, { mode: 0o700 })])
+  const privateDirectory = {
+    mode: 0o700,
+  }
+  await Promise.all([
+    mkdir(configRoot, privateDirectory),
+    mkdir(cwd),
+    mkdir(runtimeRoot, privateDirectory),
+  ])
   const previous = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]))
   Object.assign(process.env, {
     HOME: root,
+    OMPI_USAGE: "0",
     PI_CONFIG_DIR: configRoot,
     PI_CODING_AGENT_DIR: path.join(configRoot, "agent"),
     OMP_PROFILE: "",

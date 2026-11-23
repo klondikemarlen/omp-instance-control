@@ -6,7 +6,6 @@ import { prepareNamedRestoreCommand, prepareSlotRestoreCommand } from "../linux/
 import {
   captureRecoveryCheckpoint,
   exportRecoveryCommands,
-  importLegacyRecovery,
   listRecoveryCheckpoints,
   listRecoverySessions,
 } from "../linux/recovery.js"
@@ -254,23 +253,6 @@ export function createRestoreCommand(pi, { getRuntime, refreshCompletionIds }) {
                     `${item.checkpointId} ${item.createdAt} ${item.reason} (${item.entries.length} managed)`
                 )
                 .join("\n") || "No recovery checkpoints.",
-          "info"
-        )
-      } else if (recoveryOperation === "import-legacy") {
-        const imported = await importLegacyRecovery(scope, values["import-legacy"] || undefined)
-        ctx.ui.notify(
-          JSON.stringify(
-            imported.map((item) => ({
-              checkpointId: item.checkpointId,
-              warnings: item.warnings ?? [],
-              unavailable: (item.legacy ?? [])
-                .filter((entry) => entry.unavailable)
-                .map((entry) => ({
-                  sessionId: entry.sessionId,
-                  reason: entry.unavailable,
-                })),
-            }))
-          ),
           "info"
         )
       } else {

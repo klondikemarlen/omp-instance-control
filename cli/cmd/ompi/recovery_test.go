@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -71,16 +73,37 @@ func TestCheckpointListPreservesExplicitSelectionAndScope(t *testing.T) {
 	}
 }
 
-func TestLegacyImportPathIsNotTreatedAsSavedName(t *testing.T) {
-	options, err := parseRestoreOptions([]string{"import-legacy", "/private/recovery snapshot.txt", "--profile=work"})
+func TestRetiredImportCommandDoesNotDispatch(t *testing.T) {
+	scope := setUsageEnvironment(t, "1")
+	source := filepath.Join(t.TempDir(), "recovery snapshot.txt")
+	original := []byte("cd '/project' && omp --resume 'original'\n")
+	if err := os.WriteFile(source, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"import-legacy"},
+		{"import-legacy", source, "--profile=work"},
+	} {
+		_, err := runRestore(args)
+		if err == nil || !strings.Contains(err.Error(), "restore import-legacy has been removed") {
+			t.Fatalf("retired import was not rejected: %v", err)
+		}
+	}
+	contents, err := os.ReadFile(source)
+	if err != nil || !bytes.Equal(contents, original) {
+		t.Fatalf("retired import modified the original helper file: %q %v", contents, err)
+	}
+	assertNoUsageDirectory(t, scope)
+}
+
+func TestExplicitRestoreNameStillAcceptsImportLegacy(t *testing.T) {
+	options, err := parseRestoreOptions([]string{"name", "import-legacy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateRestoreOptions(options); err != nil {
-		t.Fatal(err)
-	}
-	if !options.importLegacy || options.importPath != "/private/recovery snapshot.txt" || options.profile != "work" || len(options.positionals) != 1 {
-		t.Fatalf("legacy path changed meaning: %#v", options)
+	if !options.name || options.namedTarget != "import-legacy" {
+		t.Fatalf("explicit saved name changed meaning: %#v", options)
 	}
 }
 
