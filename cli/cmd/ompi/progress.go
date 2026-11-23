@@ -290,14 +290,14 @@ func (renderer *restartRenderer) terminalFrame(terminalRows int) []progressLine 
 	}
 	if terminalRows <= 2 {
 		text := fmt.Sprintf(
-			"%c %d/%d restarted, %d pending, %d issues, %d hidden, %s elapsed | %s",
+			"%c %d/%d restarted, %d pending, %d issues, %s elapsed, %d hidden | %s",
 			loaderFrames[renderer.frameNumber%len(loaderFrames)],
 			counts.restarted,
 			counts.total,
 			counts.pending,
 			counts.failed,
-			counts.total,
 			renderer.elapsed(),
+			counts.total,
 			footer,
 		)
 		return []progressLine{{text: text}}
