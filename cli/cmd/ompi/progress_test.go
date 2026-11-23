@@ -18,12 +18,13 @@ func TestRestartProgressReportsElapsedDuration(t *testing.T) {
 		renderer := restartRenderer{startedAt: time.Now()}
 		time.Sleep(9*time.Minute + 53*time.Second + 750*time.Millisecond)
 
-		for _, frame := range [][]progressLine{
-			renderer.terminalFrame(24),
-			renderer.terminalFrame(2),
-			renderer.plainFrame(),
+		const terminalColumns = 60
+		for _, header := range []string{
+			progressLineText(renderer.terminalFrame(24)[0], terminalColumns-1),
+			progressLineText(renderer.terminalFrame(2)[0], terminalColumns-1),
+			renderer.plainFrame()[0].text,
 		} {
-			if header := frame[0].text; !strings.Contains(header, "9m53s elapsed") {
+			if !strings.Contains(header, "9m53s elapsed") {
 				t.Errorf("expected elapsed observation time in restart header: %q", header)
 			}
 		}
