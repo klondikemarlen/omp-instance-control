@@ -38,6 +38,7 @@ type resumeState struct {
 	sessionFile  string
 	restart      restartRecord
 	recoveryFile string
+	observer     restartObserver
 }
 
 func currentWrapperExecutable() (string, error) {
@@ -172,8 +173,13 @@ func resumeWrapper(args []string, extensionPath, nativeVersion string) (int, err
 	}
 	return launchWithResume(
 		state.Args, extensionPath, nativeVersion, state.RestoreID, lock,
-		&resumeState{cwd: state.CWD, sessionFile: state.SessionFile, restart: state.Restart,
-			recoveryFile: existingRestartRecovery(state.Scope, state.Restart.OperationID)},
+		&resumeState{
+			cwd:          state.CWD,
+			sessionFile:  state.SessionFile,
+			restart:      state.Restart,
+			recoveryFile: existingRestartRecovery(state.Scope, state.Restart.OperationID),
+			observer:     observeRestart(state.Scope, state.Restart),
+		},
 	)
 }
 
@@ -247,21 +253,51 @@ func consumeWrapperExecState() (wrapperExecState, *os.File, error) {
 		return state, nil, fmt.Errorf("consume native wrapper restart state: %w", err)
 	}
 	lockFD, err := strconv.Atoi(lockValue)
-	if err != nil || state.Version != 1 || state.Token != token {
+	if state.Version != 1 || state.Token != token {
+		return state, nil, errors.New("native wrapper restart state identity is invalid")
+	}
+	if err != nil {
+		observeWrapperStateFailure(state)
 		return state, nil, errors.New("native wrapper restart state identity is invalid")
 	}
 	if err := validateWrapperExecState(state, lockFD); err != nil {
+		observeWrapperStateFailure(state)
 		return state, nil, fmt.Errorf("invalid native wrapper restart state: %w", err)
 	}
 	var lock *os.File
 	if lockFD > 0 {
 		lock = os.NewFile(uintptr(lockFD), "ompi restore lock")
 		if lock == nil {
+			observeWrapperStateFailure(state)
 			return state, nil, errors.New("native wrapper restart restore lock descriptor is invalid")
 		}
 		syscall.CloseOnExec(lockFD)
 	}
 	return state, lock, nil
+}
+
+// A token-matched state still needs independent scope validation before it
+// can select a diagnostics directory, even when the replacement cannot start.
+func observeWrapperStateFailure(state wrapperExecState) {
+	if !filepath.IsAbs(state.CWD) || filepath.Clean(state.CWD) != state.CWD ||
+		!validWrapperRestartCorrelation(state.Restart) {
+		return
+	}
+	scope, err := protocol.GetScope(state.Scope.Profile, state.CWD)
+	if err != nil || scope != state.Scope {
+		return
+	}
+	observeRestart(scope, state.Restart).observe("replacement-failed", "wrapper-state", nil, 0)
+}
+
+func validWrapperRestartCorrelation(restart restartRecord) bool {
+	request := protocol.Request{
+		Version:    protocol.Version,
+		InstanceID: restart.PreviousInstanceID,
+		RequestID:  restart.OperationID,
+		Action:     "restart-wrapper",
+	}
+	return protocol.ValidateRequest(request) == nil
 }
 
 func validateWrapperExecState(state wrapperExecState, lockFD int) error {
@@ -280,11 +316,7 @@ func validateWrapperExecState(state wrapperExecState, lockFD int) error {
 	if err != nil || scope != state.Scope {
 		return errors.New("configuration scope changed during native wrapper restart")
 	}
-	request := protocol.Request{
-		Version: protocol.Version, InstanceID: state.Restart.PreviousInstanceID,
-		RequestID: state.Restart.OperationID, Action: "restart-wrapper",
-	}
-	if err := protocol.ValidateRequest(request); err != nil {
+	if !validWrapperRestartCorrelation(state.Restart) {
 		return errors.New("restart correlation is invalid")
 	}
 	if state.RestoreID == "" {

@@ -333,6 +333,9 @@ func TestFakeOMPChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if mode := os.Getenv("OMPI_TEST_RESTART_DIAGNOSTICS"); mode != "" {
+		fakeRestartDiagnostics(t, launchDir, launch["scope"].(map[string]any)["agentDir"].(string), callNumber, mode)
+	}
 	if exitCode := os.Getenv("OMPI_TEST_EXIT_CODE"); exitCode != "" {
 		code, err := strconv.Atoi(exitCode)
 		if err != nil {

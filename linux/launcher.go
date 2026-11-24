@@ -87,6 +87,13 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			code, launchError = 1, fmt.Errorf("remove completed restart recovery record: %w", err)
 		}
 	}()
+	var pendingReplacement restartObserver
+	if resume != nil {
+		pendingReplacement = resume.observer
+	}
+	defer func() {
+		pendingReplacement.observe("replacement-failed", "replacement-prepare", nil, 0)
+	}()
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		return runPassthrough(args)
 	}
@@ -171,6 +178,8 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 
 	launchPath := filepath.Join(launchDir, "launch.json")
 	handoffPath := filepath.Join(launchDir, "handoff.json")
+	observationPath := filepath.Join(launchDir, restartObservationFilename)
+	onlinePath := filepath.Join(launchDir, restartOnlineFilename)
 	executable := os.Getenv(ompExecutableEnv)
 	if executable == "" {
 		executable = "omp"
@@ -197,6 +206,8 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 	for {
 		select {
 		case received := <-signals:
+			pendingReplacement.observe("replacement-failed", "interrupted", nil, received.(syscall.Signal))
+			pendingReplacement = restartObserver{}
 			return 128 + int(received.(syscall.Signal)), nil
 		default:
 		}
@@ -220,6 +231,10 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 		if err := WritePrivateJSON(launchPath, launch); err != nil {
 			return 1, err
 		}
+		// A launch directory is reused across OMP-only restarts. Never consume
+		// a diagnostic marker left by a previous child if clearing it fails.
+		observationClear := clearRestartMarker(observationPath)
+		onlineClear := clearRestartMarker(onlinePath)
 
 		currentArgs := args
 		if resumeFile != "" {
@@ -244,6 +259,26 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			childCWD = cwd
 		}
 		child, err := runChild(executable, childArgs, childCWD, childEnv, signals, inheritedFiles)
+		if pendingReplacement.id.OperationID != "" {
+			online := onlineClear && readRestartMarker(onlinePath) == pendingReplacement.id
+			if !online && !pendingReplacement.saw("replacement-online") {
+				if !pendingReplacement.observeChildFailure("replacement-failed", child, err) {
+					pendingReplacement.observe("replacement-exited", "", &child.code, 0)
+				}
+			}
+			pendingReplacement = restartObserver{}
+		}
+		var observer restartObserver
+		if observationClear {
+			observer = restartObserver{
+				scope: scope,
+				id:    readRestartMarker(observationPath),
+			}
+			if observer.saw("shutdown-rejected", "restart-suppressed") {
+				observer = restartObserver{}
+			}
+		}
+		childFailed := observer.observeChildFailure("original-child-failed", child, err)
 		if err != nil {
 			return 1, err
 		}
@@ -252,33 +287,49 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			return 1, errors.New("OMP child completion was not verified")
 		}
 		if err := cleanupLaunchRegistrations(launchDir, token, scope, child.pid); err != nil {
+			if !childFailed {
+				observer.observe("original-child-failed", "registration-cleanup", &child.code, 0)
+			}
 			return 1, err
 		}
-		if child.signaled || child.code != 0 {
+		if child.signal != 0 || child.code != 0 {
 			return child.code, nil
 		}
 		if restartArgsErr != nil {
+			observer.observe("handoff-invalid", "restart-arguments", &child.code, 0)
 			return 0, nil
 		}
 		handoff, err := readHandoff(handoffPath, token)
 		if errors.Is(err, fs.ErrNotExist) {
+			observer.observe("handoff-invalid", "handoff-missing", &child.code, 0)
 			return 0, nil
 		}
 		if err != nil {
+			observer.observe("handoff-invalid", "handoff-read", &child.code, 0)
 			return 1, err
 		}
 		if err := validateHandoff(handoff); err != nil {
+			observer.observe("handoff-invalid", "handoff-metadata", &child.code, 0)
 			return 1, err
 		}
+		restart = &restartRecord{
+			OperationID:        handoff.OperationID,
+			PreviousInstanceID: handoff.InstanceID,
+		}
+		observer = observeRestart(scope, *restart)
 		if err := validateSessionAndCWD(handoff.SessionFile, handoff.CWD); err != nil {
+			observer.observe("handoff-invalid", "handoff-session", &child.code, 0)
 			return 1, err
 		}
+		observer.observe("handoff-validated", "", &child.code, 0)
 		nextRecoveryFile, recoveryError := preserveRestartRecovery(scope, restoreID, restartArgs, handoff)
 		if recoveryError != nil && recoveryFile != "" {
+			observer.observe("replacement-failed", "recovery-preserve", nil, 0)
 			return 1, fmt.Errorf("preserve next restart recovery record: %w", recoveryError)
 		}
 		if recoveryFile != "" && recoveryFile != nextRecoveryFile {
 			if err := os.Remove(recoveryFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				observer.observe("replacement-failed", "recovery-retire", nil, 0)
 				return 1, fmt.Errorf("retire preceding restart recovery record: %w", err)
 			}
 		}
@@ -289,25 +340,31 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			fmt.Fprintf(os.Stderr, "If replacement startup fails, recover explicitly with:\n  ompi control recover %s\n", shellQuote(recoveryFile))
 		}
 		if err := os.Remove(handoffPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			observer.observe("replacement-failed", "handoff-consume", nil, 0)
 			return 1, err
 		}
 		cwd = handoff.CWD
-		restart = &restartRecord{OperationID: handoff.OperationID, PreviousInstanceID: handoff.InstanceID}
 		resumeFile = handoff.SessionFile
+		observer.observe("replacement-starting", "", nil, 0)
 		if handoff.RestartWrapper {
 			select {
 			case received := <-signals:
+				observer.observe("replacement-failed", "interrupted", nil, received.(syscall.Signal))
 				return 128 + int(received.(syscall.Signal)), nil
 			default:
 			}
 			if !canRestartWrapper {
+				observer.observe("replacement-failed", "wrapper-unavailable", nil, 0)
 				return 1, fmt.Errorf("cannot restart the native wrapper: installed executable is unavailable or unusable: %s", wrapperExecutable)
 			}
 			if err := execWrapperReplacement(launchDir, wrapperExecutable, scope, restartArgs, cwd, resumeFile, restart, restoreID, restoreLock, handoff.NativeTarget); err != nil {
+				observer.observe("replacement-failed", "wrapper-exec", nil, 0)
 				return 1, err
 			}
+			observer.observe("replacement-failed", "wrapper-exec", nil, 0)
 			return 1, errors.New("native wrapper replacement returned without executing")
 		}
+		pendingReplacement = observer
 	}
 }
 
@@ -416,10 +473,10 @@ func replaceEnvironment(env []string, updates map[string]string) []string {
 }
 
 type childResult struct {
-	code     int
-	signaled bool
-	pid      int
-	reaped   bool // True only after cmd.Wait completed; early runner errors leave it false.
+	code   int
+	signal syscall.Signal
+	pid    int
+	reaped bool // True only after cmd.Wait completed; early runner errors leave it false.
 }
 
 func runChild(executable string, args []string, cwd string, env []string, signals <-chan os.Signal, inheritedFiles []*os.File) (childResult, error) {
@@ -440,7 +497,7 @@ func runChild(executable string, args []string, cwd string, env []string, signal
 			select {
 			case received := <-signals:
 				return childResult{
-					code: 128 + int(received.(syscall.Signal)), signaled: true, pid: childPID, reaped: true,
+					code: 128 + int(received.(syscall.Signal)), signal: received.(syscall.Signal), pid: childPID, reaped: true,
 				}, nil
 			default:
 			}
@@ -451,7 +508,7 @@ func runChild(executable string, args []string, cwd string, env []string, signal
 			if errors.As(err, &exitErr) {
 				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 					return childResult{
-						code: 128 + int(status.Signal()), signaled: true, pid: childPID, reaped: true,
+						code: 128 + int(status.Signal()), signal: status.Signal(), pid: childPID, reaped: true,
 					}, nil
 				}
 				return childResult{code: exitErr.ExitCode(), pid: childPID, reaped: true}, nil
@@ -469,7 +526,7 @@ func runChild(executable string, args []string, cwd string, env []string, signal
 					return childResult{code: 1, pid: childPID}, waitErr
 				}
 			}
-			return childResult{code: 128 + int(signal), signaled: true, pid: childPID, reaped: true}, nil
+			return childResult{code: 128 + int(signal), signal: signal, pid: childPID, reaped: true}, nil
 		}
 	}
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 - 2026-11-24
+
+- After an unexpected terminal closure, inspect `instance-control/restart-diagnostics-v1/` under the affected profile’s agent directory. Each JSON file shows one operation’s last observed stage and any recorded exit code, signal or error category. An unfinished stage is not a diagnosis.
+- Snapshots stay local, independent of usage counting and recovery. There are at most 256 slots, selected by the first two hex digits of the previous instance ID; a newer observation in the same slot replaces its contents. No terminal text, arguments or project paths are collected.
+- The 256-slot limit applies to completed JSON snapshots. Terminating a writer during an atomic update can leave a private `.tmp` file; it is not a completed observation.
+
 ## 2.0.1 - 2026-11-23
 
 - Native restart progress shows elapsed durations with explicit units instead of clock notation.
