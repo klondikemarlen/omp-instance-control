@@ -294,7 +294,7 @@ export default async function instanceControl(pi) {
     try {
       const result = ctx.shutdown()
       if (result && typeof result.then === "function") {
-        void Promise.resolve(result).catch(rejectShutdown)
+        Promise.resolve(result).catch(rejectShutdown)
       }
     } catch (error) {
       rejectShutdown(error)
