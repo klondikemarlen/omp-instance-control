@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url"
 import { createTransport, writePrivateJson } from "../../linux/transport.js"
 import { createMessageRequest, createRequest, getScope } from "../../protocol/index.js"
 import { createEventBus, createExtensionApi, createSdk } from "./lifecycle-fixture.js"
+import { createRestartDirectoryFixture, observationFile } from "./restart-directory-fixture.js"
 
 import instanceControl from "../../omp/index.js"
 
@@ -297,6 +298,7 @@ test("when the first transcript is missing, restart waits for persistence and re
     assert.equal(shutdownsAfterPersistence, 1)
     assert.equal(shutdownsAfterContextChange, 1)
     await assert.rejects(readFile(path.join(launchDirectory, "handoff.json")), { code: "ENOENT" })
+    await assertRestartSuppressed(scope, launchDirectory, request)
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
     for (const [key, value] of Object.entries(previous)) {
@@ -405,7 +407,7 @@ test("when wrapper restart is pending, a child-only request cannot downgrade its
   }
 })
 
-test("when an explicit matching exit arrives after restart acceptance, wrapper restart is rejected", async () => {
+test("when a matching explicit exit follows shutdown, restart remains suppressed even after late rejection", async () => {
   // Arrange
   const root = await mkdtemp(path.join(tmpdir(), "ic-exit-precedence-"))
   const launchDirectory = path.join(root, "launch")
@@ -440,6 +442,9 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
   Object.assign(process.env, environment)
   const events = createEventBus()
   const handlers = new Map()
+  const shutdownStarted = Promise.withResolvers()
+  const shutdownResult = Promise.withResolvers()
+  const lateRejection = Promise.withResolvers()
   const ctx = {
     agent: { kind: "main" },
     mode: "tui",
@@ -450,11 +455,12 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
     },
     ui: {
       setStatus() {},
-      notify(message) {
-        assert.fail(message)
-      },
+      notify: lateRejection.resolve,
     },
-    shutdown() {},
+    shutdown() {
+      shutdownStarted.resolve()
+      return shutdownResult.promise
+    },
   }
   const extension = createExtensionApi(events, handlers, ctx)
 
@@ -467,6 +473,7 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
 
     // Act
     const accepted = await transport.request(record, request)
+    await shutdownStarted.promise
     events.emit("omp-exit-command:exit-requested", { sessionId: "exit-session" })
     const status = await transport.request(record, createRequest(record.instanceId, "status"))
     const rejected = await transport.request(record, createRequest(record.instanceId, "restart"))
@@ -475,6 +482,8 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
       createRequest(record.instanceId, "restart-wrapper")
     )
     await handlers.get("session_shutdown")({}, ctx)
+    shutdownResult.reject(new Error("late host shutdown rejection"))
+    const notification = await lateRejection.promise
 
     // Assert
     assert.equal(accepted.ok, true)
@@ -484,6 +493,8 @@ test("when an explicit matching exit arrives after restart acceptance, wrapper r
     assert.equal(rejected.error.code, "EXPLICIT_EXIT_REQUESTED")
     assert.equal(rejectedWrapper.ok, false)
     assert.equal(rejectedWrapper.error.code, "EXPLICIT_EXIT_REQUESTED")
+    assert.match(notification, /could not accept graceful shutdown/)
+    await assertRestartSuppressed(scope, launchDirectory, request)
     await assert.rejects(readFile(path.join(launchDirectory, "handoff.json")), { code: "ENOENT" })
   } finally {
     await handlers.get("session_shutdown")?.({}, ctx)
@@ -633,93 +644,18 @@ test("when an installed update appears during manual restart, it only notifies a
   }
 })
 
-async function createRestartDirectoryFixture({ sendMessages = [] } = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "ic-cwd-"))
-  const cwd = path.join(root, "project")
-  const moved = path.join(root, "moved")
-  const launchDirectory = path.join(root, "launch")
-  await mkdir(cwd, { mode: 0o700 })
-  await mkdir(launchDirectory, { mode: 0o700 })
-  const scope = getScope({ env: { HOME: root } })
-  const token = "5".repeat(32)
-  const sessionFile = path.join(root, "session.jsonl")
-  await writeFile(sessionFile, '{"type":"session","id":"cwd-session"}\n', { mode: 0o600 })
-  await writePrivateJson(path.join(launchDirectory, "launch.json"), {
-    version: 1,
-    token,
-    pid: process.ppid,
-    scope,
-    extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
-    canRestartWrapper: true,
-    lastRestart: null,
-    builtinFlags: [],
+async function assertRestartSuppressed(scope, launchDirectory, request) {
+  const file = observationFile(scope, request.instanceId)
+  const snapshot = JSON.parse(await readFile(file, "utf8"))
+  assert.deepEqual(snapshot, {
+    operationId: request.requestId,
+    previousInstanceId: request.instanceId,
+    stage: "restart-suppressed",
+    observedAt: new Date(snapshot.observedAt).toISOString(),
   })
-  const environment = {
-    HOME: root,
-    PI_CONFIG_DIR: path.join(root, ".omp"),
-    PI_CODING_AGENT_DIR: path.join(root, ".omp", "agent"),
-    OMP_PROFILE: "",
-    PI_PROFILE: "",
-    XDG_RUNTIME_DIR: root,
-    OMP_INSTANCE_CONTROL_LAUNCH_DIR: launchDirectory,
-    OMP_INSTANCE_CONTROL_LAUNCH_TOKEN: token,
-  }
-  const previous = Object.fromEntries(
-    Object.keys(environment).map((key) => [key, process.env[key]])
-  )
-  Object.assign(process.env, environment)
-  const handlers = new Map()
-  const notifications = []
-  const shutdownRequested = Promise.withResolvers()
-  let shutdowns = 0
-  const ctx = {
-    agent: { kind: "main" },
-    mode: "tui",
-    cwd,
-    sessionManager: {
-      getSessionId: () => "cwd-session",
-      getSessionFile: () => sessionFile,
-    },
-    ui: {
-      setStatus() {},
-      notify(message, level) {
-        notifications.push({ message, level })
-      },
-    },
-    shutdown() {
-      shutdowns += 1
-      shutdownRequested.resolve()
-    },
-  }
-  const extension = createExtensionApi(createEventBus(), handlers)
-  extension.api.sendMessage = (content, options) => sendMessages.push({ content, options })
-  await instanceControl(extension.api)
-  await handlers.get("session_start")({}, ctx)
-  const transport = await createTransport(scope)
-  const [record] = await transport.readRecords()
-  return {
-    cwd,
-    moved,
-    sessionFile,
-    handlers,
-    ctx,
-    api: extension.api,
-    transport,
-    record,
-    notifications,
-    shutdownRequested,
-    get shutdowns() {
-      return shutdowns
-    },
-    async close() {
-      await handlers.get("session_shutdown")({}, ctx)
-      for (const [key, value] of Object.entries(previous)) {
-        if (value === undefined) delete process.env[key]
-        else process.env[key] = value
-      }
-      await rm(root, { recursive: true, force: true })
-    },
-  }
+  await assert.rejects(readFile(path.join(launchDirectory, "restart-observation.json")), {
+    code: "ENOENT",
+  })
 }
 
 test("when status is queried again, the adapter reads the current OMP session title", async () => {
