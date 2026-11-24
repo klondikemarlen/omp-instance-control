@@ -5,6 +5,13 @@ import { fileURLToPath } from "node:url"
 
 import { readNativeTarget, watchNativeUpdates } from "../linux/native-updates.js"
 import { captureRecoveryCheckpoint } from "../linux/recovery.js"
+import {
+  clearRestartObservation,
+  recordReplacementOnline,
+  recordRestartShutdownRejected,
+  recordRestartShutdownRequested,
+  recordRestartSuppressed,
+} from "../linux/restart-diagnostics.js"
 import { captureRestoreSnapshot } from "../linux/restore.js"
 import { createTransport, readSendContextMetadata } from "../linux/transport.js"
 import { getScope, ProtocolError, PROTOCOL_VERSION } from "../protocol/index.js"
@@ -133,6 +140,8 @@ export default async function instanceControl(pi) {
     if (probe && typeof probe === "object") probe.claimed = true
   })
 
+  if (launch) clearRestartObservation(launch)
+
   registerPeerMessageRenderer(pi)
 
   let runtime
@@ -155,6 +164,10 @@ export default async function instanceControl(pi) {
 
     runtime.exitRequestedSessionId = request.sessionId
     runtime.nativeUpdates?.close()
+    // Only an origin-session exit keeps matching even if the active session changes.
+    if (request.sessionId === runtime.origin?.sessionId) {
+      suppressRestart(runtime)
+    }
   })
 
   function hasMatchingExitRequest(state, ctx) {
@@ -173,6 +186,13 @@ export default async function instanceControl(pi) {
     if (hasMatchingExitRequest(state, ctx)) {
       throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
     }
+  }
+
+  function suppressRestart(state) {
+    if (!state.pending || !state.shutdownAccepted || state.restartSuppressed) return
+
+    state.restartSuppressed = true
+    recordRestartSuppressed(state.launch, state.pending, state.instanceId)
   }
 
   function record(ctx) {
@@ -256,22 +276,28 @@ export default async function instanceControl(pi) {
       return
     }
 
+    const operationId = state.pending
+    function rejectShutdown(error) {
+      state.shutdownAccepted = false
+      if (!state.restartSuppressed) {
+        recordRestartShutdownRejected(state.launch, operationId, state.instanceId)
+        if (runtime === state && state.pending === operationId) {
+          clearRestartObservation(state.launch)
+        }
+      }
+      state.ctx.ui.notify(`OMP could not accept graceful shutdown: ${errorMessage(error)}`, "error")
+    }
+
     state.shutdownRequested = true
     state.shutdownAccepted = true
+    recordRestartShutdownRequested(state.launch, operationId, state.instanceId)
     try {
       const result = ctx.shutdown()
       if (result && typeof result.then === "function") {
-        void Promise.resolve(result).catch((error) => {
-          state.shutdownAccepted = false
-          state.ctx.ui.notify(
-            `OMP could not accept graceful shutdown: ${errorMessage(error)}`,
-            "error"
-          )
-        })
+        void Promise.resolve(result).catch(rejectShutdown)
       }
     } catch (error) {
-      state.shutdownAccepted = false
-      state.ctx.ui.notify(`OMP could not accept graceful shutdown: ${errorMessage(error)}`, "error")
+      rejectShutdown(error)
     }
   }
 
@@ -530,15 +556,18 @@ export default async function instanceControl(pi) {
         },
       }
 
-      await recordLaunchRegistration(launch, scope, runtime.instanceId)
-      runtime.server = await runtime.transport.serve(runtime.instanceId, handleRequest, (error) =>
+      const state = runtime
+      await recordLaunchRegistration(launch, scope, state.instanceId)
+      state.server = await state.transport.serve(state.instanceId, handleRequest, (error) =>
         ctx.ui.notify(`Instance control: ${error.message}`, "error")
       )
       await refresh(ctx)
+      if (runtime === state && !state.closing) {
+        recordReplacementOnline(state.launch)
+      }
       await refreshCompletions(ctx)
       ctx.ui.setStatus("instance-control", `instance ${runtime.instanceId.slice(0, 8)}`)
 
-      const state = runtime
       if (state.launch.native && state.launch.canRestartWrapper === true) {
         state.nativeUpdates = watchNativeUpdates(state.launch.native, (candidate) => {
           if (runtime !== state || state.closing || hasMatchingExitRequest(state, state.ctx)) return
@@ -580,24 +609,26 @@ export default async function instanceControl(pi) {
         if (isMainTerminal(ctx)) {
           state.closing = true
           state.nativeUpdates?.close()
-          if (
-            state.pending &&
-            state.shutdownAccepted &&
-            isOriginContext(state, ctx) &&
-            !hasMatchingExitRequest(state, ctx)
-          ) {
-            const persistence = await sessionPersistence(ctx)
-            if (
-              persistence === "persisted" &&
-              state.shutdownAccepted &&
-              isOriginContext(state, ctx) &&
-              !hasMatchingExitRequest(state, ctx)
-            ) {
-              writeRestartHandoff(state.launch, state.pending, state.instanceId, ctx, {
-                restartWrapper: state.pendingAction === "restart-wrapper",
-                nativeTarget: state.nativeTarget,
-              })
-            }
+          if (!state.pending || !state.shutdownAccepted) return
+
+          if (!isOriginContext(state, ctx) || hasMatchingExitRequest(state, ctx)) {
+            suppressRestart(state)
+            return
+          }
+
+          const persistence = await sessionPersistence(ctx)
+          if (!state.shutdownAccepted) return
+
+          if (!isOriginContext(state, ctx) || hasMatchingExitRequest(state, ctx)) {
+            suppressRestart(state)
+            return
+          }
+
+          if (persistence === "persisted") {
+            writeRestartHandoff(state.launch, state.pending, state.instanceId, ctx, {
+              restartWrapper: state.pendingAction === "restart-wrapper",
+              nativeTarget: state.nativeTarget,
+            })
           }
         }
       } finally {
