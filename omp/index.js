@@ -291,7 +291,7 @@ export default async function instanceControl(pi) {
     state.shutdownAccepted = false
     state.admission = undefined
     if (runtime === state && !state.closing) {
-      void refresh(state.ctx).catch(() => {})
+      refresh(state.ctx).catch(() => {})
     }
   }
 
