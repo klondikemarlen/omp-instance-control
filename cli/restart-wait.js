@@ -265,6 +265,14 @@ async function observeRestart(transport, row, snapshot, signal) {
     return row
   }
 
+  if (response.data.refusedRestartOperationId === operationId) {
+    row.status = "failed"
+    row.errorCode = "NATIVE_RESTART_REFUSED"
+    row.error =
+      "The original session is still open. Check the installed ompi executable, then request restart again."
+    return row
+  }
+
   row.status = "waiting"
   return row
 }

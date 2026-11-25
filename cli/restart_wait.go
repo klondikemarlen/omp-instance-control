@@ -233,6 +233,12 @@ func observeRestart(ctx context.Context, transport Transport, row Row, snapshot 
 		setRestartUnknown(&row, errors.New("probe original instance: status did not match the original identity"))
 		return row
 	}
+	if response.Data.RefusedRestartOperationID == operationID {
+		row.Status = "failed"
+		row.ErrorCode = "NATIVE_RESTART_REFUSED"
+		row.Error = "The original session is still open. Check the installed ompi executable, then request restart again."
+		return row
+	}
 	row.Status = "waiting"
 	return row
 }

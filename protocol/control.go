@@ -257,6 +257,8 @@ type Data struct {
 	Message         string               `json:"message,omitempty"`
 	SendContext     *SendContextMetadata `json:"sendContext,omitempty"`
 	Native          *NativeMetadata      `json:"native,omitempty"`
+
+	RefusedRestartOperationID string `json:"refusedRestartOperationId,omitempty"`
 	// Received data is immutable. Keep its wire payload so CLI JSON preserves
 	// explicit nulls, absent capability fields, and unrecognized host fields.
 	raw json.RawMessage
