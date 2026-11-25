@@ -697,11 +697,13 @@ test("when status is queried again, the adapter reads the current OMP session ti
 
 test("when the working directory disappears before wrapper restart, admission rejects without closing OMP", async () => {
   // Arrange
-  const fixture = await createRestartDirectoryFixture()
+  const fixture = await createRestartDirectoryFixture({
+    withInstalledWrapper: true,
+  })
   const { cwd, moved, transport, record } = fixture
   const request = {
     ...createRequest(record.instanceId, "restart-wrapper"),
-    nativeTarget: { device: "1", inode: "2", size: "3", modifiedNs: "4" },
+    nativeTarget: fixture.nativeTarget,
   }
   try {
     await rename(cwd, moved)
