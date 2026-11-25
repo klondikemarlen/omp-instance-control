@@ -103,6 +103,26 @@ func TestWaitForRestartsCompletesOnlyAfterCorrelatedReplacementIsLive(t *testing
 	}
 }
 
+func TestRestartRefusalOnlyEndsObservationOfMatchingOperation(t *testing.T) {
+	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	row := acceptedRestartRow(original, "requested")
+	prepareAcceptedRestart(&row)
+	snapshot := indexRestartRecords([]protocol.Record{original})
+	refused := "earlier"
+	transport := restartWaitTransport{
+		request: func(_ protocol.Record, request protocol.Request) (protocol.Response, error) {
+			return statusResponse(request, &protocol.Data{InstanceID: original.InstanceID, RefusedRestartOperationID: refused}), nil
+		},
+	}
+	if observed := observeRestart(context.Background(), transport, row, snapshot); observed.Status != "waiting" {
+		t.Fatalf("unrelated refusal ended observation: %#v", observed)
+	}
+	refused = "requested"
+	if observed := observeRestart(context.Background(), transport, row, snapshot); observed.Status != "failed" || observed.ErrorCode != "NATIVE_RESTART_REFUSED" {
+		t.Fatalf("original refused restart but observer returned %#v", observed)
+	}
+}
+
 func TestWaitForRestartsDoesNotCompleteOnMismatchedOperation(t *testing.T) {
 	original := clientRecord("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	operationID := "accepted-operation"
