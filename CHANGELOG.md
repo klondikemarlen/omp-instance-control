@@ -1,8 +1,9 @@
 # Changelog
 
-## 2.1.1 - 2026-11-24
+## 2.1.1 - 2026-11-25
 
 - When a package upgrade replaces `ompi` while a normal restart is waiting, the terminal resumes the same conversation using the wrapper installed at relaunch. Start with the updated wrapper and adapter to get this behavior; installing the package does not change a restart already handled by older code.
+- Manual recovery and restore use the saved configuration root for plugin discovery. If a previous recovery reopened your transcript without your usual plugins, the plugins were not uninstalled; a fresh restore with the corrected wrapper uses the saved root.
 
 ## 2.1.0 - 2026-11-24
 
