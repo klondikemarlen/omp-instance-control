@@ -59,6 +59,8 @@ func TestRetainedLegacyCheckpointListAllowsExplicitButNotDefaultSelection(t *tes
 
 func TestRetainedLegacyCheckpointExportsSafelyQuotedManualCommand(t *testing.T) {
 	scope, _ := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	home := filepath.Dir(scope.ConfigRoot)
+	t.Setenv("HOME", home)
 	cwd := filepath.Join(filepath.Dir(scope.AgentDir), "project's work")
 	if err := os.Mkdir(cwd, 0o700); err != nil {
 		t.Fatal(err)
@@ -80,6 +82,7 @@ func TestRetainedLegacyCheckpointExportsSafelyQuotedManualCommand(t *testing.T) 
 	}
 	if !strings.Contains(exported, "unowned; review before running") ||
 		!strings.Contains(exported, `/project'\''s work' && env `) ||
+		!strings.Contains(exported, "HOME='"+home+"' PI_CONFIG_DIR='config' OMP_PROFILE='default'") ||
 		!strings.Contains(exported, ` ompi -r '`+filepath.Dir(transcript)+`/legacy'\''s session.jsonl'`) {
 		t.Fatalf("legacy export was not a quoted manual resume command: %s", exported)
 	}

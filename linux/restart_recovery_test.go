@@ -44,6 +44,9 @@ func failedRestartFixture(t *testing.T) (string, failedRestartRecord) {
 
 func TestFailedRestartRecoveryPreservesExactScopeArgumentsAndLock(t *testing.T) {
 	file, expected := failedRestartFixture(t)
+	home := filepath.Join(filepath.Dir(expected.Session.Scope.ConfigRoot), "new home")
+	t.Setenv("HOME", home)
+	beforeConfigDir := os.Getenv("PI_CONFIG_DIR")
 	beforeCWD, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -54,8 +57,9 @@ func TestFailedRestartRecoveryPreservesExactScopeArgumentsAndLock(t *testing.T) 
 			t.Fatalf("manual recovery changed the selected handoff: got=%#v want=%#v", actual, expected)
 		}
 		cwd, err := os.Getwd()
-		if err != nil || cwd != expected.Session.CWD || os.Getenv("OMP_PROFILE") != "work" || os.Getenv("PI_CONFIG_DIR") != expected.Session.Scope.ConfigRoot {
-			t.Fatalf("recovery did not anchor the original directory and profile: cwd=%q err=%v", cwd, err)
+		if err != nil || cwd != expected.Session.CWD || os.Getenv("OMP_PROFILE") != "work" ||
+			os.Getenv("HOME") != home || os.Getenv("PI_CONFIG_DIR") != "../config" {
+			t.Fatalf("recovery did not anchor the original directory and profile: cwd=%q config=%q err=%v", cwd, os.Getenv("PI_CONFIG_DIR"), err)
 		}
 		directories, err := ensureRestoreDirectories(expected.Session.Scope)
 		if err != nil {
@@ -75,8 +79,9 @@ func TestFailedRestartRecoveryPreservesExactScopeArgumentsAndLock(t *testing.T) 
 		t.Fatalf("manual recovery failed: code=%d err=%v", code, err)
 	}
 	afterCWD, err := os.Getwd()
-	if err != nil || afterCWD != beforeCWD || os.Getenv("OMP_PROFILE") != beforeProfile {
-		t.Fatalf("recovery leaked cwd/profile into its caller: cwd=%q err=%v", afterCWD, err)
+	if err != nil || afterCWD != beforeCWD || os.Getenv("OMP_PROFILE") != beforeProfile ||
+		os.Getenv("PI_CONFIG_DIR") != beforeConfigDir {
+		t.Fatalf("recovery leaked its cwd or environment into its caller: cwd=%q err=%v", afterCWD, err)
 	}
 	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("completed recovery remained replayable: %v", err)

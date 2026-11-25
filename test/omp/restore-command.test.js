@@ -374,7 +374,8 @@ test("when restoring a managed slot outside checkpoint membership, OMP prepares 
     const restoreEntry = context.entries.find((entry) => entry.customType === "ompi-restore")
     assert.ok(restoreEntry)
     assert.ok(restoreEntry.data.command.includes(`control restore slot '${fixture.restoreId}'`))
-    assert.ok(restoreEntry.data.command.includes(`PI_CONFIG_DIR='${fixture.scope.configRoot}'`))
+    assert.ok(restoreEntry.data.command.includes(`HOME='${fixture.root}'`))
+    assert.ok(restoreEntry.data.command.includes("PI_CONFIG_DIR='config'"))
     assert.ok(restoreEntry.data.command.includes(`PI_CODING_AGENT_DIR='${fixture.scope.agentDir}'`))
     assert.ok(!restoreEntry.data.command.includes("XDG_RUNTIME_DIR"))
   } finally {

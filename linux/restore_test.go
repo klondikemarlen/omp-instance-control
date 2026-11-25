@@ -101,6 +101,9 @@ func TestSavedNameFollowsItsWrapperSlotToTheCurrentSession(t *testing.T) {
 
 func TestRestoreNamedSessionHoldsExactCWDAndNormalizedResumeArguments(t *testing.T) {
 	scope, session := newRestoreFixture(t, strings.Repeat("c", 32), stoppedRestoreOwner())
+	home := filepath.Dir(scope.ConfigRoot)
+	t.Setenv("HOME", home+"/.")
+	t.Setenv("PI_CONFIG_DIR", scope.ConfigRoot)
 	session.ResumeArgs = []string{
 		"--model=small",
 		"--thinking", "high",
@@ -156,8 +159,8 @@ func TestRestoreNamedSessionHoldsExactCWDAndNormalizedResumeArguments(t *testing
 			if extensionPath != filepath.Join(filepath.Dir(extensionPath), "extension.js") {
 				t.Fatalf("unexpected extension path: %q", extensionPath)
 			}
-			if os.Getenv("PI_CONFIG_DIR") != scope.ConfigRoot || os.Getenv("OMP_PROFILE") != scope.Profile ||
-				os.Getenv("PI_CODING_AGENT_DIR") != scope.AgentDir {
+			if os.Getenv("HOME") != home || os.Getenv("PI_CONFIG_DIR") != "config" ||
+				os.Getenv("OMP_PROFILE") != scope.Profile || os.Getenv("PI_CODING_AGENT_DIR") != scope.AgentDir {
 				t.Fatal("launch environment did not preserve the saved scope")
 			}
 			return 17, nil
@@ -174,6 +177,9 @@ func TestRestoreNamedSessionHoldsExactCWDAndNormalizedResumeArguments(t *testing
 	}
 	if currentCWD != previousCWD {
 		t.Fatalf("process cwd after restore = %q, want %q", currentCWD, previousCWD)
+	}
+	if os.Getenv("HOME") != home+"/." || os.Getenv("PI_CONFIG_DIR") != scope.ConfigRoot {
+		t.Fatal("restore leaked its launch environment into the caller")
 	}
 }
 
