@@ -10,6 +10,8 @@ Current user-facing restart commands always send `restart-wrapper`, including sc
 
 `restart-wrapper` requests may carry `nativeTarget: {device, inode, size, modifiedNs}`. All fields are canonical decimal strings: device/inode/size are unsigned 64-bit values and modifiedNs is a signed 64-bit value. Other actions reject a non-null target. A supplied target pins that exact image. An omitted target selects the installed wrapper at native open if the launcher advertised `supportsInstalledWrapperSelection`; otherwise the adapter pins the image at admission. Duplicate requests do not change the first request’s selection. Update observation never dispatches this action.
 
+If the executable check fails after acknowledgement but before shutdown, the original session remains open. Its live status may include `refusedRestartOperationId`, the most recent such refusal. Only a matching operation ID on the original instance ends observation as failed; an absent field or an unrelated refusal is not evidence of failure.
+
 Received response data is read-only. Native CLI JSON preserves the host payload's explicit nulls, absent capability fields, and unknown fields rather than synthesizing values from Go defaults.
 
 Live status may include `sessionTitle`: the current OMP session name, or `null` when unnamed or unavailable. Older adapters omit it. Titles are read from the host for status requests, not stored in registrations or used to resolve message targets.
