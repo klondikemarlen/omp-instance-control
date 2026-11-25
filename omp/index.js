@@ -101,9 +101,44 @@ async function restartDirectoryError(ctx) {
   }
 }
 
-function isOriginContext(state, ctx) {
+async function readInstalledNativeTarget(launch, expectedTarget) {
+  const executable = launch.native?.executable
+  if (typeof executable !== "string" || !executable.startsWith("/")) {
+    throw new ProtocolError(
+      "NATIVE_TARGET_UNAVAILABLE",
+      "The original installed ompi path could not be identified for wrapper restart."
+    )
+  }
+
+  let installedTarget
+  try {
+    installedTarget = await readNativeTarget(executable)
+  } catch (error) {
+    throw new ProtocolError(
+      "NATIVE_TARGET_UNAVAILABLE",
+      `The installed native ompi executable could not be verified: ${errorMessage(error)}`
+    )
+  }
+
   if (
-    !state.origin ||
+    expectedTarget &&
+    (installedTarget.device !== expectedTarget.device ||
+      installedTarget.inode !== expectedTarget.inode ||
+      installedTarget.size !== expectedTarget.size ||
+      installedTarget.modifiedNs !== expectedTarget.modifiedNs)
+  ) {
+    throw new ProtocolError(
+      "NATIVE_TARGET_CHANGED",
+      "The installed native ompi executable no longer matches the requested image."
+    )
+  }
+
+  return installedTarget
+}
+
+function isOriginContext(state, ctx, origin = state.origin) {
+  if (
+    !origin ||
     typeof ctx.cwd !== "string" ||
     typeof ctx.sessionManager?.getSessionId !== "function" ||
     typeof ctx.sessionManager?.getSessionFile !== "function"
@@ -113,10 +148,10 @@ function isOriginContext(state, ctx) {
 
   try {
     return (
-      ctx.cwd === state.origin.cwd &&
-      ctx.sessionManager.getSessionId() === state.origin.sessionId &&
-      ctx.sessionManager.getSessionFile() === state.origin.sessionFile &&
-      state.launch.scope.id === state.origin.scopeId
+      ctx.cwd === origin.cwd &&
+      ctx.sessionManager.getSessionId() === origin.sessionId &&
+      ctx.sessionManager.getSessionFile() === origin.sessionFile &&
+      state.launch.scope.id === origin.scopeId
     )
   } catch {
     return false
@@ -182,9 +217,24 @@ export default async function instanceControl(pi) {
     }
   }
 
-  function rejectRestartAfterExitRequest(state, ctx) {
-    if (hasMatchingExitRequest(state, ctx)) {
+  function assertRestartContext(state, origin) {
+    if (runtime !== state || state.closing) {
+      throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")
+    }
+
+    if (hasMatchingExitRequest(state, state.ctx)) {
       throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
+    }
+
+    if (process.ppid !== state.launch.pid) {
+      throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
+    }
+
+    if (!isOriginContext(state, state.ctx, origin)) {
+      throw new ProtocolError(
+        "RESTART_CONTEXT_CHANGED",
+        "The session, transcript, working directory, or launch scope changed."
+      )
     }
   }
 
@@ -231,52 +281,103 @@ export default async function instanceControl(pi) {
     }
   }
 
+  function clearPendingRestart(state) {
+    state.pending = null
+    state.pendingAction = null
+    state.nativeTarget = null
+    state.origin = undefined
+    state.restartAcknowledged = false
+    state.shutdownRequested = false
+    state.shutdownAccepted = false
+    state.admission = undefined
+    if (runtime === state && !state.closing) {
+      refresh(state.ctx).catch(() => {})
+    }
+  }
+
   async function requestShutdownWhenPersisted(state) {
-    if (
-      runtime !== state ||
-      state.closing ||
-      !state.pending ||
-      !state.restartAcknowledged ||
-      state.shutdownRequested ||
-      hasMatchingExitRequest(state, state.ctx)
-    ) {
-      return
+    const operationId = state.pending
+
+    function verifyShutdownContext() {
+      if (
+        runtime !== state ||
+        state.closing ||
+        !operationId ||
+        state.pending !== operationId ||
+        !state.restartAcknowledged ||
+        state.shutdownRequested ||
+        hasMatchingExitRequest(state, state.ctx)
+      ) {
+        return false
+      }
+
+      if (!isOriginContext(state, state.ctx)) {
+        state.ctx.ui.notify(
+          "Restart is waiting for the original session, transcript, and working directory.",
+          "info"
+        )
+        return false
+      }
+
+      if (process.ppid !== state.launch.pid) {
+        state.ctx.ui.notify("Cannot restart: the owning launcher is no longer attached.", "error")
+        return false
+      }
+
+      if (typeof state.ctx.shutdown !== "function") {
+        state.ctx.ui.notify("Restart is waiting for OMP's graceful-shutdown API.", "error")
+        return false
+      }
+
+      return true
     }
 
-    const initialContext = state.ctx
-    if (!isOriginContext(state, initialContext)) return
+    if (!verifyShutdownContext()) return
 
     let persistence
     try {
-      persistence = await sessionPersistence(initialContext)
+      persistence = await sessionPersistence(state.ctx)
     } catch (error) {
+      if (!verifyShutdownContext()) return
+
       state.ctx.ui.notify(
         `Restart is waiting for transcript persistence: ${errorMessage(error)}`,
         "error"
       )
       return
     }
+
+    if (!verifyShutdownContext()) return
+
     if (persistence !== "persisted") return
 
-    const directoryError = await restartDirectoryError(initialContext)
+    const directoryError = await restartDirectoryError(state.ctx)
+    if (!verifyShutdownContext()) return
+
     if (directoryError) {
       state.ctx.ui.notify(`Restart is waiting: ${directoryError}`, "error")
       return
     }
 
-    const ctx = state.ctx
-    if (
-      runtime !== state ||
-      state.closing ||
-      state.shutdownRequested ||
-      hasMatchingExitRequest(state, ctx) ||
-      !isOriginContext(state, ctx) ||
-      typeof ctx.shutdown !== "function"
-    ) {
-      return
+    if (state.pendingAction === "restart-wrapper") {
+      try {
+        await readInstalledNativeTarget(state.launch, state.nativeTarget)
+      } catch (error) {
+        if (!verifyShutdownContext()) return
+
+        state.refusedRestartOperationId = operationId
+        clearPendingRestart(state)
+        state.ctx.ui.notify(
+          `Restart canceled; OMP is still open. ${errorMessage(error)} Retry when ready.`,
+          "error"
+        )
+        return
+      }
+
+      if (!verifyShutdownContext()) return
     }
 
-    const operationId = state.pending
+    const ctx = state.ctx
     function rejectShutdown(error) {
       state.shutdownAccepted = false
       if (!state.restartSuppressed) {
@@ -326,33 +427,24 @@ export default async function instanceControl(pi) {
     }
   }
 
-  async function admitRestart(state, request, ctx) {
+  async function admitRestart(state, request, origin) {
     if (request.action === "restart-wrapper") {
+      const installedTarget = await readInstalledNativeTarget(state.launch, request.nativeTarget)
+      assertRestartContext(state, origin)
+
       if (request.nativeTarget) {
         state.nativeTarget = request.nativeTarget
-      } else {
-        const executable = state.launch.native?.executable
-        if (!executable) {
-          throw new ProtocolError(
-            "NATIVE_TARGET_UNAVAILABLE",
-            "The installed native ompi executable could not be identified for wrapper restart."
-          )
-        }
-        try {
-          state.nativeTarget = await readNativeTarget(executable)
-        } catch (error) {
-          throw new ProtocolError(
-            "NATIVE_TARGET_UNAVAILABLE",
-            `The installed native ompi executable could not be verified: ${errorMessage(error)}`
-          )
-        }
+      } else if (state.launch.supportsInstalledWrapperSelection !== true) {
+        // Older launchers must take the descriptor-checked restart path.
+        state.nativeTarget = installedTarget
       }
     }
-    await refresh(ctx)
+
+    await refresh(state.ctx)
   }
 
   async function handleRequest(request) {
-    if (runtime.closing) {
+    if (!runtime || runtime.closing) {
       throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")
     }
 
@@ -382,6 +474,11 @@ export default async function instanceControl(pi) {
           canSend,
           sendContext,
           native: state.nativeUpdates?.getStatus() ?? null,
+          ...(state.refusedRestartOperationId
+            ? {
+                refusedRestartOperationId: state.refusedRestartOperationId,
+              }
+            : {}),
         },
       }
     }
@@ -427,7 +524,14 @@ export default async function instanceControl(pi) {
     const apiError = restartApiError(ctx)
     if (apiError) throw new ProtocolError("RESTART_API_UNAVAILABLE", apiError)
 
-    const directoryError = await restartDirectoryError(ctx)
+    const origin = {
+      sessionId: ctx.sessionManager.getSessionId(),
+      sessionFile: ctx.sessionManager.getSessionFile(),
+      cwd: ctx.cwd,
+      scopeId: state.launch.scope.id,
+    }
+
+    const directoryError = await restartDirectoryError(origin)
     if (directoryError) throw new ProtocolError("CWD_UNAVAILABLE", directoryError)
 
     const persistence = await sessionPersistence(ctx)
@@ -437,8 +541,9 @@ export default async function instanceControl(pi) {
         "Restart requires a persistent transcript path to a regular file; ephemeral sessions cannot be resumed."
       )
     }
-    rejectRestartAfterExitRequest(state, ctx)
-    if (state.pending && !isOriginContext(state, ctx)) {
+
+    assertRestartContext(state, origin)
+    if (state.pending && !isOriginContext(state, state.ctx)) {
       throw new ProtocolError(
         "RESTART_CONTEXT_CHANGED",
         "A restart is already pending for a different session, transcript, working directory, or launch scope."
@@ -459,55 +564,35 @@ export default async function instanceControl(pi) {
       state.pending = request.requestId
       state.pendingAction = request.action
       state.nativeTarget = null
-      state.origin = {
-        sessionId: ctx.sessionManager.getSessionId(),
-        sessionFile: ctx.sessionManager.getSessionFile(),
-        cwd: ctx.cwd,
-        scopeId: state.launch.scope.id,
-      }
-      state.admission = admitRestart(state, request, ctx)
+      state.origin = origin
+      state.admission = admitRestart(state, request, origin)
     }
 
+    const operationId = state.pending
     const admission = state.admission
     try {
       await admission
+      assertRestartContext(state, origin)
     } catch (error) {
-      if (state.admission === admission) {
-        state.pending = null
-        state.pendingAction = null
-        state.nativeTarget = null
-        state.origin = undefined
-        state.restartAcknowledged = false
-        state.shutdownRequested = false
-        state.shutdownAccepted = false
-        state.admission = undefined
-        void state.transport.writeRecord(record(state.ctx)).catch(() => {})
+      if (state.admission === admission && !state.restartAcknowledged) {
+        clearPendingRestart(state)
       }
       throw error
     }
 
-    if (hasMatchingExitRequest(state, ctx)) {
-      if (firstRequest && state.admission === admission && state.pending === request.requestId) {
-        state.pending = null
-        state.pendingAction = null
-        state.nativeTarget = null
-        state.origin = undefined
-        state.restartAcknowledged = false
-        state.shutdownRequested = false
-        state.shutdownAccepted = false
-        state.admission = undefined
-        void state.transport.writeRecord(record(state.ctx)).catch(() => {})
-      }
-      rejectRestartAfterExitRequest(state, ctx)
+    if (state.pending !== operationId) {
+      throw new ProtocolError("RESTART_CANCELED", "Restart was canceled before acknowledgement.")
     }
 
     return {
       data: {
         state: "accepted",
-        operationId: state.pending,
+        operationId,
         message: "Restart accepted; OMP owns settlement of active and queued work.",
       },
       afterReply: async () => {
+        if (runtime !== state || state.closing || state.pending !== operationId) return
+
         state.restartAcknowledged = true
         await requestShutdownWhenPersisted(state)
       },

@@ -25,19 +25,20 @@ const (
 )
 
 type launchRecord struct {
-	Version           int                   `json:"version"`
-	Token             string                `json:"token"`
-	PID               int                   `json:"pid"`
-	Scope             protocol.Scope        `json:"scope"`
-	ExtensionPath     string                `json:"extensionPath"`
-	LastRestart       *restartRecord        `json:"lastRestart"`
-	RestartError      string                `json:"restartError,omitempty"`
-	BuiltinFlags      []string              `json:"builtinFlags"`
-	RestoreID         string                `json:"restoreId"`
-	ResumeArgs        []string              `json:"resumeArgs"`
-	Owner             protocol.RestoreOwner `json:"owner"`
-	CanRestartWrapper bool                  `json:"canRestartWrapper"`
-	Native            *nativeImage          `json:"native,omitempty"`
+	Version                           int                   `json:"version"`
+	Token                             string                `json:"token"`
+	PID                               int                   `json:"pid"`
+	Scope                             protocol.Scope        `json:"scope"`
+	ExtensionPath                     string                `json:"extensionPath"`
+	LastRestart                       *restartRecord        `json:"lastRestart"`
+	RestartError                      string                `json:"restartError,omitempty"`
+	BuiltinFlags                      []string              `json:"builtinFlags"`
+	RestoreID                         string                `json:"restoreId"`
+	ResumeArgs                        []string              `json:"resumeArgs"`
+	Owner                             protocol.RestoreOwner `json:"owner"`
+	CanRestartWrapper                 bool                  `json:"canRestartWrapper"`
+	SupportsInstalledWrapperSelection bool                  `json:"supportsInstalledWrapperSelection"`
+	Native                            *nativeImage          `json:"native,omitempty"`
 }
 
 type restartRecord struct {
@@ -219,8 +220,9 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			Version: 1, Token: token, PID: os.Getpid(), Scope: scope,
 			ExtensionPath: extensionPath, LastRestart: restart, BuiltinFlags: builtinFlags,
 			RestoreID: restoreID, ResumeArgs: restartArgs, Owner: owner,
-			CanRestartWrapper: canRestartWrapper,
-			Native:            nativeMetadata,
+			CanRestartWrapper:                 canRestartWrapper,
+			SupportsInstalledWrapperSelection: true,
+			Native:                            nativeMetadata,
 		}
 		if restartArgsErr != nil && restart == nil {
 			launch.RestartError = restartArgsErr.Error()

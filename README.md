@@ -86,7 +86,7 @@ Every `ompi control restart ID_OR_PREFIX|all` and `/ompi restart [ID_OR_PREFIX|a
 
 Prompts typed while busy, including `/queue` and `=>` input, belong to OMP's normal follow-up queue. OMP drains that queue before shutdown; ompi neither copies it into a checkpoint nor submits it again after relaunch. A finished turn alone is not proof of settlement: OMP also accounts for admitted submissions and pending async-result delivery. This is a normal settled-restart guarantee, not a claim that arbitrary subprocesses or in-memory work survive crashes.
 
-Repeated requests share one restart operation and its accepted native-image identity. No continuation is injected after relaunch; the conversation is ready for your next instruction. Ctrl-C stops an external observer, not the accepted restart.
+Repeated requests share one restart operation. No continuation is injected after relaunch; the conversation is ready for your next instruction. Ctrl-C stops an external observer, not the accepted restart.
 
 ### OMP Auto-Updates
 
@@ -112,7 +112,7 @@ The notification `Installed native ompi VERSION detected; run /ompi restart to a
 
 Notification-only updates require the 0.18.0 or newer adapter to be loaded. Installing an update cannot change code already loaded in a terminal: older 0.16.x–0.17.x adapters retain automatic-update watchers and may initiate one last restart when the installed binary changes. Those processes do not gain the new policy until they relaunch.
 
-`ompi control list --json` and `/ompi list --json` distinguish the running native version, installed version, and update state under `data.native`. An `available` update has not been applied. Each observed file identity is checked and notified once per running adapter. An explicit restart captures the installed image identity at acceptance and refuses a changed image before native execution rather than silently adopting a later update. The saved conversation remains recoverable through `ompi control restore`.
+`ompi control list --json` and `/ompi list --json` distinguish the running native version, installed version, and update state under `data.native`. An `available` update has not been applied. If a package upgrade replaces `ompi` while a normal restart is waiting, the launcher opens the executable at its original installed path after OMP exits and runs that image. This requires a session running the 2.1.1 or newer wrapper and adapter. Older sessions can still need the printed `ompi control recover` command if the installed image changes during restart.
 
 Existing terminals must first adopt a capable 0.16.0 launcher and adapter through a manual scoped restart. Launchers from before 0.11.0 require one fresh `ompi` launch: they cannot acquire native replacement merely by reloading their adapter. Unsupported targets refuse restart before shutdown rather than falling back to OMP-only restart; a batch retains each target's refusal while independently restarting supported peers. Ordinary unwrapped OMP can control managed peers but cannot restart itself through `ompi`.
 
@@ -239,6 +239,8 @@ ompi control restore
 Select a slot and confirm its exact session ID and working directory. `ompi control restore list` lists candidates; add `--json` for structured output. Use `ompi control restore slot FULL_SLOT_ID` to select directly and `--profile work` explicitly for another OMP profile. Recovery runs only in the terminal where you invoke it; it does not open terminal windows or modify shell startup.
 
 Managed recovery reopens the conversation for inspection; it does **not** ask OMP to continue interrupted turns or subagents. Check which conversation opened before asking it to continue. OMP 19.0.1 may follow a newer continuation of the selected transcript even when given its absolute path. Native `omp --restore` can resume unfinished work, including tool calls, and is not a substitute for inspecting a managed slot. Normal graceful restart still waits for OMP to settle.
+
+Manual recovery and restore preserve the saved profile and plugin configuration root. A restored conversation with missing plugin commands is not evidence that the plugins were uninstalled. Before 2.1.1, restore could open the transcript but look for plugin packages under a second copy of the home path.
 
 If you launched an older wrapper with `--restore`, exit normally rather than requesting a restart. Version 1.2.1 omits the old flag when reading a saved slot. It refuses pending or failed restart handoffs that still request native restore. If your handoff is refused, wait until the original processes have stopped, then use a fresh wrapper in the original project and profile with `-r /absolute/path/to/session.jsonl`. Do not edit a recovery record to bypass a refusal.
 

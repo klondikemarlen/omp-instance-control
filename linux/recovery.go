@@ -352,6 +352,11 @@ func ExportRecoveryCommands(scope protocol.Scope, sessions []protocol.RecoverySe
 	if err := validateRecoveryScope(scope); err != nil {
 		return "", err
 	}
+	environment, err := recoveryExportEnvironment(scope)
+	if err != nil {
+		return "", err
+	}
+
 	var output strings.Builder
 	output.WriteString("# Recovery commands are for manual review; they are not executed.\n")
 	for _, candidate := range sessions {
@@ -374,7 +379,7 @@ func ExportRecoveryCommands(scope protocol.Scope, sessions []protocol.RecoverySe
 				return "", fmt.Errorf("cannot export unsafe legacy transcript: %w", err)
 			}
 			output.WriteString("# Imported legacy session is unowned; review before running.\n")
-			output.WriteString(recoveryExportCommand(scope, legacy.CWD, "-r "+shellQuote(legacy.SessionFile)))
+			output.WriteString(recoveryExportCommand(environment, legacy.CWD, "-r "+shellQuote(legacy.SessionFile)))
 			output.WriteByte('\n')
 			continue
 		}
@@ -394,23 +399,39 @@ func ExportRecoveryCommands(scope protocol.Scope, sessions []protocol.RecoverySe
 		}
 		arguments := fmt.Sprintf("control restore slot %s --profile=%s", shellQuote(candidate.RestoreID), shellQuote(scope.Profile))
 		output.WriteString("# Managed recovery slot; ownership and its current snapshot are rechecked by ompi.\n")
-		output.WriteString(recoveryExportCommand(scope, session.CWD, arguments))
+		output.WriteString(recoveryExportCommand(environment, session.CWD, arguments))
 		output.WriteByte('\n')
 	}
 	return output.String(), nil
 }
 
-func recoveryExportCommand(scope protocol.Scope, cwd, arguments string) string {
+func recoveryExportEnvironment(scope protocol.Scope) (string, error) {
+	home, configDir, err := restoreConfigEnvironment(scope.ConfigRoot)
+	if err != nil {
+		return "", err
+	}
+	if err := validateExportPath(home); err != nil {
+		return "", fmt.Errorf("cannot export unsafe HOME: %w", err)
+	}
+	if !validRecoveryText(configDir, 4096) {
+		return "", errors.New("cannot export unsafe HOME-relative configuration directory")
+	}
+
 	environment := []string{
 		"-u PI_CODING_AGENT_DIR",
-		"PI_CONFIG_DIR=" + shellQuote(scope.ConfigRoot),
+		"HOME=" + shellQuote(home),
+		"PI_CONFIG_DIR=" + shellQuote(configDir),
 		"OMP_PROFILE=" + shellQuote(scope.Profile),
 	}
 	if scope.Profile == "default" {
 		environment = append(environment, "PI_CODING_AGENT_DIR="+shellQuote(scope.AgentDir))
 	}
+	return strings.Join(environment, " "), nil
+}
+
+func recoveryExportCommand(environment, cwd, arguments string) string {
 	return fmt.Sprintf("cd %s && env %s ompi %s",
-		shellQuote(cwd), strings.Join(environment, " "), arguments)
+		shellQuote(cwd), environment, arguments)
 }
 
 func readRecoveryCheckpoint(directories restoreDirectories, scope protocol.Scope, checkpointID string) (protocol.RecoveryCheckpoint, error) {

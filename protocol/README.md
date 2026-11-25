@@ -8,7 +8,9 @@ Distinguish request acceptance, busy deferral, action completion, and failure. P
 
 Current user-facing restart commands always send `restart-wrapper`, including scoped ID/prefix and `all` targets. The child-only wire action remains interoperable with older clients, not a fallback when native replacement is unavailable.
 
-`restart-wrapper` requests may carry `nativeTarget: {device, inode, size, modifiedNs}`. All fields are canonical decimal strings: device/inode/size are unsigned 64-bit values and modifiedNs is a signed 64-bit value. Other actions reject a non-null target. When omitted, the adapter captures the installed identity at admission; it retains the accepted identity through duplicate requests and the native handoff. Update observation never dispatches this action.
+`restart-wrapper` requests may carry `nativeTarget: {device, inode, size, modifiedNs}`. All fields are canonical decimal strings: device/inode/size are unsigned 64-bit values and modifiedNs is a signed 64-bit value. Other actions reject a non-null target. A supplied target pins that exact image. An omitted target selects the installed wrapper at native open if the launcher advertised `supportsInstalledWrapperSelection`; otherwise the adapter pins the image at admission. Duplicate requests do not change the first request’s selection. Update observation never dispatches this action.
+
+If the executable check fails after acknowledgement but before shutdown, the original session remains open. Its live status may include `refusedRestartOperationId`, the most recent such refusal. Only a matching operation ID on the original instance ends observation as failed; an absent field or an unrelated refusal is not evidence of failure.
 
 Received response data is read-only. Native CLI JSON preserves the host payload's explicit nulls, absent capability fields, and unknown fields rather than synthesizing values from Go defaults.
 

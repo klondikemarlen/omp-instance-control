@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -12,6 +12,8 @@ export async function createRestartDirectoryFixture({
   sendMessages = [],
   lastRestart = null,
   failRefresh = false,
+  withInstalledWrapper = false,
+  supportsInstalledWrapperSelection,
 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "ic-cwd-"))
   const cwd = path.join(root, "project")
@@ -23,6 +25,30 @@ export async function createRestartDirectoryFixture({
   const token = "5".repeat(32)
   const sessionFile = path.join(root, "session.jsonl")
   await writeFile(sessionFile, '{"type":"session","id":"cwd-session"}\n', { mode: 0o600 })
+  const executable = path.join(root, "ompi")
+  let native
+  let nativeTarget
+  if (withInstalledWrapper) {
+    await writeFile(executable, "#!/bin/sh\nprintf 'ompi 0.18.0\\n'\n", {
+      mode: 0o700,
+    })
+    const image = await stat(executable, {
+      bigint: true,
+    })
+    nativeTarget = {
+      device: image.dev.toString(),
+      inode: image.ino.toString(),
+      size: image.size.toString(),
+      modifiedNs: image.mtimeNs.toString(),
+    }
+    native = {
+      executable,
+      version: "0.18.0",
+      device: nativeTarget.device,
+      inode: nativeTarget.inode,
+    }
+  }
+
   await writePrivateJson(path.join(launchDirectory, "launch.json"), {
     version: 1,
     token,
@@ -30,6 +56,8 @@ export async function createRestartDirectoryFixture({
     scope,
     extensionPath: fileURLToPath(new URL("../../omp/index.js", import.meta.url)),
     canRestartWrapper: true,
+    supportsInstalledWrapperSelection,
+    native,
     lastRestart,
     builtinFlags: [],
   })
@@ -89,6 +117,8 @@ export async function createRestartDirectoryFixture({
     cwd,
     moved,
     sessionFile,
+    executable,
+    nativeTarget,
     handlers,
     ctx,
     api: extension.api,

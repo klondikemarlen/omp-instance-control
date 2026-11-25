@@ -14,6 +14,7 @@ import {
 import { getScope } from "../../protocol/index.js"
 
 const scopeEnvironmentKeys = [
+  "HOME",
   "PI_CONFIG_DIR",
   "PI_CODING_AGENT_DIR",
   "OMP_PROFILE",
@@ -199,7 +200,6 @@ test("when named-profile paths contain shell syntax, resume preserves literal ar
     PI_PROFILE: "work",
     XDG_RUNTIME_DIR: runtimeDirectory,
   }
-  const configRoot = path.resolve(home, configRelative)
   const command = await prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), {
     env,
     executable: sandbox.executable,
@@ -212,7 +212,8 @@ test("when named-profile paths contain shell syntax, resume preserves literal ar
   assert.deepEqual(invocation.argv, ["--profile=work", "-r", sandbox.sessionFile])
   assert.equal(invocation.cwd, sandbox.cwd)
   assert.deepEqual(invocation.environment, {
-    PI_CONFIG_DIR: configRoot,
+    HOME: home,
+    PI_CONFIG_DIR: configRelative,
     PI_CODING_AGENT_DIR: null,
     OMP_PROFILE: null,
     PI_PROFILE: "work",
@@ -240,7 +241,6 @@ test("when the default profile overrides its agent directory, resume preserves r
     PI_CONFIG_DIR: configRelative,
     PI_CODING_AGENT_DIR: agentRelative,
   }
-  const configRoot = path.resolve(home, configRelative)
   const agentDirectory = path.resolve(process.cwd(), agentRelative)
   const command = await prepareResumeCommand(makeSnapshot(sandbox.cwd, sandbox.sessionFile), {
     env,
@@ -254,7 +254,8 @@ test("when the default profile overrides its agent directory, resume preserves r
   assert.deepEqual(invocation.argv, ["--profile=default", "-r", sandbox.sessionFile])
   assert.equal(invocation.cwd, sandbox.cwd)
   assert.deepEqual(invocation.environment, {
-    PI_CONFIG_DIR: configRoot,
+    HOME: home,
+    PI_CONFIG_DIR: configRelative,
     PI_CODING_AGENT_DIR: agentDirectory,
     OMP_PROFILE: null,
     PI_PROFILE: "default",

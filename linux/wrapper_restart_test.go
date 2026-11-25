@@ -1,6 +1,7 @@
 package linux
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,23 +11,44 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/klondikemarlen/omp-instance-control/protocol"
 )
 
 func TestWrapperRestartHarness(t *testing.T) {
-	phase := os.Getenv("OMPI_TEST_WRAPPER_PHASE")
-	if phase == "" {
+	root := os.Getenv("OMPI_TEST_WRAPPER_ROOT")
+	if root == "" {
 		t.Skip("helper process only")
 	}
 	stdinIsTerminal = func() bool { return true }
 	stdoutIsTerminal = func() bool { return true }
-	os.Args[0] = os.Getenv("OMPI_TEST_WRAPPER_PATH")
+	installed := os.Getenv("OMPI_TEST_WRAPPER_PATH")
 	var args []string
-	if phase == "original" {
+	if os.Getenv(execStatePathEnv) == "" {
+		os.Args[0] = installed
 		args = []string{"--profile", "work", "--config", "settings.json", "--restore=original-session", "--system-prompt=--restore", "initial prompt"}
+		// Keep the production exec path and argv0, selecting only this test after exec.
+		execWrapperProcess = func(path string, argv, env []string) error {
+			return syscall.Exec(path, append(argv, "-test.run=^TestWrapperRestartHarness$"), env)
+		}
+	} else {
+		if os.Args[0] != installed {
+			t.Fatalf("replacement argv0 = %q, want %q", os.Args[0], installed)
+		}
+		executing, err := os.Stat("/proc/self/exe")
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected, err := os.Stat(installed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(executing, selected) {
+			t.Fatal("replacement did not execute the newly installed image")
+		}
 	}
-	code, err := Launch(args, filepath.Join(os.Getenv("OMPI_TEST_ROOT"), "adapter.js"), "test")
+	code, err := Launch(args, filepath.Join(root, "adapter.js"), "test")
 	if err != nil || code != 0 {
 		t.Fatalf("native wrapper returned code=%d err=%v", code, err)
 	}
@@ -74,18 +96,17 @@ func TestWrapperRestartExecutesAtomicallyReplacedBinaryAndRetainsOwnership(t *te
 	}
 	installed := filepath.Join(root, "ompi")
 	updated := filepath.Join(root, "updated-ompi")
-	marker := filepath.Join(root, "replacement-executed")
 	if err := os.WriteFile(installed, []byte("old executable"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\nprintf replacement > " + shellQuote(marker) + "\n" +
-		"export OMPI_TEST_WRAPPER_PHASE=replacement\nexec " + shellQuote(binary) +
-		" -test.run=^TestWrapperRestartHarness$\n"
-	if err := os.WriteFile(updated, []byte(script), 0700); err != nil {
+	image, err := os.ReadFile(binary)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("OMPI_TEST_ROOT", root)
-	t.Setenv("OMPI_TEST_WRAPPER_PHASE", "original")
+	if err := os.WriteFile(updated, image, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OMPI_TEST_WRAPPER_ROOT", root)
 	t.Setenv("OMPI_TEST_WRAPPER_PATH", installed)
 	t.Setenv("OMPI_TEST_WRAPPER_REPLACEMENT", updated)
 	t.Setenv("OMPI_TEST_RESTART_WRAPPER", "1")
@@ -95,14 +116,14 @@ func TestWrapperRestartExecutesAtomicallyReplacedBinaryAndRetainsOwnership(t *te
 	if output, err := process.CombinedOutput(); err != nil {
 		t.Fatalf("wrapper replacement failed: %v\n%s", err, output)
 	}
-	if contents, err := os.ReadFile(marker); err != nil || string(contents) != "replacement" {
-		t.Fatalf("installed replacement code did not execute: %q %v", contents, err)
-	}
 	calls := readInvocations(t, logPath)
 	if len(calls) != 2 {
 		t.Fatalf("wrapper replacement launched %d OMP children, want two", len(calls))
 	}
 	first, second := calls[0], calls[1]
+	if first.Launch["supportsInstalledWrapperSelection"] != true || second.Launch["supportsInstalledWrapperSelection"] != true {
+		t.Fatal("native launcher did not advertise installed-wrapper selection")
+	}
 	if first.Token == second.Token || first.Launch["restoreId"] != second.Launch["restoreId"] ||
 		!reflect.DeepEqual(first.Launch["scope"], second.Launch["scope"]) {
 		t.Fatalf("replacement lost launch identity or scope: first=%#v second=%#v", first, second)
@@ -208,63 +229,71 @@ func TestFailedWrapperExecRestoresLockDescriptorFlags(t *testing.T) {
 	}
 }
 
-func TestPinnedNativeTargetRejectsMismatchedImage(t *testing.T) {
+func TestPinnedNativeTargetRejectsImageReplacedBeforeOpen(t *testing.T) {
 	root := t.TempDir()
 	executable := filepath.Join(root, "ompi")
 	if err := os.WriteFile(executable, []byte("candidate A"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	target := installedNativeTarget(t, executable)
+	replacement := filepath.Join(root, "replacement")
+	if err := os.WriteFile(replacement, []byte("candidate B"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, executable); err != nil {
+		t.Fatal(err)
+	}
 	restart := &restartRecord{OperationID: "restart", PreviousInstanceID: strings.Repeat("b", 32)}
-	called := false
 	originalExec := execWrapperProcess
 	execWrapperProcess = func(string, []string, []string) error {
-		called = true
+		t.Fatal("mismatched installed image reached exec")
 		return nil
 	}
 	t.Cleanup(func() { execWrapperProcess = originalExec })
-	target := &protocol.NativeTarget{Device: "0", Inode: "1", Size: "11", ModifiedNs: "0"}
 	err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, target)
 	if err == nil || !strings.Contains(err.Error(), "changed after verification") {
 		t.Fatalf("mismatched installed image was not rejected explicitly: %v", err)
-	}
-	if called {
-		t.Fatal("mismatched installed image reached exec")
 	}
 	if _, err := os.Stat(filepath.Join(root, execStateFilename)); !os.IsNotExist(err) {
 		t.Fatalf("mismatched image wrote restart state: %v", err)
 	}
 }
 
-func TestPinnedNativeTargetReplacementHarness(t *testing.T) {
-	if os.Getenv("OMPI_TEST_PINNED_EXEC") != "1" {
+func TestOpenedNativeImageReplacementHarness(t *testing.T) {
+	root := os.Getenv("OMPI_TEST_OPENED_IMAGE_ROOT")
+	if root == "" {
 		t.Skip("helper process only")
 	}
-	root := os.Getenv("OMPI_TEST_PINNED_ROOT")
 	executable := filepath.Join(root, "ompi")
 	replacement := filepath.Join(root, "replacement")
-	marker := filepath.Join(root, "executed")
-	if os.Getenv("OMPI_TEST_PINNED_COMPLETE") == "1" {
-		if err := os.WriteFile(marker, []byte("pinned"), 0600); err != nil {
-			t.Fatal(err)
+	if os.Getenv(execStatePathEnv) != "" {
+		if os.Args[0] != executable {
+			t.Fatalf("replacement argv0 = %q, want %q", os.Args[0], executable)
 		}
 		return
 	}
-	var info syscall.Stat_t
-	if err := syscall.Stat(executable, &info); err != nil {
-		t.Fatal(err)
-	}
-	target := &protocol.NativeTarget{
-		Device:     strconv.FormatUint(uint64(info.Dev), 10),
-		Inode:      strconv.FormatUint(info.Ino, 10),
-		Size:       strconv.FormatInt(info.Size, 10),
-		ModifiedNs: strconv.FormatInt(info.Mtim.Sec*1e9+info.Mtim.Nsec, 10),
+	var target *protocol.NativeTarget
+	if os.Getenv("OMPI_TEST_OPENED_IMAGE_MODE") == "pinned" {
+		target = installedNativeTarget(t, executable)
 	}
 	originalExec := execWrapperProcess
-	execWrapperProcess = func(path string, _ []string, _ []string) error {
+	execWrapperProcess = func(path string, argv, env []string) error {
+		number, ok := strings.CutPrefix(path, "/proc/self/fd/")
+		if !ok {
+			t.Fatalf("replacement exec path = %q, want a procfd path", path)
+		}
+		fd, err := strconv.Atoi(number)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFD), 0)
+		if errno != 0 || flags&syscall.FD_CLOEXEC == 0 {
+			t.Fatalf("replacement descriptor is not close-on-exec: flags=%d err=%v", flags, errno)
+		}
 		if err := os.Rename(replacement, executable); err != nil {
 			return err
 		}
-		return syscall.Exec(path, []string{executable, "-test.run=^TestPinnedNativeTargetReplacementHarness$"}, append(os.Environ(), "OMPI_TEST_PINNED_COMPLETE=1"))
+		return syscall.Exec(path, append(argv, "-test.run=^TestOpenedNativeImageReplacementHarness$"), env)
 	}
 	defer func() { execWrapperProcess = originalExec }()
 	restart := &restartRecord{OperationID: "restart", PreviousInstanceID: strings.Repeat("b", 32)}
@@ -274,37 +303,104 @@ func TestPinnedNativeTargetReplacementHarness(t *testing.T) {
 	t.Fatal("native replacement returned without executing")
 }
 
-func TestPinnedNativeTargetSurvivesAtomicPathReplacement(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Chmod(root, 0700); err != nil {
-		t.Fatal(err)
-	}
+func TestOpenedNativeImageSurvivesAtomicPathReplacement(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed := filepath.Join(root, "ompi")
-	replacement := filepath.Join(root, "replacement")
-	contents, err := os.ReadFile(executable)
+	image, err := os.ReadFile(executable)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(installed, contents, 0700); err != nil {
-		t.Fatal(err)
-	}
-	replacementBytes, err := os.ReadFile("/bin/false")
+	replacement, err := os.ReadFile("/bin/false")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(replacement, replacementBytes, 0700); err != nil {
+	for _, mode := range []string{"installed", "pinned"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "ompi"), image, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "replacement"), replacement, 0700); err != nil {
+				t.Fatal(err)
+			}
+			process := exec.Command(executable, "-test.run=^TestOpenedNativeImageReplacementHarness$")
+			process.Env = append(os.Environ(), "OMPI_TEST_OPENED_IMAGE_ROOT="+root, "OMPI_TEST_OPENED_IMAGE_MODE="+mode)
+			if output, err := process.CombinedOutput(); err != nil {
+				t.Fatalf("the opened image did not run after atomic replacement: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
+func TestNativeWrapperRejectsInvalidInstalledImage(t *testing.T) {
+	root := os.Getenv("OMPI_TEST_INVALID_IMAGE_ROOT")
+	if root != "" {
+		executable := filepath.Join(root, "ompi")
+		restart := &restartRecord{OperationID: "restart", PreviousInstanceID: strings.Repeat("b", 32)}
+		err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, nil)
+		if os.Getenv("OMPI_TEST_INVALID_IMAGE_KIND") == "missing" {
+			if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("missing installed image error = %v, want file not found", err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), "not a regular executable file") {
+			t.Fatalf("invalid installed image was not rejected explicitly: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, execStateFilename)); !os.IsNotExist(err) {
+			t.Fatalf("invalid installed image wrote restart state: %v", err)
+		}
+		return
+	}
+
+	binary, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	process := exec.Command(executable, "-test.run=^TestPinnedNativeTargetReplacementHarness$")
-	process.Env = append(os.Environ(), "OMPI_TEST_PINNED_EXEC=1", "OMPI_TEST_PINNED_ROOT="+root)
-	if output, err := process.CombinedOutput(); err != nil {
-		t.Fatalf("pinned native replacement failed: %v\n%s", err, output)
+	for _, kind := range []string{"missing", "directory", "nonexecutable", "fifo"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Chmod(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "ompi")
+			var err error
+			switch kind {
+			case "directory":
+				err = os.Mkdir(path, 0700)
+			case "nonexecutable":
+				err = os.WriteFile(path, []byte("not executable"), 0600)
+			case "fifo":
+				err = syscall.Mkfifo(path, 0700)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A blocking FIFO open must fail this test instead of hanging the suite.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			process := exec.CommandContext(ctx, binary, "-test.run=^TestNativeWrapperRejectsInvalidInstalledImage$")
+			process.Env = append(os.Environ(), "OMPI_TEST_INVALID_IMAGE_ROOT="+root, "OMPI_TEST_INVALID_IMAGE_KIND="+kind)
+			if output, err := process.CombinedOutput(); err != nil {
+				t.Fatalf("invalid installed image check failed: %v (context: %v)\n%s", err, ctx.Err(), output)
+			}
+		})
 	}
-	if contents, err := os.ReadFile(filepath.Join(root, "executed")); err != nil || string(contents) != "pinned" {
-		t.Fatalf("the pinned image did not run after atomic replacement: %q %v", contents, err)
+}
+
+func installedNativeTarget(t *testing.T, executable string) *protocol.NativeTarget {
+	t.Helper()
+	var info syscall.Stat_t
+	if err := syscall.Stat(executable, &info); err != nil {
+		t.Fatal(err)
+	}
+	return &protocol.NativeTarget{
+		Device:     strconv.FormatUint(uint64(info.Dev), 10),
+		Inode:      strconv.FormatUint(info.Ino, 10),
+		Size:       strconv.FormatInt(info.Size, 10),
+		ModifiedNs: strconv.FormatInt(info.Mtim.Sec*1e9+info.Mtim.Nsec, 10),
 	}
 }

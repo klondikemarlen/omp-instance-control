@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -234,16 +235,17 @@ func restoreSessionSlotWithBinding(scope protocol.Scope, restoreID, name, extens
 	if err != nil {
 		return 0, fmt.Errorf("read current working directory before restore: %w", err)
 	}
-	if err := os.Chdir(session.CWD); err != nil {
-		return 0, fmt.Errorf("change to saved working directory %q: %w", session.CWD, err)
-	}
-	defer func() { _ = os.Chdir(previousCWD) }()
 
 	restoreEnvironment, err := anchorRestoreEnvironment(session.Scope)
 	if err != nil {
 		return 0, err
 	}
 	defer restoreEnvironment()
+
+	if err := os.Chdir(session.CWD); err != nil {
+		return 0, fmt.Errorf("change to saved working directory %q: %w", session.CWD, err)
+	}
+	defer func() { _ = os.Chdir(previousCWD) }()
 
 	return launchSession(args, extensionPath, session.RestoreID, lock)
 }
@@ -625,10 +627,41 @@ func readProcessStartTime(pid int) (string, error) {
 	return startTime, nil
 }
 
+func restoreConfigEnvironment(configRoot string) (string, string, error) {
+	home := os.Getenv("HOME")
+	if home == "" {
+		currentUser, err := user.Current()
+		if err != nil {
+			return "", "", fmt.Errorf("resolve home directory for restore: %w", err)
+		}
+		home = currentUser.HomeDir
+		if home == "" {
+			return "", "", errors.New("no home directory is available for restore")
+		}
+	}
+	absoluteHome, err := filepath.Abs(home)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve home directory for restore: %w", err)
+	}
+
+	// OMP joins PI_CONFIG_DIR to HOME, even if PI_CONFIG_DIR starts with a slash.
+	configDir, err := filepath.Rel(absoluteHome, configRoot)
+	if err != nil {
+		return "", "", fmt.Errorf("make restore configuration directory relative to home: %w", err)
+	}
+	return absoluteHome, configDir, nil
+}
+
 func anchorRestoreEnvironment(scope protocol.Scope) (func(), error) {
+	home, configDir, err := restoreConfigEnvironment(scope.ConfigRoot)
+	if err != nil {
+		return nil, err
+	}
+
 	updates := map[string]string{
+		"HOME":          home,
 		"OMP_PROFILE":   scope.Profile,
-		"PI_CONFIG_DIR": scope.ConfigRoot,
+		"PI_CONFIG_DIR": configDir,
 	}
 	if scope.Profile == "default" {
 		updates["PI_CODING_AGENT_DIR"] = scope.AgentDir

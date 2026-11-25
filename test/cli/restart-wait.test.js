@@ -39,6 +39,35 @@ function liveStatus(record, lastRestart = record.lastRestart) {
   }
 }
 
+test("when the original refuses this restart, waiting ends without treating older refusals as failures", async () => {
+  // Arrange
+  const original = makeRecord(ORIGINAL_ID, 42)
+  const refusals = ["previous-operation", OPERATION_ID]
+  const transport = {
+    async readRecords() {
+      return [original]
+    },
+    async request() {
+      assert.notEqual(refusals.length, 0, "observation continued after refusal")
+      return {
+        ok: true,
+        data: {
+          ...liveStatus(original),
+          refusedRestartOperationId: refusals.shift(),
+        },
+      }
+    },
+  }
+
+  // Act
+  const [row] = await waitForRestarts(transport, [acceptedRow(original)])
+
+  // Assert
+  assert.deepEqual(refusals, [])
+  assert.equal(row.status, "failed")
+  assert.equal(row.errorCode, "NATIVE_RESTART_REFUSED")
+})
+
 test("when a correlated replacement reuses the original PID, observation completes without replaying restart", async () => {
   // Arrange
   const original = makeRecord(ORIGINAL_ID, 42)

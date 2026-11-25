@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { constants } from "node:fs"
 import { access, lstat, stat } from "node:fs/promises"
+import { homedir } from "node:os"
 import path from "node:path"
 
 import { getScope } from "../protocol/index.js"
@@ -136,10 +137,23 @@ async function requireControlRestoreVersion(executable, scope, env) {
     )
 }
 
-function recoveryEnvironmentArguments(scope) {
+function configRootArguments(env, scope) {
+  const home = env.HOME || homedir()
+  if (!path.isAbsolute(home)) {
+    throw new Error("HOME must be an absolute path to prepare a resume command.")
+  }
+  // OMP joins PI_CONFIG_DIR to HOME, even when the supplied path is absolute.
+  const configDirectory = path.relative(home, scope.configRoot) || "."
+  return [
+    `HOME=${shellQuote(home, "Home directory")}`,
+    `PI_CONFIG_DIR=${shellQuote(configDirectory, "Configuration directory")}`,
+  ]
+}
+
+function recoveryEnvironmentArguments(env, scope) {
   const args = [
     "-u PI_CODING_AGENT_DIR",
-    `PI_CONFIG_DIR=${shellQuote(scope.configRoot, "Configuration directory")}`,
+    ...configRootArguments(env, scope),
     `OMP_PROFILE=${shellQuote(scope.profile, "Profile")}`,
   ]
   if (scope.profile === "default") {
@@ -152,7 +166,7 @@ function environmentArguments(env, scope) {
   const args = ["-u OMP_PROFILE", "-u PI_CODING_AGENT_DIR", "-u XDG_RUNTIME_DIR"]
 
   args.push(
-    `PI_CONFIG_DIR=${shellQuote(scope.configRoot, "Configuration directory")}`,
+    ...configRootArguments(env, scope),
     `PI_PROFILE=${shellQuote(scope.profile, "Profile")}`
   )
   if (scope.profile === "default") {
@@ -231,7 +245,7 @@ export async function prepareNamedRestoreCommand(
   const absoluteExecutable = await resolveExecutable(env, executable)
 
   await requireControlRestoreVersion(absoluteExecutable, scope, env)
-  const environment = recoveryEnvironmentArguments(scope)
+  const environment = recoveryEnvironmentArguments(env, scope)
 
   return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore name ${shellQuote(name, "Restore name")} --profile=${shellQuote(scope.profile, "Profile")}`
 }
@@ -270,7 +284,7 @@ export async function prepareSlotRestoreCommand(
   await requireDirectory(session.cwd, { rejectSymlink: true })
   const absoluteExecutable = await resolveExecutable(env, executable)
   await requireControlRestoreVersion(absoluteExecutable, scope, env)
-  const environment = recoveryEnvironmentArguments(scope)
+  const environment = recoveryEnvironmentArguments(env, scope)
   return `cd ${shellQuote(session.cwd, "Saved session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} control restore slot ${shellQuote(restoreId, "Restore identity")} --profile=${shellQuote(scope.profile, "Profile")}`
 }
 
@@ -291,6 +305,6 @@ export async function prepareLegacyRecoveryExportCommand(
     rejectSymlink: true,
   })
   const absoluteExecutable = await resolveExecutable(env, executable)
-  const environment = recoveryEnvironmentArguments(scope)
+  const environment = recoveryEnvironmentArguments(env, scope)
   return `cd ${shellQuote(legacy.cwd, "Legacy session directory")} && env ${environment} ${shellQuote(absoluteExecutable, "ompi executable")} -r ${shellQuote(legacy.sessionFile, "Legacy session file")}`
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -284,6 +285,7 @@ func TestRecoveryCheckpointPruningKeepsTenNewestAndPreviousBoot(t *testing.T) {
 
 func TestSlotRestoreRejectsChangedSelectedWorkButAllowsOwnerRefresh(t *testing.T) {
 	scope, session := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	t.Setenv("HOME", scope.ConfigRoot)
 	changed := session
 	changed.SessionID = "different-session"
 	changed.UpdatedAt = time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano)
@@ -304,11 +306,69 @@ func TestSlotRestoreRejectsChangedSelectedWorkButAllowsOwnerRefresh(t *testing.T
 	writeRestoreFixtureSnapshot(t, scope, unchanged)
 	_, err = restoreSessionSlotExpected(scope, session.RestoreID, filepath.Join(t.TempDir(), "extension.js"), session, true,
 		func([]string, string, string, *os.File) (int, error) {
+			if os.Getenv("PI_CONFIG_DIR") != "." {
+				t.Fatalf("configuration at HOME was not anchored: PI_CONFIG_DIR=%q", os.Getenv("PI_CONFIG_DIR"))
+			}
 			launches++
 			return 0, nil
 		})
 	if err != nil || launches != 1 {
 		t.Fatalf("safe owner metadata refresh changed the selected work identity: err=%v launches=%d", err, launches)
+	}
+}
+
+func TestManagedRecoveryExportKeepsScopeUnderDifferentAmbientHome(t *testing.T) {
+	scope, session := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	root := filepath.Dir(scope.ConfigRoot)
+	home := filepath.Join(root, "exporter's home")
+	scope.ConfigRoot = filepath.Join(root, "project's config")
+	scope.AgentDir = filepath.Join(root, "project's agent")
+	session.Scope = scope
+	t.Setenv("HOME", home+"/./")
+	exported, err := ExportRecoveryCommands(scope, []protocol.RecoverySession{
+		{
+			RestoreID: session.RestoreID,
+			Session:   &session,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bin := t.TempDir()
+	shim := `#!/bin/sh
+printf '%s\n' "$PWD" "$HOME" "$PI_CONFIG_DIR" "$PI_CODING_AGENT_DIR" "$OMP_PROFILE" "$@"
+`
+	if err := os.WriteFile(filepath.Join(bin, "ompi"), []byte(shim), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PI_CODING_AGENT_DIR", "/other/agent")
+	output, err := exec.Command("/bin/sh", "-c", exported).CombinedOutput()
+	if err != nil {
+		t.Fatalf("execute generated recovery command: %v\n%s", err, output)
+	}
+	want := strings.Join([]string{
+		session.CWD, home, "../project's config", scope.AgentDir, scope.Profile,
+		"control", "restore", "slot", session.RestoreID, "--profile=default",
+	}, "\n") + "\n"
+	if string(output) != want {
+		t.Fatalf("generated recovery command received %q, want %q", output, want)
+	}
+}
+
+func TestRecoveryExportRejectsControlCharactersInHome(t *testing.T) {
+	scope, session := newRestoreFixture(t, strings.Repeat("a", 32), stoppedRestoreOwner())
+	t.Setenv("HOME", filepath.Join(filepath.Dir(scope.ConfigRoot), "home\nwith control"))
+	exported, err := ExportRecoveryCommands(scope, []protocol.RecoverySession{
+		{
+			RestoreID: session.RestoreID,
+			Session:   &session,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsafe HOME") || exported != "" {
+		t.Fatalf("expected export to reject unsafe HOME: output=%q error=%v", exported, err)
 	}
 }
 
