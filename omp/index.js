@@ -217,10 +217,17 @@ export default async function instanceControl(pi) {
     }
   }
 
+  function requireStableSession(state) {
+    if (state.resumingPR) {
+      throw new ProtocolError("SESSION_SWITCHING", "This terminal is switching conversations.")
+    }
+  }
+
   function assertRestartContext(state, origin) {
     if (runtime !== state || state.closing) {
       throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")
     }
+    requireStableSession(state)
 
     if (hasMatchingExitRequest(state, state.ctx)) {
       throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
@@ -455,7 +462,10 @@ export default async function instanceControl(pi) {
       const sessionTitle = readSessionTitle(pi)
       const apiUnavailable = restartApiError(ctx) !== null
       const canSend =
-        !state.closing && !hasMatchingExitRequest(state, ctx) && messageApiError(pi) === null
+        !state.resumingPR &&
+        !state.closing &&
+        !hasMatchingExitRequest(state, ctx) &&
+        messageApiError(pi) === null
       const [sendContext, persistence, directoryError] = await Promise.all([
         readSendContextMetadata(currentRecord),
         sessionPersistence(ctx),
@@ -466,6 +476,7 @@ export default async function instanceControl(pi) {
           ...currentRecord,
           sessionTitle,
           canRestart:
+            !state.resumingPR &&
             !hasMatchingExitRequest(state, ctx) &&
             !state.launch.restartError &&
             !apiUnavailable &&
@@ -483,6 +494,7 @@ export default async function instanceControl(pi) {
       }
     }
 
+    requireStableSession(state)
     if (request.action === "send") {
       if (hasMatchingExitRequest(state, ctx)) {
         throw new ProtocolError("INSTANCE_CLOSING", "This instance is shutting down.")

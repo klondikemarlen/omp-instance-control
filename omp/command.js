@@ -623,6 +623,9 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
       tokenPrefix
     )
   }
+  if (operation === "resume" && tokens.length === 0 && tokenPrefix.startsWith("-")) {
+    return completionValues([completionItem("--help")], completedTokens, tokenPrefix)
+  }
   if (operation === "set" && tokens.length === 0 && tokenPrefix.startsWith("-")) {
     return completionValues([completionItem("--branch")], completedTokens, tokenPrefix)
   }
@@ -943,7 +946,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
 
       try {
         if (/^\s*work(?:\s|$)/.test(args)) {
-          const result = await workCommand(args, ctx, getRuntime)
+          const result = await workCommand(args, ctx, getRuntime, pi)
           ctx.ui.notify(result.split("\n").map(safeTerminalText).join("\n"), "info")
           return
         }
@@ -959,7 +962,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "send ID MESSAGE      Queue a follow-up message for a peer",
               "steer ID MESSAGE     Redirect a peer's active work with a message",
               "restore [NAME]       Choose a recoverable conversation",
-              "work list|find|set|clear  Inspect or claim issue and pull-request work",
+              "work list|find|resume|set|clear  Inspect, resume, or claim GitHub work",
               "cleanup              Remove safely confirmed stale registrations",
               "take-over            Prepare a plain-OMP session for manual relaunch",
               "help [COMMAND]       Show usage and advanced options",
