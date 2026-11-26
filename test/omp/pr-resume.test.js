@@ -31,7 +31,9 @@ async function writeJournal(directory, sessionId, cwd) {
     },
   }
   const transcript = `${JSON.stringify(header)}\n${JSON.stringify(leaf)}\n`
-  await writeFile(sessionFile, transcript)
+  await writeFile(sessionFile, transcript, {
+    mode: 0o600,
+  })
   return {
     sessionId,
     sessionFile,
@@ -51,6 +53,7 @@ async function createResumeFixture(t) {
   const claimsPath = path.join(fixture.root, "claims.json")
   const nativeCallsPath = path.join(fixture.root, "native-argv.jsonl")
   await mkdir(directory, {
+    mode: 0o700,
     recursive: true,
   })
   const source = await writeJournal(directory, "source-conversation", cwd)

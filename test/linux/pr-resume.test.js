@@ -8,7 +8,7 @@ import {
   rm,
   symlink,
   utimes,
-  writeFile,
+  writeFile as writeJournalFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -25,6 +25,12 @@ const prURL = "https://github.com/example/project/pull/42"
 const timestamp = "2026-11-25T00:00:00.000Z"
 const filename = (id) => `2026-11-25T00-00-00-000Z_${id}.jsonl`
 
+function writeFile(file, content) {
+  return writeJournalFile(file, content, {
+    mode: 0o600,
+  })
+}
+
 async function createFixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "ompi-pr-resume-"))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -37,6 +43,7 @@ async function createFixture(t) {
   const bucket = path.join(scope.agentDir, "sessions", "-project")
   const cwd = path.join(root, "project")
   await mkdir(bucket, {
+    mode: 0o700,
     recursive: true,
   })
   await mkdir(cwd)
@@ -132,7 +139,8 @@ function jsonl(...records) {
   return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`
 }
 
-test("findResumeCandidates returns safe evidence from correlated creation and a same-scope claim", async (t) => {
+test("when claims and creation records match, lookup distinguishes their evidence", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const historical = path.join(bucket, filename("historical"))
   const claimed = path.join(bucket, filename("claimed"))
@@ -168,6 +176,7 @@ test("findResumeCandidates returns safe evidence from correlated creation and a 
   await writeFile(claimed, jsonl(sessionHeader("claimed", cwd), creationCall(), creationResult()))
   await utimes(claimed, latestActivity, latestActivity)
 
+  // Act
   const candidates = await findResumeCandidates(
     scope,
     prURL,
@@ -175,6 +184,7 @@ test("findResumeCandidates returns safe evidence from correlated creation and a 
     cwd
   )
 
+  // Assert
   assert.deepEqual(candidates, [
     {
       sessionId: "claimed",
@@ -193,7 +203,8 @@ test("findResumeCandidates returns safe evidence from correlated creation and a 
   ])
 })
 
-test("findResumeCandidates does not mistake mentions, failed or ambiguous tool output for ownership", async (t) => {
+test("when a transcript only mentions the PR or lacks a successful creation, lookup excludes it", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const mention = messageEntry("call", null, {
     role: "assistant",
@@ -260,10 +271,15 @@ test("findResumeCandidates does not mistake mentions, failed or ambiguous tool o
     await writeFile(path.join(bucket, filename(id)), jsonl(sessionHeader(id, cwd), ...records))
   }
 
-  assert.deepEqual(await findResumeCandidates(scope, prURL, [], cwd), [])
+  // Act
+  const candidates = await findResumeCandidates(scope, prURL, [], cwd)
+
+  // Assert
+  assert.deepEqual(candidates, [])
 })
 
-test("findResumeCandidates checks claim identity and does not disclose claimed working directory", async (t) => {
+test("when claims outlive their transcripts, only a matching saved identity is offered", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const valid = path.join(bucket, filename("valid"))
   const recycled = path.join(bucket, filename("recycled"))
@@ -293,15 +309,18 @@ test("findResumeCandidates checks claim identity and does not disclose claimed w
     workClaim(scope, cwd, missing, "missing"),
   ]
 
+  // Act
   const candidates = await findResumeCandidates(scope, prURL, claims, cwd)
 
+  // Assert
   assert.equal(candidates.length, 1)
   assert.equal(candidates[0].sessionId, "valid")
   assert.equal(candidates[0].cwd, cwd)
   assert.equal(candidates[0].evidence, "Explicit work claim")
 })
 
-test("findResumeCandidates scopes historical evidence to the current cwd without losing explicit claims", async (t) => {
+test("when work belongs to another directory, only its explicit claim is listed", async (t) => {
+  // Arrange
   const { bucket, cwd, root, scope } = await createFixture(t)
   const sessionFile = path.join(bucket, filename("other-project"))
   const otherCwd = path.join(root, "other-project")
@@ -310,16 +329,21 @@ test("findResumeCandidates scopes historical evidence to the current cwd without
     jsonl(sessionHeader("other-project", otherCwd), creationCall(), creationResult())
   )
 
-  assert.deepEqual(await findResumeCandidates(scope, prURL, [], cwd), [])
-
   const claim = workClaim(scope, otherCwd, sessionFile, "other-project")
+
+  // Act
+  const unclaimed = await findResumeCandidates(scope, prURL, [], cwd)
   const [candidate] = await findResumeCandidates(scope, prURL, [claim], cwd)
+
+  // Assert
+  assert.deepEqual(unclaimed, [])
   assert.equal(candidate.sessionFile, sessionFile)
   assert.equal(candidate.cwd, otherCwd)
   assert.equal(candidate.evidence, "Explicit work claim")
 })
 
-test("findResumeCandidates does not cross profile, artifact, link or read-only boundaries", async (t) => {
+test("when journals cross a storage boundary, lookup excludes them from the current profile", async (t) => {
+  // Arrange
   const { bucket, cwd, env, scope } = await createFixture(t)
   const other = getScope({
     env,
@@ -336,9 +360,11 @@ test("findResumeCandidates does not cross profile, artifact, link or read-only b
   const chrome = path.join(bucket, filename("chrome"))
   const fork = path.join(bucket, filename("fork"))
   await mkdir(otherBucket, {
+    mode: 0o700,
     recursive: true,
   })
   await mkdir(artifact, {
+    mode: 0o700,
     recursive: true,
   })
   for (const [id, file] of [
@@ -369,14 +395,20 @@ test("findResumeCandidates does not cross profile, artifact, link or read-only b
     workClaim(scope, cwd, readOnly, "readonly"),
   ]
 
-  assert.deepEqual(await findResumeCandidates(scope, prURL, claims, cwd), [])
+  // Act
+  const matches = await findResumeCandidates(scope, prURL, claims, cwd)
+  const otherMatches = await findResumeCandidates(other, prURL, [], cwd)
+
+  // Assert
+  assert.deepEqual(matches, [])
   assert.deepEqual(
-    (await findResumeCandidates(other, prURL, [], cwd)).map(({ sessionId }) => sessionId),
+    otherMatches.map(({ sessionId }) => sessionId),
     ["foreign"]
   )
 })
 
-test("findResumeCandidates can find late creation evidence after an oversized record", async (t) => {
+test("when a large message precedes PR creation, the original conversation is found", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const sessionFile = path.join(bucket, filename("long-session"))
   const largeMessage = messageEntry("earlier", null, {
@@ -388,13 +420,16 @@ test("findResumeCandidates can find late creation evidence after an oversized re
     jsonl(sessionHeader("long-session", cwd), largeMessage, creationCall(), creationResult())
   )
 
+  // Act
   const [candidate] = await findResumeCandidates(scope, prURL, [], cwd)
 
+  // Assert
   assert.equal(candidate.sessionId, "long-session")
   assert.equal(candidate.evidence, "Created this pull request")
 })
 
-test("findResumeCandidates correlates legacy tool calls without tree IDs in record order", async (t) => {
+test("when an older journal lacks tree IDs, ordered tool results identify PR creation", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const sessionFile = path.join(bucket, filename("legacy"))
   const header = sessionHeader("legacy", cwd, {
@@ -404,19 +439,24 @@ test("findResumeCandidates correlates legacy tool calls without tree IDs in reco
   const result = messageEntry(undefined, undefined, creationResult().message)
   await writeFile(sessionFile, jsonl(header, call, result))
 
+  // Act
   const [candidate] = await findResumeCandidates(scope, prURL, [], cwd)
 
+  // Assert
   assert.equal(candidate.sessionId, "legacy")
   assert.equal(candidate.evidence, "Created this pull request")
 })
 
-test("revalidateResumeCandidate does not trust a selected claim after transfer, replacement or removal", async (t) => {
+test("when a selected transcript moves or disappears, revalidation rejects its stale identity", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const sessionFile = path.join(bucket, filename("selected"))
   const claim = workClaim(scope, cwd, sessionFile, "selected")
   const original = jsonl(sessionHeader("selected", cwd))
   await writeFile(sessionFile, original)
+  // Act
   const [candidate] = await findResumeCandidates(scope, prURL, [claim], cwd)
+  // Assert
   assert.deepEqual(await revalidateResumeCandidate(scope, prURL, [claim], candidate), candidate)
 
   const departed = transferNotice({
@@ -454,7 +494,8 @@ test("revalidateResumeCandidate does not trust a selected claim after transfer, 
   assert.equal(await revalidateResumeCandidate(scope, prURL, [claim], candidate), null)
 })
 
-test("revalidateResumeCandidate fails closed on an oversized transfer marker and evicted evidence", async (t) => {
+test("when ownership evidence disappears or a transfer is unreadable, revalidation refuses resume", async (t) => {
+  // Arrange
   const { bucket, cwd, scope } = await createFixture(t)
   const sessionFile = path.join(bucket, filename("historical"))
   const header = jsonl(sessionHeader("historical", cwd))
@@ -465,20 +506,28 @@ test("revalidateResumeCandidate fails closed on an oversized transfer marker and
     kind: "departed",
     to: "x".repeat(600 * 1024),
   })
+  // Act
   await appendFile(sessionFile, jsonl(opaque))
+  // Assert
   assert.equal(await revalidateResumeCandidate(scope, prURL, [], candidate), null)
 
   await writeFile(sessionFile, header)
   assert.equal(await revalidateResumeCandidate(scope, prURL, [], candidate), null)
 })
 
-test("normalizePRResumeURL accepts only a qualified GitHub pull request", () => {
-  assert.equal(normalizePRResumeURL("https://github.com/Example/Project/pull/42"), prURL)
-  assert.equal(normalizePRResumeURL("https://github.com/example/project/issues/42"), null)
-  assert.equal(normalizePRResumeURL("https://github.com/example/project/pull/42?x=y"), null)
-  assert.equal(normalizePRResumeURL("https://github.com@example.org/example/project/pull/42"), null)
-  assert.equal(
-    normalizePRResumeURL("https://github.com/example/project/pull/18446744073709551616"),
-    null
-  )
+test("when a resume URL is provided, only a qualified GitHub PR is accepted", () => {
+  // Arrange
+  const inputs = [
+    "https://github.com/Example/Project/pull/42",
+    "https://github.com/example/project/issues/42",
+    "https://github.com/example/project/pull/42?x=y",
+    "https://github.com@example.org/example/project/pull/42",
+    "https://github.com/example/project/pull/18446744073709551616",
+  ]
+
+  // Act
+  const normalized = inputs.map(normalizePRResumeURL)
+
+  // Assert
+  assert.deepEqual(normalized, [prURL, null, null, null, null])
 })
