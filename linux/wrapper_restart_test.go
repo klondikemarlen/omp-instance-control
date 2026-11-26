@@ -3,6 +3,7 @@ package linux
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,7 +49,21 @@ func TestWrapperRestartHarness(t *testing.T) {
 			t.Fatal("replacement did not execute the newly installed image")
 		}
 	}
-	code, err := Launch(args, filepath.Join(root, "adapter.js"), "test")
+	adapter := filepath.Join(root, "adapter.js")
+	prResume := os.Getenv("OMPI_TEST_PR_RESUME_STATUS") != ""
+	var code int
+	var err error
+	if prResume && os.Getenv(execStatePathEnv) == "" {
+		code, err = LaunchPullRequest(testPRResumeURL, "work", adapter, "test")
+	} else {
+		code, err = Launch(args, adapter, "test")
+	}
+	if prResume {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Exit(code)
+	}
 	if err != nil || code != 0 {
 		t.Fatalf("native wrapper returned code=%d err=%v", code, err)
 	}
@@ -151,6 +166,45 @@ func TestWrapperRestartExecutesAtomicallyReplacedBinaryAndRetainsOwnership(t *te
 	}
 }
 
+func TestWrapperRestartPreservesCancelledPRResumeExitStatus(t *testing.T) {
+	root := t.TempDir()
+	logPath := filepath.Join(root, "invocations.jsonl")
+	session := filepath.Join(root, "session.jsonl")
+	if err := os.WriteFile(session, []byte("session after cancelling PR resume"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prepareFakeOMP(t, root, logPath, session, root, "valid")
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := filepath.Join(root, "ompi")
+	if err := os.Symlink(binary, installed); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(root, "operator.yml")
+	t.Setenv("PI_CONFIG_FILES", overlay)
+	t.Setenv("OMPI_TEST_PR_RESUME_INITIAL_CONFIG", overlay)
+	t.Setenv("OMPI_TEST_PR_RESUME_STATUS", "cancelled")
+	t.Setenv("OMPI_TEST_WRAPPER_ROOT", root)
+	t.Setenv("OMPI_TEST_WRAPPER_PATH", installed)
+	t.Setenv("OMPI_TEST_RESTART_WRAPPER", "1")
+	process := exec.Command(binary, "-test.run=^TestWrapperRestartHarness$")
+	process.Dir = root
+
+	output, err := process.CombinedOutput()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 ||
+		!strings.Contains(string(output), "the PR resume was not completed before the terminal restarted") {
+		t.Fatalf("expected unconfirmed PR resume exit after native restart: err=%v\n%s", err, output)
+	}
+	calls := readInvocations(t, logPath)
+	if len(calls) != 2 || !containsPair(calls[1].Args, "-r", session) {
+		t.Fatalf("PR cancellation blocked the independent native restart: %#v", calls)
+	}
+}
+
 func TestPendingWrapperRestartRefusesPersistedNativeRestore(t *testing.T) {
 	fixtureScope, session := newRestoreFixture(t, strings.Repeat("c", 32), stoppedRestoreOwner())
 	t.Setenv("PI_CONFIG_DIR", fixtureScope.ConfigRoot)
@@ -214,7 +268,7 @@ func TestFailedWrapperExecRestoresLockDescriptorFlags(t *testing.T) {
 	execWrapperProcess = func(string, []string, []string) error { return syscall.EACCES }
 	t.Cleanup(func() { execWrapperProcess = originalExec })
 	restart := &restartRecord{OperationID: "restart", PreviousInstanceID: strings.Repeat("b", 32)}
-	err = execWrapperReplacement(root, executable, scope, []string{}, root, filepath.Join(root, "session.jsonl"), restart, restoreID, lock, nil)
+	err = execWrapperReplacement(root, executable, scope, []string{}, root, filepath.Join(root, "session.jsonl"), restart, restoreID, lock, nil, false)
 	if !errors.Is(err, syscall.EACCES) {
 		t.Fatalf("exec failure was not reported: %v", err)
 	}
@@ -250,7 +304,7 @@ func TestPinnedNativeTargetRejectsImageReplacedBeforeOpen(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { execWrapperProcess = originalExec })
-	err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, target)
+	err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, target, false)
 	if err == nil || !strings.Contains(err.Error(), "changed after verification") {
 		t.Fatalf("mismatched installed image was not rejected explicitly: %v", err)
 	}
@@ -297,7 +351,7 @@ func TestOpenedNativeImageReplacementHarness(t *testing.T) {
 	}
 	defer func() { execWrapperProcess = originalExec }()
 	restart := &restartRecord{OperationID: "restart", PreviousInstanceID: strings.Repeat("b", 32)}
-	if err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, target); err != nil {
+	if err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, target, false); err != nil {
 		t.Fatal(err)
 	}
 	t.Fatal("native replacement returned without executing")
@@ -342,7 +396,7 @@ func TestNativeWrapperRejectsInvalidInstalledImage(t *testing.T) {
 	if root != "" {
 		executable := filepath.Join(root, "ompi")
 		restart := &restartRecord{OperationID: "restart", PreviousInstanceID: strings.Repeat("b", 32)}
-		err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, nil)
+		err := execWrapperReplacement(root, executable, protocol.Scope{}, nil, root, filepath.Join(root, "session"), restart, "", nil, nil, false)
 		if os.Getenv("OMPI_TEST_INVALID_IMAGE_KIND") == "missing" {
 			if !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("missing installed image error = %v, want file not found", err)

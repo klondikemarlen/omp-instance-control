@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,41 @@ func testParseMessageArguments(t *testing.T, action string) {
 			}
 			if err == nil && (id != testCase.wantID || message != testCase.wantMessage) {
 				t.Fatalf("parseSendArguments() = (%q, %q), want (%q, %q)", id, message, testCase.wantID, testCase.wantMessage)
+			}
+		})
+	}
+}
+
+func TestResumeRequiresOneCanonicalGitHubPullRequestURL(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "no URL",
+		},
+		{
+			name: "GitHub issue where the owner is named pull",
+			args: []string{"https://github.com/pull/example/issues/116"},
+		},
+		{
+			name: "PR discussion link",
+			args: []string{"https://github.com/example/project/pull/116#issuecomment-1"},
+		},
+		{
+			name: "multiple PR URLs",
+			args: []string{"https://github.com/example/project/pull/116", "https://github.com/example/project/pull/117"},
+		},
+		{
+			name: "consent bypass flag",
+			args: []string{"https://github.com/example/project/pull/116", "--yes"},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := runControl(append([]string{"resume"}, testCase.args...))
+
+			if !errors.Is(err, errUsage) {
+				t.Fatalf("control resume returned %v; want a usage error", err)
 			}
 		})
 	}

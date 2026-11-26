@@ -85,16 +85,16 @@ _ompi_control_completion()
     # _comp_initialize populates prev through Bash dynamic scope; keep it local.
     # shellcheck disable=SC2034
     local cur prev words cword
-    _comp_initialize -n = || return
+    _comp_initialize -n '=:' || return
     COMPREPLY=()
     if (( cword == 2 )); then
-        mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup usage help version' -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W 'list restart resume send steer restore recover work cleanup usage help version' -- "$cur")
         return 0
     fi
     local action=${words[2]}
     if [[ $action == help ]]; then
         if (( cword == 3 )); then
-            mapfile -t COMPREPLY < <(compgen -W 'list restart send steer restore recover work cleanup usage version' -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W 'list restart resume send steer restore recover work cleanup usage version' -- "$cur")
         fi
         return 0
     fi
@@ -144,7 +144,7 @@ _ompi_control_completion()
         mapfile -t COMPREPLY < <(compgen -W "${candidates[*]}" -- "$cur")
         return 0
     fi
-    [[ $action == list || $action == restart || $action == cleanup || $action == restore ]] || return 0
+    [[ $action == list || $action == restart || $action == resume || $action == cleanup || $action == restore ]] || return 0
 
     local index token name next pending='' selector='' selector_prefix=''
     local -A used=()
@@ -189,6 +189,9 @@ _ompi_control_completion()
     local options='--profile --json' operation=${positionals[0]} needs_argument=false
     if [[ $action == restart ]]; then
         options+=' --no-wait'
+        (( ${#positionals[@]} > 1 )) && return 0
+    elif [[ $action == resume ]]; then
+        options='--profile'
         (( ${#positionals[@]} > 1 )) && return 0
     elif [[ $action == restore ]]; then
         options='--profile'

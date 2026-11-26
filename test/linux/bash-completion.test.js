@@ -42,6 +42,21 @@ function complete(words) {
 
 for (const { condition, words, expected } of [
   {
+    condition: "the resume action is typed",
+    words: ["ompi", "control", "resu"],
+    expected: ["resume"],
+  },
+  {
+    condition: "help is requested for resume",
+    words: ["ompi", "control", "help", "resu"],
+    expected: ["resume"],
+  },
+  {
+    condition: "a PR URL is supplied",
+    words: ["ompi", "control", "resume", "https://github.com/org/repo/pull/1", "--"],
+    expected: ["--profile"],
+  },
+  {
     condition: "a restart target is selected",
     words: ["ompi", "control", "restart", "all", ""],
     expected: [],

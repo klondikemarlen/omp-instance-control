@@ -21,6 +21,7 @@ import {
   writeRestartHandoff,
 } from "./launcher-context.js"
 import { registerOmpiCommand } from "./command.js"
+import { registerPRResumeControl } from "./pr-resume-control.js"
 import { registerPeerMessageRenderer } from "./peer-message.js"
 
 const ENTRY_CLAIM_EVENT = "omp-instance-control:entry-claim"
@@ -180,7 +181,12 @@ export default async function instanceControl(pi) {
   registerPeerMessageRenderer(pi)
 
   let runtime
-  const refreshCompletions = registerOmpiCommand(pi, { getRuntime: () => runtime })
+  const getRuntime = () => runtime
+  const prResume = registerPRResumeControl(pi, getRuntime)
+  const refreshCompletions = registerOmpiCommand(pi, {
+    getRuntime,
+    runPRResume: prResume.run,
+  })
   const releaseExitRequestListener = pi.events.on(EXIT_REQUESTED_EVENT, (request) => {
     if (!runtime || !isMainTerminal(runtime.ctx) || typeof request?.sessionId !== "string") return
 
@@ -674,6 +680,8 @@ export default async function instanceControl(pi) {
           )
         })
       }
+
+      await prResume.prepareLaunch(state, ctx, launch.scope)
     } catch (error) {
       if (runtime) {
         runtime.nativeUpdates?.close()

@@ -4,10 +4,8 @@ import { access, stat } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs, promisify } from "node:util"
 
-import { normalizePRResumeURL } from "../linux/pr-resume.js"
 import { recordSlashUsage } from "../linux/usage.js"
 import { validateInstanceId } from "../protocol/index.js"
-import { resumePullRequest } from "./pr-resume.js"
 
 const execFileAsync = promisify(execFile)
 // Keep in sync with the first line of workHelp in cli/cmd/ompi/work.go.
@@ -16,7 +14,6 @@ const WORK_HELP_MARKER = "Usage: ompi control work"
 const WORK_USAGE = {
   list: "/ompi work list [--profile NAME] [--json]",
   find: "/ompi work find URL [--profile NAME] [--json]",
-  resume: "/ompi work resume https://github.com/OWNER/REPO/pull/N",
   set: "/ompi work set [--branch NAME] URL SUMMARY",
   clear: "/ompi work clear",
 }
@@ -25,16 +22,14 @@ export const WORK_OPERATIONS = Object.keys(WORK_USAGE)
 export const WORK_HELP = [
   `Usage: ${WORK_USAGE.list}`,
   WORK_USAGE.find,
-  WORK_USAGE.resume,
   WORK_USAGE.set,
   WORK_USAGE.clear,
   "URL must identify a GitHub issue or pull request. List and find show every claim or match.",
-  "Resume looks for the original PR conversation in this managed terminal's launch scope.",
   "Set and clear affect only this managed saved conversation in its launch scope.",
   "Everything after URL in set is literal summary text, not shell syntax.",
 ]
 
-export async function workCommand(args, ctx, getRuntime, pi) {
+export async function workCommand(args, ctx, getRuntime) {
   const operation = parseWorkArguments(args)
   if (operation === null) {
     return WORK_HELP.join("\n")
@@ -43,44 +38,6 @@ export async function workCommand(args, ctx, getRuntime, pi) {
   const cwd = ctx.cwd
   const runtime = getRuntime()
   await recordSlashUsage(`work.${operation.name}`, runtime?.launch?.scope)
-  if (operation.name === "resume") {
-    return resumePullRequest(
-      operation.positionals[0],
-      ctx,
-      getRuntime,
-      async (scope) => {
-        await requireWorkingDirectory(cwd)
-        const env = workEnvironment(cwd, scope)
-        const executable = await resolveNativeExecutable(runtime, env)
-        await requireWorkSupport(executable, {
-          cwd,
-          env,
-        })
-        const stdout = await runNativeWork(
-          executable,
-          ["control", "work", "find", "--json", "--", operation.positionals[0]],
-          {
-            cwd,
-            env,
-          }
-        )
-        let claims
-        try {
-          claims = JSON.parse(stdout)
-        } catch {
-          throw new Error("Native ompi did not return valid work claim JSON.")
-        }
-
-        if (!Array.isArray(claims)) {
-          throw new Error("Native ompi did not return a work claim list.")
-        }
-
-        return claims
-      },
-      pi
-    )
-  }
-
   const isMutation = operation.name === "set" || operation.name === "clear"
   const argv = ["control", "work", operation.name]
   let session
@@ -115,6 +72,29 @@ export async function workCommand(args, ctx, getRuntime, pi) {
   return runNativeWork(executable, argv, { cwd, env })
 }
 
+export async function readPRResumeClaims(runtime, cwd, url) {
+  await requireWorkingDirectory(cwd)
+  const env = workEnvironment(cwd, runtime.launch.scope)
+  const executable = await resolveNativeExecutable(runtime, env)
+  await requireWorkSupport(executable, { cwd, env })
+  const stdout = await runNativeWork(executable, ["control", "work", "find", "--json", "--", url], {
+    cwd,
+    env,
+  })
+
+  let claims
+  try {
+    claims = JSON.parse(stdout)
+  } catch {
+    throw new Error("Native ompi did not return valid work claim JSON.")
+  }
+  if (!Array.isArray(claims)) {
+    throw new Error("Native ompi did not return a work claim list.")
+  }
+
+  return claims
+}
+
 async function runNativeWork(executable, argv, { cwd, env }) {
   try {
     const { stdout } = await execFileAsync(executable, argv, { cwd, env })
@@ -140,6 +120,10 @@ function parseWorkArguments(args) {
     return null
   }
 
+  if (name === "resume") {
+    throw new Error("PR resume moved to /ompi resume PR_URL.")
+  }
+
   if (!WORK_OPERATIONS.includes(name)) {
     throw new Error(`Unknown /ompi work operation: ${name}; use /ompi help work.`)
   }
@@ -158,18 +142,6 @@ function parseWorkArguments(args) {
       name,
       options: [],
       positionals: [],
-    }
-  }
-
-  if (name === "resume") {
-    const url = argument ? normalizePRResumeURL(argument[0]) : null
-    if (!url || !tokens.next().done) {
-      throw new Error(`Usage: ${WORK_USAGE.resume}`)
-    }
-
-    return {
-      name,
-      positionals: [url],
     }
   }
 

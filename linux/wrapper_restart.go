@@ -22,23 +22,25 @@ const (
 )
 
 type wrapperExecState struct {
-	Version     int            `json:"version"`
-	Token       string         `json:"token"`
-	Scope       protocol.Scope `json:"scope"`
-	Args        []string       `json:"args"`
-	CWD         string         `json:"cwd"`
-	SessionFile string         `json:"sessionFile"`
-	Restart     restartRecord  `json:"restart"`
-	RestoreID   string         `json:"restoreId"`
-	LockFD      int            `json:"lockFd"`
+	Version             int            `json:"version"`
+	Token               string         `json:"token"`
+	Scope               protocol.Scope `json:"scope"`
+	Args                []string       `json:"args"`
+	CWD                 string         `json:"cwd"`
+	SessionFile         string         `json:"sessionFile"`
+	Restart             restartRecord  `json:"restart"`
+	RestoreID           string         `json:"restoreId"`
+	LockFD              int            `json:"lockFd"`
+	UnconfirmedPRResume bool           `json:"unconfirmedPRResume,omitempty"`
 }
 
 type resumeState struct {
-	cwd          string
-	sessionFile  string
-	restart      restartRecord
-	recoveryFile string
-	observer     restartObserver
+	cwd                 string
+	sessionFile         string
+	restart             restartRecord
+	recoveryFile        string
+	observer            restartObserver
+	unconfirmedPRResume bool
 }
 
 func currentWrapperExecutable() (string, error) {
@@ -79,6 +81,7 @@ var execWrapperProcess = syscall.Exec
 func execWrapperReplacement(
 	launchDir, executable string, scope protocol.Scope, args []string, cwd, sessionFile string,
 	restart *restartRecord, restoreID string, restoreLock *os.File, nativeTarget *protocol.NativeTarget,
+	unconfirmedPRResume bool,
 ) error {
 	if nativeTarget != nil {
 		if err := protocol.ValidateNativeTarget(nativeTarget); err != nil {
@@ -115,6 +118,7 @@ func execWrapperReplacement(
 	state := wrapperExecState{
 		Version: 1, Token: token, Scope: scope, Args: args,
 		CWD: cwd, SessionFile: sessionFile, Restart: *restart, RestoreID: restoreID,
+		UnconfirmedPRResume: unconfirmedPRResume,
 	}
 	oldDescriptorFlags := 0
 	if restoreLock != nil {
@@ -169,11 +173,12 @@ func resumeWrapper(args []string, extensionPath, nativeVersion string) (int, err
 	return launchWithResume(
 		state.Args, extensionPath, nativeVersion, state.RestoreID, lock,
 		&resumeState{
-			cwd:          state.CWD,
-			sessionFile:  state.SessionFile,
-			restart:      state.Restart,
-			recoveryFile: existingRestartRecovery(state.Scope, state.Restart.OperationID),
-			observer:     observeRestart(state.Scope, state.Restart),
+			cwd:                 state.CWD,
+			sessionFile:         state.SessionFile,
+			restart:             state.Restart,
+			recoveryFile:        existingRestartRecovery(state.Scope, state.Restart.OperationID),
+			observer:            observeRestart(state.Scope, state.Restart),
+			unconfirmedPRResume: state.UnconfirmedPRResume,
 		},
 	)
 }

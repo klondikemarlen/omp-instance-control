@@ -31,6 +31,8 @@ func TestUsageDoesNotCreateStorageForNonDispatches(t *testing.T) {
 		{"restart", "--help"},
 		{"restart", "invalid id"},
 		{"work", "--help"},
+		{"resume", "--help"},
+		{"resume", "https://github.com/example/project/issues/116"},
 		{"restore", "--version"},
 		{"restore", "import-legacy"},
 		{"remove", "arbitrary"},
@@ -60,6 +62,24 @@ func TestCrossProfileDispatchCountsInInvokingScope(t *testing.T) {
 		t.Fatalf("unexpected invoking-scope counters: %#v", counts)
 	}
 	assertNoUsageDirectory(t, target)
+}
+
+func TestResumeDispatchCountsOneCLIInvocationInInvokingScope(t *testing.T) {
+	scope := setUsageEnvironment(t, "1")
+	t.Setenv("OMP_INSTANCE_CONTROL_OMP", filepath.Join(t.TempDir(), "missing-omp"))
+
+	_, dispatchError := runControl([]string{"resume", "https://github.com/example/project/pull/116", "--profile", "target"})
+
+	if dispatchError == nil || errors.Is(dispatchError, errUsage) {
+		t.Fatalf("expected a dispatched but failed resume, got %v", dispatchError)
+	}
+	counts, err := linux.ReadUsage(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counts) != 1 || counts[0].Surface != "cli" || counts[0].Feature != "work.resume" || counts[0].Count != 1 {
+		t.Fatalf("unexpected resume usage counters: %#v", counts)
+	}
 }
 
 func TestUsageCountsRestoreFeaturesFromParsedGrammar(t *testing.T) {
@@ -209,7 +229,11 @@ func TestSendMessageStartingWithOptionPrefixIsCounted(t *testing.T) {
 
 func setUsageEnvironment(t *testing.T, optIn string) protocol.Scope {
 	t.Helper()
-	root := t.TempDir()
+	root, err := os.MkdirTemp("", "ompi-usage-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
 	t.Setenv("HOME", root)
 	t.Setenv("OMP_PROFILE", "default")
 	t.Setenv("PI_CONFIG_DIR", filepath.Join(root, "config"))

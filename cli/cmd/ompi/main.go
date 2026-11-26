@@ -20,6 +20,7 @@ const controlHelp = `Usage:
   ompi control [help [COMMAND] | version]
   ompi control list [--profile NAME] [--json]
   ompi control restart ID|all [--profile NAME] [--json] [--no-wait]
+  ompi control resume PR_URL [--profile NAME]
   ompi control send [--profile NAME] [--json] ID MESSAGE
   ompi control steer [--profile NAME] [--json] ID MESSAGE
   ompi control cleanup [--profile NAME] [--json]
@@ -74,7 +75,7 @@ func run(args []string) (int, error) {
 		return 1, err
 	}
 	if code == 0 && len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nMessages: ompi control send|steer ID MESSAGE\nSaved sessions: ompi control restore\nWork claims: ompi control work")
+		fmt.Fprintln(os.Stdout, "\nInstance control: ompi control list|restart ID|all|cleanup\nMessages: ompi control send|steer ID MESSAGE\nPR conversations: ompi control resume PR_URL\nSaved sessions: ompi control restore\nWork claims: ompi control work")
 	}
 	return code, nil
 }
@@ -105,6 +106,8 @@ func runControl(args []string) (int, error) {
 			fmt.Println("Usage: ompi control list [--profile NAME] [--json]")
 		case "restart":
 			fmt.Println("Usage: ompi control restart ID|all [--profile NAME] [--json] [--no-wait]\n  ID may be a unique lowercase hexadecimal prefix.\n  Every target replaces its native ompi wrapper and OMP using the installed code.\n  Restarts inject zero model messages. OMP settles active work and typed instructions queued while busy before the session reopens for input.\n  Explicit exit suppresses relaunch.")
+		case "resume":
+			fmt.Print(resumeHelp)
 		case "send", "steer":
 			fmt.Printf("Usage: ompi control %s [--profile NAME] [--json] ID MESSAGE\n  ID may be a unique lowercase hexadecimal prefix.\n  Options precede ID. Quote MESSAGE as one literal shell argument. Idle delivery starts a turn.\n", args[1])
 			if args[1] == "send" {
@@ -135,6 +138,9 @@ func runControl(args []string) (int, error) {
 		}
 		fmt.Printf("ompi %s\n", version)
 		return 0, nil
+	}
+	if args[0] == "resume" {
+		return runResume(args[1:])
 	}
 	if args[0] == "restore" {
 		return runRestore(args[1:])

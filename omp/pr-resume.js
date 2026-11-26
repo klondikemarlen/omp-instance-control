@@ -2,21 +2,38 @@ import { lstat, realpath } from "node:fs/promises"
 import path from "node:path"
 
 import { findResumeCandidates, revalidateResumeCandidate } from "../linux/pr-resume.js"
+import { readPRResumeClaims } from "./work-command.js"
 
-const CANCELLED = "PR resume cancelled."
+export const RESUME_HELP = [
+  "Usage: /ompi resume https://github.com/OWNER/REPO/pull/N",
+  "Choose and confirm the original saved conversation in this managed terminal's launch scope.",
+  "Only conversations in this directory can be opened; active or uncertain ownership is refused.",
+]
+
+const CANCELLED = {
+  status: "cancelled",
+  message: "PR resume cancelled.",
+}
 const RESUME_ENTRY = "ompi-pr-resume"
+const STARTUP_SELECTOR_ENTRIES = new Set([
+  "model_change",
+  "thinking_level_change",
+  "service_tier_change",
+  "mode_change",
+  "credential_pin",
+])
 const TARGET_CHANGED =
-  "The selected PR conversation changed or disappeared; run /ompi work resume again."
+  "The selected PR conversation changed or disappeared; run /ompi resume again."
 const SOURCE_CHANGED =
-  "The current conversation changed; run /ompi work resume again in the intended terminal."
+  "The current conversation changed; run /ompi resume again in the intended terminal."
 const OWNERSHIP_UNCONFIRMED =
   "OMP did not confirm durable ownership of the original PR conversation. Check which conversation is active before continuing."
 
-export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
+export async function resumePullRequest(url, ctx, getRuntime, pi, { freshStart = false } = {}) {
   const runtime = getRuntime()
   const scope = runtime?.launch?.scope
   if (!scope || !runtime.transport) {
-    throw new Error("/ompi work resume requires a launcher-managed ompi terminal.")
+    throw new Error("/ompi resume requires a launcher-managed ompi terminal.")
   }
 
   // ExtensionAPI.pi is the host's public coding-agent SDK. Use its storage
@@ -55,12 +72,21 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
   }
 
   const sourceStamp = await savedSessionStamp(source.sessionFile)
-  if (!sourceStamp || (await readSessionHeaderId(source.sessionFile)) !== source.sessionId) {
+  if (freshStart && (sourceStamp !== undefined || !isFreshPRResumeSession(manager))) {
+    throw new Error("Shell PR resume requires the fresh OMP conversation that opened here.")
+  }
+  if (
+    !freshStart &&
+    (!sourceStamp || (await readSessionHeaderId(source.sessionFile)) !== source.sessionId)
+  ) {
     throw new Error("The current OMP transcript is unavailable; save it before resuming PR work.")
   }
 
   async function requireUnchangedSource({ switching = false } = {}) {
     const currentStamp = await savedSessionStamp(source.sessionFile)
+    const sameSource = freshStart
+      ? currentStamp === undefined && isFreshPRResumeSession(manager)
+      : sameStamp(currentStamp, sourceStamp)
     if (
       getRuntime() !== runtime ||
       runtime.launch.scope !== scope ||
@@ -71,7 +97,7 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
       source.cwd !== manager.getRecordedCwd() ||
       !isSameSession(sessionIdentity(ctx), source) ||
       manager.getLeafId() !== sourceLeaf ||
-      !sameStamp(currentStamp, sourceStamp)
+      !sameSource
     ) {
       throw new Error(SOURCE_CHANGED)
     }
@@ -90,11 +116,14 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
   }
 
   await requireUnchangedSource()
-  const claims = await readClaims(scope)
+  const claims = await readPRResumeClaims(runtime, source.cwd, url)
   const candidates = await findResumeCandidates(scope, url, claims, source.cwd)
   await requireUnchangedSource()
   if (candidates.length === 0) {
-    return "No saved PR conversation found in this directory or claimed in this ompi profile."
+    return {
+      status: "not-found",
+      message: "No saved PR conversation found in this directory or claimed in this ompi profile.",
+    }
   }
 
   const labels = candidates.map((candidate, index) =>
@@ -113,7 +142,10 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
 
   await requireUnchangedSource()
   if (isSameSession(source, target)) {
-    return "This PR conversation is already active in this terminal."
+    return {
+      status: "already-active",
+      message: "This PR conversation is already active in this terminal.",
+    }
   }
   if (target.sessionId === source.sessionId || target.sessionFile === source.sessionFile) {
     throw new Error(TARGET_CHANGED)
@@ -136,16 +168,19 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
     throw new Error(TARGET_CHANGED)
   }
 
+  const sourceDescription = freshStart
+    ? "This fresh conversation has no saved history to replace."
+    : "Your current conversation will stay guarded and saved during the switch."
   const confirmed = await ctx.ui.confirm(
     "Resume the original PR conversation?",
-    `Open ${choice} here and acquire its free OMP ownership lease. Your current conversation will stay guarded and saved during the switch.`
+    `Open ${choice} here and acquire its free OMP ownership lease. ${sourceDescription}`
   )
   if (confirmed !== true) {
     return CANCELLED
   }
 
   await requireUnchangedSource()
-  const currentClaims = await readClaims(scope)
+  const currentClaims = await readPRResumeClaims(runtime, source.cwd, url)
   await requireUnchangedSource()
   if (runtime.resumingPR) {
     throw new Error("A PR resume is already in progress in this terminal.")
@@ -159,7 +194,9 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
     requireFreeLease(probeSessionLeases, target.sessionId)
     // FileSessionStorage's claims share the host's process-local reference
     // count. Protect both journals across the host's async switch and rollback.
-    releaseSource = claimJournal(storage, probeSessionLeases, source)
+    if (!freshStart) {
+      releaseSource = claimJournal(storage, probeSessionLeases, source)
+    }
     releaseTarget = claimJournal(storage, probeSessionLeases, target)
     const latest = await revalidateResumeCandidate(scope, url, currentClaims, target)
     if (
@@ -189,7 +226,10 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
     }
 
     if (result?.cancelled === true && isSameSession(sessionIdentity(ctx), source)) {
-      return "OMP cancelled PR resume; the previous conversation is still active."
+      return {
+        status: "cancelled",
+        message: "OMP cancelled PR resume; the previous conversation is still active.",
+      }
     }
     if (
       result?.cancelled !== false ||
@@ -218,12 +258,25 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
       throw new Error(OWNERSHIP_UNCONFIRMED)
     }
 
-    return "Resumed the original PR conversation in this terminal."
+    return {
+      status: "resumed",
+      message: "Resumed the original PR conversation in this terminal.",
+    }
   } finally {
     releaseTarget?.()
     releaseSource?.()
     runtime.resumingPR = false
   }
+}
+
+export function isFreshPRResumeSession(manager) {
+  if (manager?.isSessionOnDisk?.() !== false || manager.getHeader().origin !== undefined) {
+    return false
+  }
+
+  // Only host startup selector metadata may exist before the first submission.
+  const entries = manager.getEntries?.()
+  return Array.isArray(entries) && entries.every(({ type }) => STARTUP_SELECTOR_ENTRIES.has(type))
 }
 
 function sessionIdentity(ctx) {
@@ -305,9 +358,10 @@ async function savedSessionStamp(file) {
       return stamp
     }
   } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error
+    if (error.code === "ENOENT") {
+      return undefined
     }
+    throw error
   }
 
   return null
@@ -315,8 +369,8 @@ async function savedSessionStamp(file) {
 
 function sameStamp(first, second) {
   return (
-    first !== null &&
-    second !== null &&
+    first != null &&
+    second != null &&
     first.dev === second.dev &&
     first.ino === second.ino &&
     first.size === second.size &&
