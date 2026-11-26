@@ -30,11 +30,15 @@ export async function findResumeCandidates(scope, url, claims = [], cwd = proces
   const candidates = await withSessionsDirectory(lookup, async (sessions) => {
     const matches = []
     for await (const bucket of directoryEntries(sessions)) {
-      if (!bucket.isDirectory() || !isSessionBucket(bucket.name)) continue
+      if (!bucket.isDirectory() || !isSessionBucket(bucket.name)) {
+        continue
+      }
 
       await withBucket(sessions, bucket.name, async (directory) => {
         for await (const file of directoryEntries(directory)) {
-          if (!file.isFile()) continue
+          if (!file.isFile()) {
+            continue
+          }
 
           const candidate = await inspectTranscript(lookup, directory, bucket.name, file.name)
           if (candidate) matches.push(candidate)
@@ -373,7 +377,10 @@ async function findEvidence(lines, url, header, isClaimed) {
 
     const mayBeTransfer = line?.includes(TRANSFER_MARKER)
     if (!mayBeTransfer) {
-      if (evidence) continue
+      if (evidence) {
+        continue
+      }
+
       if (calls.size === 0 && (!line?.includes(ASSISTANT_ROLE) || !line.includes(GITHUB_CLI))) {
         continue
       }
@@ -395,14 +402,19 @@ async function findEvidence(lines, url, header, isClaimed) {
 
       if (transfer) latestTransfer = transfer
     }
-    if (evidence || entry.type !== "message") continue
+    if (evidence || entry.type !== "message") {
+      continue
+    }
 
     const message = entry.message
     if (message?.role === "assistant") {
       calls.clear()
       assistantEntryId = entry.id
       lastResultEntryId = undefined
-      if (typeof assistantEntryId !== "string" && !isLegacy) continue
+      if (typeof assistantEntryId !== "string" && !isLegacy) {
+        continue
+      }
+
       if (!Array.isArray(message.content) || ["aborted", "error"].includes(message.stopReason)) {
         continue
       }
