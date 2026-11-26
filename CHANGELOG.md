@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.0 - 2026-11-26
+
+- From a shell, use `ompi control resume PR_URL`. Inside a managed terminal, `/ompi resume PR_URL` replaces `/ompi work resume PR_URL`. Both open the selected conversation here; neither takes it from another terminal.
+
 ## 2.2.0 - 2026-11-25
 
 - In a managed terminal, use `/ompi work resume PR_URL` to find the original saved conversation by a work claim or recorded PR creation. Confirm the match to continue there without copying a session ID.

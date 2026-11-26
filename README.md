@@ -182,6 +182,24 @@ ompi control work find --json https://github.com/klondikemarlen/omp-instance-con
 
 The native CLI can also set or clear a claim for an explicitly selected live ID: `ompi control work set ID URL 'Summary with spaces'` or `ompi control work clear ID`. The slash forms mutate only the invoking managed session. Both command surfaces require the work-capable native `ompi` executable.
 
+### Resuming a Pull Request Conversation
+
+| Where you start                | 2.2.x                      | Starting in 3.0              |
+| ------------------------------ | -------------------------- | ---------------------------- |
+| Shell in the project directory | Not available              | `ompi control resume PR_URL` |
+| Managed OMP terminal           | `/ompi work resume PR_URL` | `/ompi resume PR_URL`        |
+
+Use the full GitHub pull request URL. The shell opens OMP in that terminal with the command prepared; press Enter to review the matches. Choose a conversation and confirm to open its original saved history. The lookup uses work claims in your current profile or recorded PR creation in the current directory. A URL mention, matching title, or shared directory alone is not evidence. Cancel if the match is unclear. If another terminal owns the conversation, resume refuses to take it over.
+
+In a managed terminal on 3.0, agents can initiate a request without submitting the command or confirming for the user. For example, with OMP's tool commands enabled, run these **inside OMP's Bash tool**, not in an external shell:
+
+```bash
+ompi_pr_resume -j '{"action":"request","url":"https://github.com/OWNER/REPO/pull/123"}'
+ompi_pr_resume -j '{"action":"status"}'
+```
+
+`awaiting-user` means the command was staged in an empty editor; nothing switched. The user submits it, chooses a conversation, and confirms. `status` reports the latest request in that terminal; include its `requestId` to check a particular request. `resumed` confirms the switch. `cancelled` and `refused` do not.
+
 ### Sending Peer Messages
 
 **Known peer in the same folder:** On OMP 19, if both interactive sessions have [`task.crossInstance`](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/task/settings.ts#L508-L519) enabled, an agent can read `agent://peers` and write a message to `agent://<pid>` for the intended main agent. The roster shows PIDs and status, not session titles. This setting is off by default: opting in also lets participating peers read subagent outputs and send messages that can wake agents.
