@@ -305,7 +305,9 @@ async function savedSessionStamp(file) {
       return stamp
     }
   } catch (error) {
-    if (error.code !== "ENOENT") throw error
+    if (error.code !== "ENOENT") {
+      throw error
+    }
   }
 
   return null
