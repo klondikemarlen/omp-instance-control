@@ -15,6 +15,7 @@ const FEATURES = new Set([
   "take-over",
   "work.list",
   "work.find",
+  "work.resume",
   "work.set",
   "work.clear",
   "restore.select",
