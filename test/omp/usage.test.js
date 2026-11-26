@@ -72,6 +72,7 @@ test("when plain OMP dispatches commands, only fixed categories accumulate in it
     "steer abcd another-message",
     "work list",
     "work find https://github.com/owner/project/issues/17 --profile other",
+    "work resume https://github.com/owner/project/pull/17",
     "work clear",
     "restore private-name",
     "restore",
@@ -114,6 +115,7 @@ test("when plain OMP dispatches commands, only fixed categories accumulate in it
     "work.clear",
     "work.find",
     "work.list",
+    "work.resume",
   ]
   const files = await readdir(directory)
   assert.deepEqual(
