@@ -19,6 +19,8 @@ export async function resumePullRequest(url, ctx, getRuntime, readClaims, pi) {
     throw new Error("/ompi work resume requires a launcher-managed ompi terminal.")
   }
 
+  // ExtensionAPI.pi is the host's public coding-agent SDK. Use its storage
+  // implementation so lease reservations share the host's process-local state.
   const { FileSessionStorage, SessionManager, probeSessionLeases, readSessionHeaderId } =
     pi?.pi ?? {}
   const manager = ctx.sessionManager

@@ -23,7 +23,9 @@ const CREATE_EVIDENCE = "Created this pull request"
 
 export async function findResumeCandidates(scope, url, claims = [], cwd = process.cwd()) {
   const lookup = createLookup(scope, url, claims, cwd)
-  if (!lookup) return []
+  if (!lookup) {
+    return []
+  }
 
   const candidates = await withSessionsDirectory(lookup, async (sessions) => {
     const matches = []
@@ -51,12 +53,16 @@ export async function findResumeCandidates(scope, url, claims = [], cwd = proces
 
 export async function revalidateResumeCandidate(scope, url, claims, candidate) {
   const lookup = createLookup(scope, url, claims, candidate?.cwd)
-  if (!lookup || !isAbsolutePath(candidate?.sessionFile)) return null
+  if (!lookup || !isAbsolutePath(candidate?.sessionFile)) {
+    return null
+  }
 
   const [bucket, file, extra] = path
     .relative(lookup.sessionsRoot, candidate.sessionFile)
     .split(path.sep)
-  if (!isSessionBucket(bucket) || !SESSION_FILE.test(file) || extra !== undefined) return null
+  if (!isSessionBucket(bucket) || !SESSION_FILE.test(file) || extra !== undefined) {
+    return null
+  }
 
   const refreshed = await withSessionsDirectory(lookup, (sessions) =>
     withBucket(sessions, bucket, (directory) => inspectTranscript(lookup, directory, bucket, file))
@@ -152,8 +158,13 @@ async function withSessionsDirectory({ sessionsRoot }, visit) {
       const stickyTmp = current === "/tmp" && info.uid === 0 && (info.mode & 0o1000) !== 0
       const owned = info.uid === uid
       const writableByOthers = (info.mode & 0o022) !== 0
-      if ((!owned && info.uid !== 0) || (writableByOthers && !stickyTmp)) return null
-      if ((current === sessionsRoot || current === agentDir) && !owned) return null
+      if ((!owned && info.uid !== 0) || (writableByOthers && !stickyTmp)) {
+        return null
+      }
+
+      if ((current === sessionsRoot || current === agentDir) && !owned) {
+        return null
+      }
     }
     return await visit(directory)
   } catch (error) {
@@ -168,7 +179,9 @@ async function withBucket(parent, name, visit) {
   try {
     directory = await open(descriptorPath(parent, name), DIRECTORY_FLAGS)
     const info = await directory.stat()
-    if (info.uid !== process.getuid() || (info.mode & 0o022) !== 0) return null
+    if (info.uid !== process.getuid() || (info.mode & 0o022) !== 0) {
+      return null
+    }
 
     return await visit(directory)
   } catch (error) {
@@ -184,14 +197,18 @@ async function* directoryEntries(directory) {
 }
 
 function unavailablePath(error) {
-  if (UNAVAILABLE_PATH.has(error.code)) return null
+  if (UNAVAILABLE_PATH.has(error.code)) {
+    return null
+  }
 
   throw new Error("Could not read saved OMP sessions in this profile.", { cause: error })
 }
 
 async function inspectTranscript(lookup, directory, bucket, name) {
   const sessionId = SESSION_FILE.exec(name)?.[1]
-  if (!sessionId) return null
+  if (!sessionId) {
+    return null
+  }
 
   const sessionFile = path.join(lookup.sessionsRoot, bucket, name)
   const isClaimed = lookup.claimIdsByFile.get(sessionFile) === sessionId
@@ -233,7 +250,9 @@ async function inspectTranscript(lookup, directory, bucket, name) {
     }
 
     const evidence = await findEvidence(lines, lookup.url, header, isClaimed)
-    if (!evidence) return null
+    if (!evidence) {
+      return null
+    }
 
     const after = await transcript.stat()
     if (
@@ -268,7 +287,9 @@ function isSessionHeader(header, sessionId) {
 }
 
 function parseRecord(line) {
-  if (!Buffer.isBuffer(line)) return null
+  if (!Buffer.isBuffer(line)) {
+    return null
+  }
 
   try {
     return JSON.parse(line.toString("utf8"))
@@ -346,7 +367,9 @@ async function findEvidence(lines, url, header, isClaimed) {
   let assistantEntryId
   let lastResultEntryId
   for await (const line of lines) {
-    if (line === OPAQUE_TRANSFER) return null
+    if (line === OPAQUE_TRANSFER) {
+      return null
+    }
 
     const mayBeTransfer = line?.includes(TRANSFER_MARKER)
     if (!mayBeTransfer) {
@@ -357,14 +380,19 @@ async function findEvidence(lines, url, header, isClaimed) {
     }
     const entry = parseRecord(line)
     if (!entry) {
-      if (mayBeTransfer) return null
+      if (mayBeTransfer) {
+        return null
+      }
 
       calls.clear()
       continue
     }
     if (mayBeTransfer) {
       const transfer = transferKind(entry)
-      if (transfer === "invalid") return null
+      if (transfer === "invalid") {
+        return null
+      }
+
       if (transfer) latestTransfer = transfer
     }
     if (evidence || entry.type !== "message") continue
@@ -425,7 +453,10 @@ function transferKind(entry) {
   ) {
     return "arrived"
   }
-  if (details?.kind === "departed" && typeof details.to === "string") return "departed"
+  if (details?.kind === "departed" && typeof details.to === "string") {
+    return "departed"
+  }
+
   if (
     details?.kind === "forked" &&
     typeof details.source === "string" &&
@@ -486,18 +517,30 @@ function isDirectPRCreate(command) {
       word += character
     } else if (character === "\\") {
       const next = command[++index]
-      if (next === undefined || (quote === '"' && !'\\$`"\n'.includes(next))) return false
+      if (next === undefined || (quote === '"' && !'\\$`"\n'.includes(next))) {
+        return false
+      }
+
       if (next !== "\n") word += next
     } else if (quote === '"') {
-      if (character === "$" || character === "`") return false
+      if (character === "$" || character === "`") {
+        return false
+      }
+
       word += character
     } else if (character === "'" || character === '"') {
       quote = character
     } else if (character === " " || character === "\t") {
-      if (isNonCreatingFlag(word)) return false
+      if (isNonCreatingFlag(word)) {
+        return false
+      }
+
       word = ""
     } else {
-      if ("\n\r;&|<>()$`#*?[]{}~".includes(character)) return false
+      if ("\n\r;&|<>()$`#*?[]{}~".includes(character)) {
+        return false
+      }
+
       word += character
     }
   }
