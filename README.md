@@ -182,18 +182,6 @@ ompi control work find --json https://github.com/klondikemarlen/omp-instance-con
 
 The native CLI can also set or clear a claim for an explicitly selected live ID: `ompi control work set ID URL 'Summary with spaces'` or `ompi control work clear ID`. The slash forms mutate only the invoking managed session. Both command surfaces require the work-capable native `ompi` executable.
 
-### Resuming the Conversation Behind a Pull Request
-
-In a managed terminal in the original working directory, enter the full GitHub pull request URL:
-
-```text
-/ompi work resume https://github.com/klondikemarlen/omp-instance-control/pull/113
-```
-
-This is an interactive slash command in ompi 2.2.0, not a shell command. It checks this profile’s saved work claims. For unclaimed work, it looks in conversations from the current directory for a successful `gh pr create` whose output identifies that PR. A mention, title, or shared working directory is not evidence. Historical lookup does not cover every way to create a PR; no match does not mean there was no conversation.
-
-Check the evidence before confirming the original conversation. Cancel to stay where you are. If the owner is still running, use that terminal instead. The command does not ask an owner to exit, switch profiles, or continue in a fork. A successful switch changes the history used by your next prompt in this terminal; the conversation you left stays saved.
-
 ### Sending Peer Messages
 
 **Known peer in the same folder:** On OMP 19, if both interactive sessions have [`task.crossInstance`](https://github.com/can1357/oh-my-pi/blob/v19.0.1/packages/coding-agent/src/task/settings.ts#L508-L519) enabled, an agent can read `agent://peers` and write a message to `agent://<pid>` for the intended main agent. The roster shows PIDs and status, not session titles. This setting is off by default: opting in also lets participating peers read subagent outputs and send messages that can wake agents.
