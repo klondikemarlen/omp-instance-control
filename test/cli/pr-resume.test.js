@@ -37,7 +37,7 @@ test("when an agent requests PR resume, only an empty draft is prepared and appr
   assert.equal(terminal.getDraft(), resumeCommand)
 })
 
-test("when the draft contains user text or the URL is not a PR, no command is prepared", () => {
+test("when the draft contains user text, the existing draft is preserved", () => {
   // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal("User's unfinished thought")
@@ -49,12 +49,18 @@ test("when the draft contains user text or the URL is not a PR, no command is pr
   assert.equal(refused.status, "refused")
   assert.equal(terminal.getDraft(), "User's unfinished thought")
   assert.equal(requests.status(undefined, terminal).status, "unknown")
+})
 
-  terminal.setDraft("")
-  assert.equal(
-    requests.request("https://github.com/owner/repo/issues/116", terminal).status,
-    "refused"
-  )
+test("when the URL is an issue rather than a PR, the editor stays empty", () => {
+  // Arrange
+  const requests = createPRResumeRequests(normalizePRResumeURL)
+  const terminal = createTerminal()
+
+  // Act
+  const refused = requests.request("https://github.com/owner/repo/issues/116", terminal)
+
+  // Assert
+  assert.equal(refused.status, "refused")
   assert.equal(terminal.getDraft(), "")
 })
 
@@ -106,22 +112,31 @@ test("when the matching slash command runs, only its final observed result repor
   assert.equal(requests.status(requestId, terminal).status, "unknown")
 })
 
-test("when the slash command is cancelled or cannot safely resume, status preserves that disposition", async () => {
+test("when the operator cancels the slash command, the request reports cancellation", async () => {
   // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
   const cancelled = requests.request(url, terminal)
   terminal.setDraft("")
+
   // Act
   await requests.run(url, terminal, async () => ({
     status: "cancelled",
     message: "PR resume cancelled.",
   }))
+
   // Assert
   assert.equal(requests.status(cancelled.requestId, terminal).status, "cancelled")
+})
 
+test("when a live owner prevents resume, the request reports the refusal reason", async () => {
+  // Arrange
+  const requests = createPRResumeRequests(normalizePRResumeURL)
+  const terminal = createTerminal()
   const refused = requests.request(url, terminal)
   terminal.setDraft("")
+
+  // Act
   await assert.rejects(
     requests.run(url, terminal, async () => {
       throw new Error("The selected conversation has a live owner.")
@@ -129,6 +144,7 @@ test("when the slash command is cancelled or cannot safely resume, status preser
     /live owner/
   )
 
+  // Assert
   assert.deepEqual(requests.status(refused.requestId, terminal), {
     requestId: refused.requestId,
     status: "refused",
