@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.0 - 2026-11-25
+
+- In a managed terminal, use `/ompi work resume PR_URL` to find the original saved conversation by a work claim or recorded PR creation. Confirm the match to continue there without copying a session ID.
+
 ## 2.1.1 - 2026-11-25
 
 - When a package upgrade replaces `ompi` while a normal restart is waiting, the terminal resumes the same conversation using the wrapper installed at relaunch. Start with the updated wrapper and adapter to get this behavior; installing the package does not change a restart already handled by older code.

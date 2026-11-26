@@ -1,3 +1,9 @@
+omp-instance-control (2.2.0~ppa1) resolute; urgency=medium
+
+  * Resume a saved conversation by pull request in a managed terminal.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Wed, 25 Nov 2026 18:14:59 -0700
+
 omp-instance-control (2.1.1~ppa1) resolute; urgency=medium
 
   * Resume through an atomic native package upgrade during ordinary restart.
