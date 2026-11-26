@@ -22,11 +22,14 @@ function createTerminal(initialDraft = "") {
 }
 
 test("when an agent requests PR resume, only an empty draft is prepared and approval stays pending", () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
 
+  // Act
   const pending = requests.request("https://github.com/Owner/Repo/pull/116", terminal)
 
+  // Assert
   assert.equal(terminal.getDraft(), resumeCommand)
   assert.equal(pending.status, "awaiting-user")
   assert.deepEqual(requests.status(pending.requestId, terminal), pending)
@@ -35,10 +38,15 @@ test("when an agent requests PR resume, only an empty draft is prepared and appr
 })
 
 test("when the draft contains user text or the URL is not a PR, no command is prepared", () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal("User's unfinished thought")
 
-  assert.equal(requests.request(url, terminal).status, "refused")
+  // Act
+  const refused = requests.request(url, terminal)
+
+  // Assert
+  assert.equal(refused.status, "refused")
   assert.equal(terminal.getDraft(), "User's unfinished thought")
   assert.equal(requests.status(undefined, terminal).status, "unknown")
 
@@ -51,12 +59,15 @@ test("when the draft contains user text or the URL is not a PR, no command is pr
 })
 
 test("when the prepared draft is absent during a status query, the request is not reported as cancelled", () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
   const { requestId } = requests.request(url, terminal)
 
+  // Act
   terminal.setDraft("Unrelated user prompt")
 
+  // Assert
   assert.equal(requests.status(requestId, terminal).status, "not-staged")
   assert.equal(terminal.getDraft(), "Unrelated user prompt")
 
@@ -65,6 +76,7 @@ test("when the prepared draft is absent during a status query, the request is no
 })
 
 test("when the matching slash command runs, only its final observed result reports a resume", async () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
   const { requestId } = requests.request(url, terminal)
@@ -73,6 +85,7 @@ test("when the matching slash command runs, only its final observed result repor
     message: "Resumed the original PR conversation in this terminal.",
   }
 
+  // Act
   terminal.setDraft("")
   const switchPromise = requests.run(url, terminal, async () => {
     assert.equal(requests.status(requestId, terminal).status, "in-progress")
@@ -81,6 +94,7 @@ test("when the matching slash command runs, only its final observed result repor
     return switchResult
   })
 
+  // Assert
   assert.deepEqual(await switchPromise, switchResult)
   assert.deepEqual(requests.status(undefined, terminal), {
     requestId,
@@ -93,14 +107,17 @@ test("when the matching slash command runs, only its final observed result repor
 })
 
 test("when the slash command is cancelled or cannot safely resume, status preserves that disposition", async () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
   const cancelled = requests.request(url, terminal)
   terminal.setDraft("")
+  // Act
   await requests.run(url, terminal, async () => ({
     status: "cancelled",
     message: "PR resume cancelled.",
   }))
+  // Assert
   assert.equal(requests.status(cancelled.requestId, terminal).status, "cancelled")
 
   const refused = requests.request(url, terminal)
@@ -120,16 +137,20 @@ test("when the slash command is cancelled or cannot safely resume, status preser
 })
 
 test("when another conversation becomes active, the old request is no longer staged", () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
   const { requestId } = requests.request(url, terminal)
 
+  // Act
   terminal.sessionId = "another-session"
 
+  // Assert
   assert.equal(requests.status(requestId, terminal).status, "not-staged")
 })
 
 test("when a slash command uses another source or URL, it does not consume the staged request", async () => {
+  // Arrange
   const requests = createPRResumeRequests(normalizePRResumeURL)
   const terminal = createTerminal()
   const { requestId } = requests.request(url, terminal)
@@ -138,6 +159,7 @@ test("when a slash command uses another source or URL, it does not consume the s
     message: "No saved PR conversation found.",
   }
 
+  // Act
   await requests.run(`${url}1`, terminal, async () => otherResult)
   await requests.run(
     url,
@@ -156,6 +178,7 @@ test("when a slash command uses another source or URL, it does not consume the s
     async () => otherResult
   )
 
+  // Assert
   assert.equal(requests.status(requestId, terminal).status, "awaiting-user")
 })
 

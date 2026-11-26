@@ -497,21 +497,27 @@ test("when slash resume is given an issue URL or a profile override, it reports 
 })
 
 test("when using the retired slash resume spelling, it shows migration help without looking up work", async (t) => {
+  // Arrange
   const { command, ctx, switches, notifications, picks } = await createResumeFixture(t)
 
+  // Act
   await command.handler(`work ${COMMAND}`, ctx)
 
+  // Assert
   assert.deepEqual(picks, [])
   assert.deepEqual(switches, [])
   assert.deepEqual(notifications, [["PR resume moved to /ompi resume PR_URL.", "error"]])
 })
 
 test("when requesting slash resume help, it describes the guarded operation without opening a chooser", async (t) => {
+  // Arrange
   const { command, ctx, notifications, picks } = await createResumeFixture(t)
 
+  // Act
   await command.handler("help resume", ctx)
   await command.handler("resume --help", ctx)
 
+  // Assert
   assert.deepEqual(picks, [])
   assert.equal(notifications.length, 2)
   assert.equal(notifications[0][1], "info")
@@ -523,6 +529,7 @@ test("when requesting slash resume help, it describes the guarded operation with
 })
 
 test("when completing slash resume, only the root command and its help option are suggested", async (t) => {
+  // Arrange
   const { command } = await createResumeFixture(t)
   const cases = [
     ["resu", ["resume"]],
@@ -532,15 +539,20 @@ test("when completing slash resume, only the root command and its help option ar
     [`${COMMAND} --`, []],
   ]
 
-  for (const [input, expected] of cases) {
-    assert.deepEqual(
-      command.getArgumentCompletions(input).map(({ value }) => value),
-      expected
-    )
-  }
+  // Act
+  const actual = cases.map(([input]) =>
+    command.getArgumentCompletions(input).map(({ value }) => value)
+  )
+
+  // Assert
+  assert.deepEqual(
+    actual,
+    cases.map(([, expected]) => expected)
+  )
 })
 
 test("when OMP starts for shell PR resume, prefill alone never opens the original", async (t) => {
+  // Arrange
   const {
     command,
     prResume,
@@ -557,8 +569,10 @@ test("when OMP starts for shell PR resume, prefill alone never opens the origina
     freshStart: true,
   })
 
+  // Act
   await prResume.prepareLaunch(runtime, ctx, runtime.launch.scope)
 
+  // Assert
   assert.equal(ctx.ui.getEditorText(), `/ompi ${COMMAND}`)
   assert.deepEqual(picks, [])
   assert.deepEqual(confirms, [])
@@ -590,13 +604,16 @@ test("when OMP starts for shell PR resume, prefill alone never opens the origina
 })
 
 test("when OMP's editor holds a draft at startup, shell PR resume leaves it untouched", async (t) => {
+  // Arrange
   const { prResume, runtime, ctx, switches, resultPath } = await createResumeFixture(t, {
     freshStart: true,
   })
   ctx.ui.setEditorText("An existing draft")
 
+  // Act
   await prResume.prepareLaunch(runtime, ctx, runtime.launch.scope)
 
+  // Assert
   assert.equal(ctx.ui.getEditorText(), "An existing draft")
   assert.deepEqual(switches, [])
   assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), {
@@ -608,14 +625,17 @@ test("when OMP's editor holds a draft at startup, shell PR resume leaves it unto
 })
 
 test("when OMP started in a different profile, shell resume refuses before showing any candidates", async (t) => {
+  // Arrange
   const { prResume, runtime, ctx, picks, resultPath } = await createResumeFixture(t, {
     freshStart: true,
   })
 
+  // Act
   await prResume.prepareLaunch(runtime, ctx, {
     id: "another-profile",
   })
 
+  // Assert
   assert.equal(ctx.ui.getEditorText(), "")
   assert.deepEqual(picks, [])
   assert.equal(JSON.parse(await readFile(resultPath, "utf8")).status, "refused")
