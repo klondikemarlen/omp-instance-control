@@ -4,6 +4,18 @@
 
 - A cooperating trusted exit plugin can request a fresh managed session in an approved directory in the same terminal. The handoff requires a correlated clean exit and does not resume an existing conversation, even with automatic resume enabled.
 
+## 3.1.1 - 2026-11-27
+
+- `/ompi restart` now distinguishes acceptance from completion when it selects the invoking terminal. It shows how to check status from another terminal without interrupting the target. This does not change when OMP shuts down.
+
+## 3.1.0 - 2026-11-27
+
+- `ompi control list` and `/ompi list` show the OMP version each terminal is actually running, so you can choose which terminals to restart after an update. Unknown versions are labeled in the human lists and omitted from JSON, where `data.ompVersion` is separate from the wrapper version.
+
+## 3.0.1 - 2026-11-27
+
+- The initial `/ompi` completion menu keeps `restore` visible and omits `cleanup` and `take-over`. Both commands still appear when you type their prefixes and in `/ompi help`.
+
 ## 3.0.0 - 2026-11-26
 
 - From a shell, use `ompi control resume PR_URL`. Inside a managed terminal, `/ompi resume PR_URL` replaces `/ompi work resume PR_URL`. Both resume conversations from the current working directory without taking them from another terminal. For a match in another directory, use OMP's native `/resume` picker.
