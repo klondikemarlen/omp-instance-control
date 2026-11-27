@@ -508,6 +508,9 @@ test("when /ompi restart runs in a managed session, it targets only that instanc
     assert.equal(self.requests[0].instanceId, selfId)
     assert.deepEqual(peer.requests, [])
     assert.equal(notifications[0].level, "info")
+    assert.match(notifications[0].message, /Restart accepted, not complete/)
+    assert.match(notifications[0].message, /another terminal in the same profile and configuration/)
+    assert.match(notifications[0].message, /ompi control list --json/)
   } finally {
     await fixture.close()
   }
@@ -535,6 +538,8 @@ test("when a scoped prefix selects this session, restart returns acceptance with
     assert.equal(rows[0].instanceId, selfId)
     assert.equal(rows[0].status, "accepted")
     assert.equal(self.requests[0].instanceId, selfId)
+    assert.match(ui.notifications[1].message, /Restart accepted, not complete/)
+    assert.match(ui.notifications[1].message, /ompi control list --json/)
     assert.equal(self.requests[0].action, "restart-wrapper")
     assert.deepEqual(otherProfilePeer.requests, [])
   } finally {
