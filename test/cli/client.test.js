@@ -227,7 +227,7 @@ test("when listing a vanished endpoint, its outcome remains distinct from a live
   )
   assert.equal(
     formatListRows(rows),
-    "/one\\u000apath\n  aaaaaaaaaaaa  unreachable  endpoint unavailable\n/two\n  bbbbbbbbbbbb  running"
+    "/one\\u000apath\n  aaaaaaaaaaaa  unreachable  OMP unknown  endpoint unavailable\n/two\n  bbbbbbbbbbbb  running  OMP unknown"
   )
 })
 
@@ -253,13 +253,13 @@ test("when status includes loaded Send Context metadata, list JSON retains it bu
   )
   assert.equal(
     formatListRows(rows),
-    "/one\\u000apath\n  aaaaaaaaaaaa  running\n/two\n  bbbbbbbbbbbb  running"
+    "/one\\u000apath\n  aaaaaaaaaaaa  running  OMP unknown\n/two\n  bbbbbbbbbbbb  running  OMP unknown"
   )
   assert.equal(Object.hasOwn(rows[0], "sendContext"), false)
   assert.equal(JSON.parse(JSON.stringify(rows))[1].data.sendContext, null)
 })
 
-test("when older status data omits Send Context and the title, listing leaves them absent", async () => {
+test("when older status data omits optional metadata, listing leaves it absent", async () => {
   // Arrange
   const client = transport([first], async () => ({ ok: true, data: { state: "running" } }))
 
@@ -268,7 +268,7 @@ test("when older status data omits Send Context and the title, listing leaves th
 
   // Assert
   assert.equal(Object.hasOwn(rows[0].data, "sendContext"), false)
-  assert.equal(formatListRows(rows), "/one\\u000apath\n  aaaaaaaaaaaa  running")
+  assert.equal(formatListRows(rows), "/one\\u000apath\n  aaaaaaaaaaaa  running  OMP unknown")
   assert.deepEqual(JSON.parse(JSON.stringify(rows))[0].data, { state: "running" })
 })
 
@@ -308,10 +308,10 @@ test("when project folders have the same name, list headings distinguish their f
   // Act / Assert
   assert.deepEqual(formatListRows(rows).split("\n"), [
     "/\ue000/team/project",
-    "  bbbbbbbbbbbb  online  First topic",
-    "  cccccccccccc  restart pending  Second topic",
+    "  bbbbbbbbbbbb  online  OMP unknown  First topic",
+    "  cccccccccccc  restart pending  OMP unknown  Second topic",
     "/😀/team/project",
-    "  aaaaaaaaaaaa  online",
+    "  aaaaaaaaaaaa  online  OMP unknown",
   ])
 })
 
@@ -353,10 +353,10 @@ test("when a project is at or below home, only the home directory prefix is abbr
   // Act / Assert
   assert.deepEqual(formatListRows(rows).split("\n"), [
     "~",
-    "  aaaaaaaaaaaa  online",
+    "  aaaaaaaaaaaa  online  OMP unknown",
     "/home/ompi-user-other/work/project",
-    "  cccccccccccc  online",
+    "  cccccccccccc  online  OMP unknown",
     "~/work/project",
-    "  bbbbbbbbbbbb  online",
+    "  bbbbbbbbbbbb  online  OMP unknown",
   ])
 })

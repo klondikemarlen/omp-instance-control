@@ -222,7 +222,7 @@ func TestListFailureStillIdentifiesTheProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "/projects/customer/payments\n  aaaaaaaaaaaa  unreachable  socket missing"
+	want := "/projects/customer/payments\n  aaaaaaaaaaaa  unreachable  OMP unknown  socket missing"
 	if got := FormatRows(rows); got != want {
 		t.Fatalf("failed list probe = %q, want %q", got, want)
 	}
@@ -254,16 +254,16 @@ func TestListDistinguishesUnreachableAndCorrelatedRejection(t *testing.T) {
 	}
 }
 
-func TestListJSONPreservesLoadedAndUnknownSendContext(t *testing.T) {
+func TestListJSONPreservesLoadedAndUnknownPeerVersions(t *testing.T) {
 	first := clientRecord(strings.Repeat("a", 32))
 	second := clientRecord(strings.Repeat("b", 32))
 	third := clientRecord(strings.Repeat("c", 32))
 	var verifiedData protocol.Data
-	if err := json.Unmarshal([]byte(`{"state":"running","sendContext":{"version":"2.8.0","protocolVersion":1}}`), &verifiedData); err != nil {
+	if err := json.Unmarshal([]byte(`{"state":"running","ompVersion":"19.2.1","sendContext":{"version":"2.8.0","protocolVersion":1}}`), &verifiedData); err != nil {
 		t.Fatal(err)
 	}
 	var explicitUnknownData protocol.Data
-	if err := json.Unmarshal([]byte(`{"state":"running","sendContext":null}`), &explicitUnknownData); err != nil {
+	if err := json.Unmarshal([]byte(`{"state":"running","ompVersion":"19.2.0","sendContext":null}`), &explicitUnknownData); err != nil {
 		t.Fatal(err)
 	}
 	var absentData protocol.Data
@@ -293,6 +293,9 @@ func TestListJSONPreservesLoadedAndUnknownSendContext(t *testing.T) {
 		rows[1].Data.SendContext != nil || rows[2].Data.SendContext != nil {
 		t.Fatalf("list did not preserve verified and unknown metadata: %#v", rows)
 	}
+	if rows[0].Data.OMPVersion != "19.2.1" || rows[1].Data.OMPVersion != "19.2.0" || rows[2].Data.OMPVersion != "" {
+		t.Fatalf("list did not preserve known and unknown OMP versions: %#v", rows)
+	}
 
 	encoded, err := json.Marshal(rows)
 	if err != nil {
@@ -313,6 +316,7 @@ func TestListJSONPreservesLoadedAndUnknownSendContext(t *testing.T) {
 		{value: "null", present: true},
 		{value: "", present: false},
 	}
+	expectedOMPVersion := []string{`"19.2.1"`, `"19.2.0"`, ""}
 	for index, expected := range expectedSendContext {
 		var data map[string]json.RawMessage
 		if err := json.Unmarshal(output[index]["data"], &data); err != nil {
@@ -324,6 +328,10 @@ func TestListJSONPreservesLoadedAndUnknownSendContext(t *testing.T) {
 		}
 		if _, duplicated := output[index]["sendContext"]; duplicated {
 			t.Fatalf("JSON repeated Send Context outside status data: %s", encoded)
+		}
+		ompVersion := data["ompVersion"]
+		if string(ompVersion) != expectedOMPVersion[index] {
+			t.Fatalf("JSON ompVersion for row %d = %s: %s", index, ompVersion, encoded)
 		}
 	}
 }
@@ -356,8 +364,8 @@ func TestListDisplaysRenamedSessionTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "/workspace\n" +
-		"  aaaaaaaaaaaa  running  Réviser les paiements\n" +
-		"  bbbbbbbbbbbb  running  Review refunds"
+		"  aaaaaaaaaaaa  running  OMP unknown  Réviser les paiements\n" +
+		"  bbbbbbbbbbbb  running  OMP unknown  Review refunds"
 	if got := FormatRows(rows); got != want {
 		t.Fatalf("initial list = %q, want %q", got, want)
 	}
@@ -368,8 +376,8 @@ func TestListDisplaysRenamedSessionTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = "/workspace\n" +
-		"  aaaaaaaaaaaa  running   Review \\u001b[31mpayments\\u000d\\u000aagain\\u009b \n" +
-		"  bbbbbbbbbbbb  running  Review refunds"
+		"  aaaaaaaaaaaa  running  OMP unknown   Review \\u001b[31mpayments\\u000d\\u000aagain\\u009b \n" +
+		"  bbbbbbbbbbbb  running  OMP unknown  Review refunds"
 	if got := FormatRows(rows); got != want {
 		t.Fatalf("list after rename = %q, want %q", got, want)
 	}
@@ -395,13 +403,17 @@ func TestFormatRowsGroupsByFullWorkingDirectory(t *testing.T) {
 		{
 			Record: &second,
 			Status: "online",
+			Data: &protocol.Data{
+				OMPVersion: "19.2.0",
+			},
 		},
 		{
 			Record: &third,
 			Status: "online",
 			Data: &protocol.Data{
-				CWD:   "/home/operator/hub/payments",
-				State: "restart-requested",
+				CWD:        "/home/operator/hub/payments",
+				State:      "restart-requested",
+				OMPVersion: "19.2.1",
 				SendContext: &protocol.SendContextMetadata{
 					Version:         "2.8.0",
 					ProtocolVersion: 1,
@@ -420,12 +432,12 @@ func TestFormatRowsGroupsByFullWorkingDirectory(t *testing.T) {
 		},
 	}
 	want := "~\n" +
-		"  dddddddddddd  online\n" +
+		"  dddddddddddd  online  OMP unknown\n" +
 		"/home/operator-backup/hub/payments\n" +
-		"  aaaaaaaaaaaa  online\n" +
+		"  aaaaaaaaaaaa  online  OMP unknown\n" +
 		"~/hub/payments\n" +
-		"  bbbbbbbbbbbb  online\n" +
-		"  cccccccccccc  restart pending"
+		"  bbbbbbbbbbbb  online  OMP 19.2.0\n" +
+		"  cccccccccccc  restart pending  OMP 19.2.1"
 	if got := FormatRows(rows); got != want {
 		t.Fatalf("grouped list = %q, want %q", got, want)
 	}
@@ -455,13 +467,14 @@ func TestFormatRowsOmitsTitlesWithoutNamedOnlineStatus(t *testing.T) {
 			Status: "unreachable",
 			Data: &protocol.Data{
 				SessionTitle: &oldTitle,
+				OMPVersion:   "19.2.0",
 			},
 		},
 	}
 	want := "/workspace\n" +
-		"  aaaaaaaaaaaa  online\n" +
-		"  aaaaaaaaaaaa  online\n" +
-		"  aaaaaaaaaaaa  unreachable  endpoint unavailable"
+		"  aaaaaaaaaaaa  online  OMP unknown\n" +
+		"  aaaaaaaaaaaa  online  OMP unknown\n" +
+		"  aaaaaaaaaaaa  unreachable  OMP unknown  endpoint unavailable"
 	if got := FormatRows(rows); got != want {
 		t.Fatalf("list without named online status = %q, want %q", got, want)
 	}

@@ -38,6 +38,9 @@ const ACTION_COMPLETIONS = [
   "take-over",
 ]
 const ROOT_COMPLETIONS = ["help", "version", ...ACTION_COMPLETIONS]
+const EVERYDAY_ROOT_COMPLETIONS = ROOT_COMPLETIONS.filter(
+  (value) => value !== "cleanup" && value !== "take-over"
+)
 const LIST_COMPLETIONS = ["--profile", "--json"]
 const RETIRED_RESTORE_IMPORT = "import-legacy"
 const RESTORE_OPERATIONS = [
@@ -574,8 +577,9 @@ function getArgumentCompletions(
   if (context.ended || context.options.has("help") || context.options.has("version")) return []
 
   if (completedTokens.length === 0) {
+    const candidates = tokenPrefix ? ROOT_COMPLETIONS : EVERYDAY_ROOT_COMPLETIONS
     return completionValues(
-      ROOT_COMPLETIONS.map((value) => completionItem(value)),
+      candidates.map((value) => completionItem(value)),
       completedTokens,
       tokenPrefix
     )

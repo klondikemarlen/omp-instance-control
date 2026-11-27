@@ -281,6 +281,13 @@ func writeListRow(formatted *strings.Builder, row *Row) {
 	formatted.WriteString("  ")
 	writeSafeText(formatted, state)
 
+	ompVersion := "unknown"
+	if row.Status == "online" && row.Data != nil && strings.TrimSpace(row.Data.OMPVersion) != "" {
+		ompVersion = row.Data.OMPVersion
+	}
+	formatted.WriteString("  OMP ")
+	writeSafeText(formatted, ompVersion)
+
 	if row.Status != "online" {
 		if details := ErrorSummary(*row); details != "" {
 			formatted.WriteString("  ")
