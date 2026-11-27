@@ -45,6 +45,7 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
       path.join(fixture.root, "default-peer")
     )
     await fixture.addPeer(workScope, workId, path.join(fixture.root, "work-peer"), {
+      ompVersion: "19.2.1",
       sendContext: {
         version: "2.8.0",
         protocolVersion: 1,
@@ -65,8 +66,8 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     // Assert
     const defaultLines = ui.notifications[0].message.split("\n")
     assert.ok(defaultLines.includes("~/default-peer"))
-    assert.ok(defaultLines.includes("  111111111111  running"))
-    assert.ok(defaultLines.includes("  666666666666  unreachable  socket missing"))
+    assert.ok(defaultLines.includes("  111111111111  running  OMP unknown"))
+    assert.ok(defaultLines.includes("  666666666666  unreachable  OMP unknown  socket missing"))
     assert.deepEqual(
       ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
       [`restart ${defaultId}`]
@@ -84,6 +85,7 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     assert.equal(workRows.length, 1)
     assert.equal(workRows[0].record.instanceId, workId)
     assert.equal(workRows[0].record.scope, workScope.id)
+    assert.equal(workRows[0].data.ompVersion, "19.2.1")
     assert.deepEqual(workRows[0].data.sendContext, { version: "2.8.0", protocolVersion: 1 })
     for (const verb of ["send", "steer"]) {
       assert.deepEqual(
@@ -104,7 +106,9 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
     await ui.command.handler("list --profile work", ctx)
 
     // Assert
-    assert.ok(ui.notifications[2].message.endsWith("~/work-peer\n  222222222222  running"))
+    assert.ok(
+      ui.notifications[2].message.endsWith("~/work-peer\n  222222222222  running  OMP 19.2.1")
+    )
     assert.deepEqual(
       ui.command.getArgumentCompletions("restart 11111111").map((item) => item.value),
       [`restart ${defaultId}`]
@@ -114,7 +118,7 @@ test("when listing a selected profile, discovery uses its scope and ctx.cwd", as
   }
 })
 
-test("when peers share a working directory, slash list shows safe titles and send still targets an ID", async () => {
+test("when peers share a directory, slash list distinguishes versions and titles without changing send targets", async () => {
   // Arrange
   const fixture = await createFixture()
   try {
@@ -126,9 +130,11 @@ test("when peers share a working directory, slash list shows safe titles and sen
     const secondId = "2".repeat(32)
     const sessionTitle = "Review \u001b[31m\n\u009b"
     const first = await fixture.addPeer(scope, firstId, ctx.cwd, {
+      ompVersion: "19.2.0",
       sessionTitle: "Plan next steps",
     })
     const second = await fixture.addPeer(scope, secondId, ctx.cwd, {
+      ompVersion: "19.2.1",
       sessionTitle,
     })
     const ui = createCommand(ctx)
@@ -140,10 +146,14 @@ test("when peers share a working directory, slash list shows safe titles and sen
     // Assert
     const lines = ui.notifications[0].message.split("\n")
     assert.equal(lines.filter((line) => line === "~/worktree").length, 1)
-    assert.ok(lines.includes("  111111111111  running  Plan next steps"))
-    assert.ok(lines.includes("  222222222222  running  Review \\u001b[31m\\u000a\\u009b"))
+    assert.ok(lines.includes("  111111111111  running  OMP 19.2.0  Plan next steps"))
+    assert.ok(
+      lines.includes("  222222222222  running  OMP 19.2.1  Review \\u001b[31m\\u000a\\u009b")
+    )
     const rows = JSON.parse(ui.notifications[1].message)
     const secondRow = rows.find((row) => row.record.instanceId === secondId)
+    assert.equal(rows.find((row) => row.record.instanceId === firstId).data.ompVersion, "19.2.0")
+    assert.equal(secondRow.data.ompVersion, "19.2.1")
     assert.equal(secondRow.data.sessionTitle, sessionTitle)
 
     // Act
