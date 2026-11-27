@@ -54,6 +54,22 @@ The installed controller can run in ordinary OMP without publishing an endpoint.
 
 `/ompi take-over` prepares a manually invoked resume command for an ordinary-OMP session. It resolves configuration paths against the host process directory, shell-quotes the current persisted session and cwd, displays a copy-and-confirm dialog, and revalidates the snapshot before public shutdown. The command is stored through public `appendEntry` without injecting a model message. OMP still owns settlement; the user waits for the shell and pastes the prepared command. This is not automatic executable or terminal handoff, and the prepared snapshot is not rewritten if the user switches sessions during a pending exit.
 
+## Fresh-Launch Handoff for Exit Plugins
+
+The exit plugin owns intent, wrap-up, destination resolution, explicit approval, and timing. Use the public `pi.events` bus only from a cooperating trusted extension; the bus is not an authentication boundary. The plugin should display the resolved absolute directory in its approval dialog and prepare only after approval. The managed main TUI adapter responds synchronously by setting `result` on the supplied mutable object:
+
+| Event                                       | Supply                     | Successful `result`              |
+| ------------------------------------------- | -------------------------- | -------------------------------- |
+| `omp-instance-control:fresh-launch:prepare` | `{ sessionId, directory }` | `{ status: "accepted", ticket }` |
+| `omp-instance-control:fresh-launch:cancel`  | `{ sessionId, ticket }`    | `{ status: "cancelled" }`        |
+| `omp-instance-control:fresh-launch:commit`  | `{ sessionId, ticket }`    | `{ status: "committed" }`        |
+
+Use `ctx.sessionManager.getSessionId()` for `sessionId`; an absent `result` means unsupported, while `{ status: "refused", message }` means the managed adapter refused. Prepare only reserves an in-memory ticket; it never requests shutdown. Cancel on an abandoned intent. On the successful path, emit commit only when the final reply is complete and the plugin would otherwise request graceful shutdown. Commit revalidates the owning launch, active session, wrapper, and approved directory and calls public `ctx.shutdown()` itself. Do not also emit `omp-exit-command:exit-requested` or call shutdown. Refusal or cancellation is not permission to fall back to a plain exit on that intent.
+
+A committed ticket wins over a queued managed restart. An unrelated plain exit, operator pre-close, or session switch invalidates the ticket. Only committed teardown of the matching main session followed by an explicit zero process exit can write the private handoff; Linux independently checks the original launch token and reaped child status and PID. The wrapper pins the approved directory's device and inode, consumes the handoff before re-execing its own verified native image, and reports failure without retrying. The replacement preserves profile/config scope and terminal, not original launch arguments or any conversation. A private per-launch settings overlay suppresses auto-resume for that initial child; normal startup trust still applies and the invoking shell's cwd is unchanged.
+
+OMP's public `session_shutdown` event has no reason or request ID, and `ctx.shutdown()` does not return a completion receipt. The contract correlates the trusted plugin's commit, matching session teardown, explicit zero process exit, and the wrapper's successful wait. Native POSIX `/restart` normally replaces OMP using exec, which does not emit a JavaScript process exit event. This is not a general API for attributing simultaneous closes initiated by arbitrary extensions or future host close paths that share the same lifecycle observations.
+
 ## Managed Recovery Slots
 
 A recovery slot identifies a persistent managed wrapper independently of its ephemeral control instance ID. The slot keeps the latest public session ID/file and cwd through lifecycle changes. Optional immutable names are aliases for these slots; they are not required for recovery or frozen transcript bookmarks.

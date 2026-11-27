@@ -36,15 +36,14 @@ func LaunchPullRequest(url, profile, extensionPath, nativeVersion string) (int, 
 	}
 	return launchManaged(args, extensionPath, nativeVersion, "", nil, nil, &prResumeRequest{
 		URL: url,
-	})
+	}, false)
 }
 
-func writePRResumeOverlay(launchDir string) (string, error) {
-	file := filepath.Join(launchDir, "pr-resume.yml")
+func writeNoAutoResumeOverlay(launchDir, filename string) (string, error) {
+	file := filepath.Join(launchDir, filename)
 	if strings.ContainsRune(file, os.PathListSeparator) {
 		return "", errors.New("cannot disable automatic session resume with this runtime directory; its path contains the config file list separator")
 	}
-	// Auto-resume would claim a conversation before this launch can ask for consent.
 	if err := os.WriteFile(file, []byte("autoResume: false\n"), 0600); err != nil {
 		return "", fmt.Errorf("disable automatic session resume for this launch: %w", err)
 	}

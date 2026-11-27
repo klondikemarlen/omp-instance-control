@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.2.0 - 2026-11-27
+
+- A cooperating trusted exit plugin can request a fresh managed session in an approved directory in the same terminal. The handoff requires a correlated clean exit and does not resume an existing conversation, even with automatic resume enabled.
+
 ## 3.1.1 - 2026-11-27
 
 - `/ompi restart` now distinguishes acceptance from completion when it selects the invoking terminal. It shows how to check status from another terminal without interrupting the target. This does not change when OMP shuts down.

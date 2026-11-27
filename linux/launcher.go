@@ -37,6 +37,7 @@ type launchRecord struct {
 	ResumeArgs                        []string              `json:"resumeArgs"`
 	Owner                             protocol.RestoreOwner `json:"owner"`
 	CanRestartWrapper                 bool                  `json:"canRestartWrapper"`
+	CanFreshLaunch                    bool                  `json:"canFreshLaunch,omitempty"`
 	SupportsInstalledWrapperSelection bool                  `json:"supportsInstalledWrapperSelection"`
 	Native                            *nativeImage          `json:"native,omitempty"`
 	PRResume                          *prResumeRequest      `json:"prResume,omitempty"`
@@ -56,6 +57,7 @@ type handoffRecord struct {
 	CWD            string                 `json:"cwd"`
 	RestartWrapper bool                   `json:"restartWrapper,omitempty"`
 	NativeTarget   *protocol.NativeTarget `json:"nativeTarget,omitempty"`
+	FreshLaunch    *freshLaunchHandoff    `json:"freshLaunch,omitempty"`
 }
 
 // Launch runs upstream OMP as a foreground child, loading the public control
@@ -63,6 +65,17 @@ type handoffRecord struct {
 func Launch(args []string, extensionPath, nativeVersion string) (int, error) {
 	if os.Getenv(execStatePathEnv) != "" || os.Getenv(execStateTokenEnv) != "" || os.Getenv(execStateLockEnv) != "" {
 		return resumeWrapper(args, extensionPath, nativeVersion)
+	}
+	if os.Getenv(freshLaunchEnv) == "1" {
+		_ = os.Unsetenv(freshLaunchEnv)
+		if len(args) != 0 {
+			return 1, errors.New("invalid fresh launch invocation")
+		}
+		code, err := launchManaged(nil, extensionPath, nativeVersion, "", nil, nil, nil, true)
+		if err != nil {
+			return 1, fmt.Errorf("Cannot start fresh ompi session: %w", err)
+		}
+		return code, nil
 	}
 	return launch(args, extensionPath, nativeVersion, "", nil)
 }
@@ -72,10 +85,10 @@ func launch(args []string, extensionPath, nativeVersion, restoreID string, resto
 }
 
 func launchWithResume(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState) (code int, launchError error) {
-	return launchManaged(args, extensionPath, nativeVersion, restoreID, restoreLock, resume, nil)
+	return launchManaged(args, extensionPath, nativeVersion, restoreID, restoreLock, resume, nil, false)
 }
 
-func launchManaged(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState, prResume *prResumeRequest) (code int, launchError error) {
+func launchManaged(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState, prResume *prResumeRequest, fresh bool) (code int, launchError error) {
 	var prResumeError error
 	if resume != nil && resume.unconfirmedPRResume {
 		prResumeError = errors.New("the PR resume was not completed before the terminal restarted")
@@ -114,6 +127,9 @@ func launchManaged(args []string, extensionPath, nativeVersion, restoreID string
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
 		if prResume != nil {
 			return 1, errors.New("PR resume requires an interactive terminal to confirm the resume in OMP")
+		}
+		if fresh {
+			return 1, errors.New("fresh launch requires an interactive terminal")
 		}
 		return runPassthrough(args)
 	}
@@ -233,9 +249,13 @@ func launchManaged(args []string, extensionPath, nativeVersion, restoreID string
 	if slices.Contains(builtinFlags, "trusted-extension") {
 		extensionFlag = "--trusted-extension"
 	}
-	var prResumeOverlay string
-	if prResume != nil {
-		prResumeOverlay, err = writePRResumeOverlay(launchDir)
+	var noAutoResumeOverlay string
+	if prResume != nil || fresh {
+		filename := "pr-resume.yml"
+		if fresh {
+			filename = "fresh-launch.yml"
+		}
+		noAutoResumeOverlay, err = writeNoAutoResumeOverlay(launchDir, filename)
 		if err != nil {
 			return 1, err
 		}
@@ -257,6 +277,7 @@ func launchManaged(args []string, extensionPath, nativeVersion, restoreID string
 			ExtensionPath: extensionPath, LastRestart: restart, BuiltinFlags: builtinFlags,
 			RestoreID: restoreID, ResumeArgs: restartArgs, Owner: owner,
 			CanRestartWrapper:                 canRestartWrapper,
+			CanFreshLaunch:                    restartArgsErr == nil,
 			SupportsInstalledWrapperSelection: true,
 			Native:                            nativeMetadata,
 			PRResume:                          prResume,
@@ -293,14 +314,15 @@ func launchManaged(args []string, extensionPath, nativeVersion, restoreID string
 			launchDirectoryEnv: launchDir,
 			launchTokenEnv:     token,
 		}
-		if prResume != nil {
-			childSettings[ompConfigFilesEnv] = prResumeOverlay
+		if prResume != nil || fresh {
+			childSettings[ompConfigFilesEnv] = noAutoResumeOverlay
 		}
 		childEnv := replaceEnvironment(baseEnv, childSettings)
 		childCWD := initialCwd
 		if resumeFile != "" {
 			childCWD = cwd
 		}
+		fresh = false
 		child, err := runChild(executable, childArgs, childCWD, childEnv, signals, inheritedFiles)
 		if pendingReplacement.id.OperationID != "" {
 			online := onlineClear && readRestartMarker(onlinePath) == pendingReplacement.id
@@ -354,6 +376,28 @@ func launchManaged(args []string, extensionPath, nativeVersion, restoreID string
 		if err != nil {
 			observer.observe("handoff-invalid", "handoff-read", &child.code, 0)
 			return 1, err
+		}
+		if handoff.FreshLaunch != nil {
+			if err := validateFreshLaunchHandoff(handoff, child); err != nil {
+				return 1, err
+			}
+			// An explicit fresh launch wins over restart; clear the old
+			// launch directory before exec, whose success skips Go defers.
+			if err := os.RemoveAll(launchDir); err != nil {
+				return 1, fmt.Errorf("consume fresh-launch handoff: %w", err)
+			}
+			if recoveryFile != "" {
+				if err := os.Remove(recoveryFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					return 1, fmt.Errorf("retire preceding restart recovery record: %w", err)
+				}
+				recoveryFile = ""
+			}
+			select {
+			case received := <-signals:
+				return 128 + int(received.(syscall.Signal)), nil
+			default:
+			}
+			return 1, fmt.Errorf("Cannot start fresh ompi session: %w", execFreshLaunch(*handoff.FreshLaunch, scope, executable, childCWD, cwd))
 		}
 		if err := validateHandoff(handoff); err != nil {
 			observer.observe("handoff-invalid", "handoff-metadata", &child.code, 0)
