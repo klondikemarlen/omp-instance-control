@@ -272,6 +272,17 @@ export function formatListRows(rows) {
     lines.push(safeText(heading))
     for (const row of projectRows) {
       const parts = instanceRowParts(row)
+      let ompVersion = "unknown"
+      const reportedVersion = row.data?.ompVersion
+      if (
+        row.status === "online" &&
+        typeof reportedVersion === "string" &&
+        reportedVersion.trim()
+      ) {
+        ompVersion = reportedVersion
+      }
+      parts.push(`OMP ${ompVersion}`)
+
       const sessionTitle = row.data?.sessionTitle
       if (row.status !== "online") {
         const error = errorSummary(row)

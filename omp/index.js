@@ -178,6 +178,10 @@ export default async function instanceControl(pi) {
 
   if (launch) clearRestartObservation(launch)
 
+  // The injected SDK belongs to this OMP process, not the installed executable.
+  const version = launch && pi.pi?.VERSION
+  const ompVersion = typeof version === "string" && version.trim() ? version : undefined
+
   registerPeerMessageRenderer(pi)
 
   let runtime
@@ -481,6 +485,7 @@ export default async function instanceControl(pi) {
         data: {
           ...currentRecord,
           sessionTitle,
+          ompVersion,
           canRestart:
             !state.resumingPR &&
             !hasMatchingExitRequest(state, ctx) &&
