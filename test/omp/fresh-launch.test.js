@@ -69,7 +69,7 @@ function commitPreparedLaunch(send, directory) {
   return ticket
 }
 
-test("fresh launch refuses a request from another session", async (t) => {
+test("when another session requests a fresh launch, preparation is refused", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
 
@@ -84,7 +84,7 @@ test("fresh launch refuses a request from another session", async (t) => {
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("fresh launch refuses a request after the owning launch changes", async (t) => {
+test("when the owning launch changes, preparation is refused", async (t) => {
   // Arrange
   const { ctx, directory, launch, send, state } = await managedSession(t)
   state.launch = {
@@ -100,7 +100,7 @@ test("fresh launch refuses a request after the owning launch changes", async (t)
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("fresh launch refuses a relative destination", async (t) => {
+test("when the destination is relative, preparation is refused", async (t) => {
   // Arrange
   const { ctx, send } = await managedSession(t)
 
@@ -112,7 +112,7 @@ test("fresh launch refuses a relative destination", async (t) => {
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("fresh launch refuses a destination that does not exist", async (t) => {
+test("when the destination does not exist, preparation is refused", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
   const missingDirectory = path.join(directory, "missing")
@@ -125,7 +125,7 @@ test("fresh launch refuses a destination that does not exist", async (t) => {
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("fresh launch refuses an unresolved symlink destination", async (t) => {
+test("when the destination is an unresolved symlink, preparation is refused", async (t) => {
   // Arrange
   const { ctx, directory, launch, send } = await managedSession(t)
   const symlinkedDirectory = path.join(launch.directory, "unresolved")
@@ -139,7 +139,7 @@ test("fresh launch refuses an unresolved symlink destination", async (t) => {
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("fresh launch refuses a commit with the wrong ticket", async (t) => {
+test("when the commit ticket is incorrect, the session stays open", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
   prepareTicket(send, directory)
@@ -152,7 +152,7 @@ test("fresh launch refuses a commit with the wrong ticket", async (t) => {
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("cancelling a prepared fresh launch prevents its ticket from requesting shutdown", async (t) => {
+test("when the user cancels a prepared launch, its ticket cannot request shutdown", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
   const ticket = prepareTicket(send, directory)
@@ -167,7 +167,7 @@ test("cancelling a prepared fresh launch prevents its ticket from requesting shu
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("an unrelated clean exit does not publish a prepared fresh launch", async (t) => {
+test("when the session exits without committing, the prepared launch is not published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
   const preparation = send("prepare", { directory })
@@ -181,7 +181,7 @@ test("an unrelated clean exit does not publish a prepared fresh launch", async (
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
-test("a confirmed fresh launch requests shutdown only once", async (t) => {
+test("when a confirmed ticket is submitted again, shutdown is not requested twice", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
   const ticket = prepareTicket(send, directory)
@@ -196,7 +196,7 @@ test("a confirmed fresh launch requests shutdown only once", async (t) => {
   assert.equal(ctx.shutdown.mock.callCount(), 1)
 })
 
-test("a correlated clean exit publishes the approved directory without a resume source", async (t) => {
+test("when the committed session exits cleanly, the handoff names only the fresh destination", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
   const ticket = commitPreparedLaunch(send, directory)
@@ -212,7 +212,7 @@ test("a correlated clean exit publishes the approved directory without a resume 
   assert.equal(handoff.sessionFile, undefined)
 })
 
-test("fresh launch is not published when teardown has not reached process exit", async (t) => {
+test("when teardown has not reached process exit, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, send, state } = await managedSession(t)
   commitPreparedLaunch(send, directory)
@@ -224,7 +224,7 @@ test("fresh launch is not published when teardown has not reached process exit",
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
-test("fresh launch is not published when the process exits without host teardown", async (t) => {
+test("when the process exits without host teardown, no handoff is published", async (t) => {
   // Arrange
   const { directory, launch, processEvents, send } = await managedSession(t)
   commitPreparedLaunch(send, directory)
@@ -236,7 +236,7 @@ test("fresh launch is not published when the process exits without host teardown
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
-test("fresh launch is not published when host teardown belongs to another session", async (t) => {
+test("when host teardown belongs to another session, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
   commitPreparedLaunch(send, directory)
@@ -250,7 +250,7 @@ test("fresh launch is not published when host teardown belongs to another sessio
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
-test("fresh launch is not published when the host exits unsuccessfully", async (t) => {
+test("when the host exits unsuccessfully, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
   commitPreparedLaunch(send, directory)
@@ -263,7 +263,7 @@ test("fresh launch is not published when the host exits unsuccessfully", async (
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
-test("fresh launch is not published when the event loop drains instead of explicitly exiting", async (t) => {
+test("when the event loop drains without explicit exit, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
   commitPreparedLaunch(send, directory)
@@ -277,7 +277,7 @@ test("fresh launch is not published when the event loop drains instead of explic
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
-test("fresh launch refuses commit when the approved directory has been replaced", async (t) => {
+test("when the approved directory is replaced, commit is refused", async (t) => {
   // Arrange
   const { ctx, directory, launch, send } = await managedSession(t)
   const ticket = prepareTicket(send, directory)
@@ -292,7 +292,7 @@ test("fresh launch refuses commit when the approved directory has been replaced"
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
 
-test("fresh launch refuses a commit if OMP rejects the shutdown request", async (t) => {
+test("when OMP rejects shutdown, commit is refused", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(
     t,
