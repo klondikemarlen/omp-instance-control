@@ -90,18 +90,20 @@ test("when the matching slash command runs, only its final observed result repor
     status: "resumed",
     message: "Resumed the original PR conversation in this terminal.",
   }
+  let statusDuringSwitch
 
   // Act
   terminal.setDraft("")
-  const switchPromise = requests.run(url, terminal, async () => {
-    assert.equal(requests.status(requestId, terminal).status, "in-progress")
+  const result = await requests.run(url, terminal, async () => {
+    statusDuringSwitch = requests.status(requestId, terminal).status
     terminal.sessionId = "target-session"
     terminal.sessionFile = "/project/target-session.jsonl"
     return switchResult
   })
 
   // Assert
-  assert.deepEqual(await switchPromise, switchResult)
+  assert.equal(statusDuringSwitch, "in-progress")
+  assert.deepEqual(result, switchResult)
   assert.deepEqual(requests.status(undefined, terminal), {
     requestId,
     status: "resumed",
