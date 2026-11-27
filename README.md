@@ -189,7 +189,9 @@ The native CLI can also set or clear a claim for an explicitly selected live ID:
 | Shell in the project directory | Not available              | `ompi control resume PR_URL` |
 | Managed OMP terminal           | `/ompi work resume PR_URL` | `/ompi resume PR_URL`        |
 
-Use the full GitHub pull request URL. The shell opens OMP in that terminal with the command prepared; press Enter to review the matches. Choose a conversation and confirm to open its original saved history. The lookup uses work claims in your current profile or recorded PR creation in the current directory. A URL mention, matching title, or shared directory alone is not evidence. Cancel if the match is unclear. If another terminal owns the conversation, resume refuses to take it over.
+Use the full GitHub pull request URL. The shell opens OMP in that terminal with the command prepared; press Enter to review the matches. The lookup uses work claims in your current profile or recorded PR creation in the current directory. A URL mention, matching title, or shared directory alone is not evidence.
+
+Choose a conversation from the current working directory and confirm to open its saved history. A work claim can also match a conversation from another directory. For that match, use OMP's native `/resume` picker instead; `/ompi resume` leaves this terminal unchanged. Cancel if the match is unclear. If another terminal owns the conversation, resume refuses to take it over.
 
 In a managed terminal on 3.0, agents can initiate a request without submitting the command or confirming for the user. For example, with OMP's tool commands enabled, run these **inside OMP's Bash tool**, not in an external shell:
 
