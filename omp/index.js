@@ -21,6 +21,7 @@ import {
   writeRestartHandoff,
 } from "./launcher-context.js"
 import { registerOmpiCommand } from "./command.js"
+import { registerFreshLaunch } from "./fresh-launch.js"
 import { registerPRResumeControl } from "./pr-resume-control.js"
 import { registerPeerMessageRenderer } from "./peer-message.js"
 
@@ -182,6 +183,9 @@ export default async function instanceControl(pi) {
 
   let runtime
   const getRuntime = () => runtime
+  const freshLaunch =
+    launch?.canFreshLaunch === true ? registerFreshLaunch(pi, launch, getRuntime) : undefined
+
   const prResume = registerPRResumeControl(pi, getRuntime)
   const refreshCompletions = registerOmpiCommand(pi, {
     getRuntime,
@@ -204,6 +208,7 @@ export default async function instanceControl(pi) {
     }
 
     runtime.exitRequestedSessionId = request.sessionId
+    freshLaunch?.invalidate()
     runtime.nativeUpdates?.close()
     // Only an origin-session exit keeps matching even if the active session changes.
     if (request.sessionId === runtime.origin?.sessionId) {
@@ -235,7 +240,7 @@ export default async function instanceControl(pi) {
     }
     requireStableSession(state)
 
-    if (hasMatchingExitRequest(state, state.ctx)) {
+    if (hasMatchingExitRequest(state, state.ctx) || freshLaunch?.isCommitted()) {
       throw new ProtocolError("EXPLICIT_EXIT_REQUESTED", "This instance is exiting.")
     }
 
@@ -319,6 +324,7 @@ export default async function instanceControl(pi) {
         state.pending !== operationId ||
         !state.restartAcknowledged ||
         state.shutdownRequested ||
+        freshLaunch?.isCommitted() ||
         hasMatchingExitRequest(state, state.ctx)
       ) {
         return false
@@ -694,10 +700,12 @@ export default async function instanceControl(pi) {
   })
 
   pi.on("session_switch", async (_event, ctx) => {
+    if (isMainTerminal(ctx)) freshLaunch?.invalidate()
     await refresh(ctx)
     if (isMainTerminal(ctx)) await refreshCompletions(ctx)
   })
   pi.on("session_branch", async (_event, ctx) => {
+    if (isMainTerminal(ctx)) freshLaunch?.invalidate()
     await refresh(ctx)
     if (isMainTerminal(ctx)) await refreshCompletions(ctx)
   })
@@ -705,6 +713,12 @@ export default async function instanceControl(pi) {
     await refresh(ctx)
     if (isMainTerminal(ctx)) await refreshCompletions(ctx)
   })
+
+  if (freshLaunch) {
+    pi.on("session_before_shutdown", (_event, ctx) => {
+      if (isMainTerminal(ctx)) freshLaunch.invalidate()
+    })
+  }
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (ctx.agent.kind !== "main") return
@@ -714,6 +728,12 @@ export default async function instanceControl(pi) {
         if (isMainTerminal(ctx)) {
           state.closing = true
           state.nativeUpdates?.close()
+          if (freshLaunch?.isCommitted()) {
+            freshLaunch.onShutdown(state, ctx)
+            suppressRestart(state)
+            return
+          }
+
           if (!state.pending || !state.shutdownAccepted) return
 
           if (!isOriginContext(state, ctx) || hasMatchingExitRequest(state, ctx)) {
@@ -752,10 +772,12 @@ export default async function instanceControl(pi) {
         }
         releaseClaim()
         releaseExitRequestListener()
+        freshLaunch?.release()
       }
     } else {
       releaseClaim()
       releaseExitRequestListener()
+      freshLaunch?.release()
     }
   })
 }

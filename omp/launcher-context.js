@@ -33,6 +33,9 @@ export async function readLauncherContext(env = process.env) {
   if (launch.canRestartWrapper !== undefined && typeof launch.canRestartWrapper !== "boolean") {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher wrapper-restart capability is invalid.")
   }
+  if (launch.canFreshLaunch !== undefined && typeof launch.canFreshLaunch !== "boolean") {
+    throw new ProtocolError("INVALID_LAUNCHER", "Launcher fresh-launch capability is invalid.")
+  }
   if (launch.restartError !== undefined && typeof launch.restartError !== "string") {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher restart limitation is invalid.")
   }
@@ -160,6 +163,10 @@ export function writeRestartHandoff(
   }
   if (restartWrapper) handoff.restartWrapper = true
   if (nativeTarget) handoff.nativeTarget = nativeTarget
+  writeLaunchHandoff(launch, handoff)
+}
+
+export function writeLaunchHandoff(launch, handoff) {
   const temporary = `${launch.handoffPath}.${randomBytes(8).toString("hex")}.tmp`
   writeFileSync(temporary, `${JSON.stringify(handoff)}\n`, { mode: 0o600, flag: "wx" })
   renameSync(temporary, launch.handoffPath)
