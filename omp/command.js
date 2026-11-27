@@ -13,10 +13,12 @@ import {
 import { waitForRestarts } from "../cli/restart-wait.js"
 import { listProfileNames } from "../linux/profiles.js"
 import { listSavedSessions, validateRestoreName } from "../linux/restore.js"
+import { normalizePRResumeURL } from "../linux/pr-resume.js"
 import { prepareTakeover } from "./take-over.js"
 import { listRecoveryCheckpoints, listRecoverySlotIds } from "../linux/recovery.js"
 import { recordSlashUsage } from "../linux/usage.js"
 import { createRestoreCommand, getRestoreScope } from "./recovery-command.js"
+import { resumePullRequest, RESUME_HELP } from "./pr-resume.js"
 import { requestWrapperRestart } from "./restart.js"
 import { parseWorkLookupOptions, WORK_HELP, WORK_OPERATIONS, workCommand } from "./work-command.js"
 
@@ -29,6 +31,7 @@ const ACTION_COMPLETIONS = [
   "steer",
   "cleanup",
   "restore",
+  "resume",
   "work",
   "take-over",
 ]
@@ -119,6 +122,24 @@ function normalizeBooleanArguments(args) {
 
 function parseOmpiArguments(args) {
   if (/^\s*(?:send|steer)(?:\s|$)/.test(args)) return parseSendArguments(args)
+  if (/^\s*resume(?:\s|$)/.test(args)) {
+    const [, argument, ...extra] = args.trim().split(/\s+/)
+    if (extra.length === 0 && ["--help", "-h"].includes(argument)) {
+      return {
+        action: "help",
+        helpTarget: "resume",
+      }
+    }
+    const target = normalizePRResumeURL(argument)
+    if (!target || extra.length !== 0) {
+      throw new Error(RESUME_HELP[0])
+    }
+    return {
+      action: "resume",
+      target,
+    }
+  }
+
   const normalized = normalizeBooleanArguments(args)
   const parsed = parseArgs({
     args: normalized.args,
@@ -566,6 +587,12 @@ function getArgumentCompletions(
       tokenPrefix
     )
   }
+  if (command === "resume") {
+    if (completedTokens.length === 1 && tokenPrefix.startsWith("-")) {
+      return completionValues([completionItem("--help")], completedTokens, tokenPrefix)
+    }
+    return []
+  }
   if (!["restore", "restart", "list", "cleanup"].includes(command)) return []
   if (command === "restore" && context.positionals[0] === RETIRED_RESTORE_IMPORT) return []
 
@@ -622,9 +649,6 @@ function getWorkCompletions(completedTokens, tokenPrefix, profileNames) {
       completedTokens,
       tokenPrefix
     )
-  }
-  if (operation === "resume" && tokens.length === 0 && tokenPrefix.startsWith("-")) {
-    return completionValues([completionItem("--help")], completedTokens, tokenPrefix)
   }
   if (operation === "set" && tokens.length === 0 && tokenPrefix.startsWith("-")) {
     return completionValues([completionItem("--branch")], completedTokens, tokenPrefix)
@@ -840,7 +864,13 @@ function renderPeerProgress(ctx, rows, started, frame) {
   ctx.ui.setWidget(PROGRESS_WIDGET, lines, { placement: "aboveEditor" })
 }
 
-export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
+export function registerOmpiCommand(
+  pi,
+  {
+    getRuntime = () => undefined,
+    runPRResume = (url, ctx) => resumePullRequest(url, ctx, getRuntime, pi),
+  } = {}
+) {
   const keybindings = pi.pi.KeybindingsManager.inMemory({ "app.clear": "ctrl+c" })
   const completionIds = new Map()
   const completionNames = new Map()
@@ -924,7 +954,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
   const restoreCommand = createRestoreCommand(pi, { getRuntime, refreshCompletionIds })
 
   pi.registerCommand(COMMAND, {
-    description: "Control this OMP session and peer instances, recovery, or manual takeover",
+    description:
+      "Control OMP terminals, resume PR conversations, recover sessions, or prepare takeover",
     getArgumentCompletions(argumentText) {
       return getArgumentCompletions(
         argumentText,
@@ -946,7 +977,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
 
       try {
         if (/^\s*work(?:\s|$)/.test(args)) {
-          const result = await workCommand(args, ctx, getRuntime, pi)
+          const result = await workCommand(args, ctx, getRuntime)
           ctx.ui.notify(result.split("\n").map(safeTerminalText).join("\n"), "info")
           return
         }
@@ -962,7 +993,8 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "send ID MESSAGE      Queue a follow-up message for a peer",
               "steer ID MESSAGE     Redirect a peer's active work with a message",
               "restore [NAME]       Choose a recoverable conversation",
-              "work list|find|resume|set|clear  Inspect, resume, or claim GitHub work",
+              "resume PR_URL        Switch to the original saved PR conversation",
+              "work list|find|set|clear  Inspect or claim GitHub work",
               "cleanup              Remove safely confirmed stale registrations",
               "take-over            Prepare a plain-OMP session for manual relaunch",
               "help [COMMAND]       Show usage and advanced options",
@@ -992,6 +1024,7 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
               "Explicit exit suppresses relaunch; Ctrl-C stops watching only.",
             ],
             cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
+            resume: RESUME_HELP,
             work: WORK_HELP,
             restore: [
               "Usage: /ompi restore [NAME] [--profile NAME]",
@@ -1030,8 +1063,17 @@ export function registerOmpiCommand(pi, { getRuntime = () => undefined } = {}) {
           feature = "restart"
         } else if (action === "send" && values.delivery === "steer") {
           feature = "steer"
+        } else if (action === "resume") {
+          // Preserve the stored counter after moving resume out of work.
+          feature = "work.resume"
         }
         await recordSlashUsage(feature, getRuntime()?.launch?.scope)
+
+        if (action === "resume") {
+          const { message } = await runPRResume(target, ctx)
+          ctx.ui.notify(message, "info")
+          return
+        }
 
         if (action === "restore") {
           await restoreCommand(ctx, { operation, name, values })

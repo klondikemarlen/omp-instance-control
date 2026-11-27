@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto"
 import { renameSync, writeFileSync } from "node:fs"
-import { unlink } from "node:fs/promises"
+import { open, unlink } from "node:fs/promises"
 import path from "node:path"
 
+import { normalizePRResumeURL } from "../linux/pr-resume.js"
 import { ensurePrivateDirectory, readPrivateJson, writePrivateJson } from "../linux/transport.js"
 import { ProtocolError, PROTOCOL_VERSION, validateInstanceId } from "../protocol/index.js"
 
@@ -41,6 +42,15 @@ export async function readLauncherContext(env = process.env) {
   ) {
     throw new ProtocolError("INVALID_LAUNCHER", "Launcher built-in flag names are invalid.")
   }
+  if (
+    launch.prResume !== undefined &&
+    (normalizePRResumeURL(launch.prResume?.url) !== launch.prResume?.url ||
+      typeof launch.prResume?.url !== "string" ||
+      typeof launch.prResume.cwd !== "string" ||
+      !path.isAbsolute(launch.prResume.cwd))
+  ) {
+    throw new ProtocolError("INVALID_LAUNCHER", "Launcher PR resume request is invalid.")
+  }
 
   const handoffPath = path.join(directory, "handoff.json")
   try {
@@ -59,6 +69,35 @@ export async function readLauncherContext(env = process.env) {
   }
 
   return { ...launch, directory, handoffPath }
+}
+
+export async function claimLaunchPRResume(launch) {
+  // An upstream /restart can rebind the extension without stopping ompi.
+  // A private exclusive claim prevents the same launch request being staged twice.
+  let claim
+  try {
+    claim = await open(path.join(launch.directory, "pr-resume.claim"), "wx", 0o600)
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      return false
+    }
+    throw error
+  }
+  await claim.close()
+  return true
+}
+
+export async function recordLaunchPRResumeResult(launch, { status, message }) {
+  if (process.ppid !== launch.pid) {
+    throw new ProtocolError("LAUNCHER_GONE", "The owning launcher is no longer attached.")
+  }
+
+  await writePrivateJson(path.join(launch.directory, "pr-resume-result.json"), {
+    version: PROTOCOL_VERSION,
+    token: launch.token,
+    status,
+    message,
+  })
 }
 
 export async function recordLaunchRegistration(launch, scope, instanceId) {

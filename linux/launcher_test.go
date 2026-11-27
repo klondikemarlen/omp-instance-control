@@ -268,6 +268,31 @@ func TestFakeOMPChild(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if status := os.Getenv("OMPI_TEST_PR_RESUME_STATUS"); status != "" && callNumber == 1 {
+		overlay := filepath.Join(launchDir, "pr-resume.yml")
+		wantConfigFiles := os.Getenv("OMPI_TEST_PR_RESUME_INITIAL_CONFIG") + string(os.PathListSeparator) + overlay
+		if got := os.Getenv("PI_CONFIG_FILES"); got != wantConfigFiles {
+			t.Fatalf("first launch config files = %q; want %q", got, wantConfigFiles)
+		}
+		config, err := os.ReadFile(overlay)
+		if err != nil || string(config) != "autoResume: false\n" {
+			t.Fatalf("fresh launch overlay = %q, error = %v", config, err)
+		}
+		result := map[string]any{
+			"version": 1,
+			"token":   entry.Token,
+			"status":  status,
+			"message": "Host disposition",
+		}
+		if err := WritePrivateJSON(filepath.Join(launchDir, "pr-resume-result.json"), result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if initialConfig := os.Getenv("OMPI_TEST_PR_RESUME_INITIAL_CONFIG"); initialConfig != "" && callNumber > 1 {
+		if got := os.Getenv("PI_CONFIG_FILES"); got != initialConfig {
+			t.Fatalf("replacement replayed the launch overlay: %q", got)
+		}
+	}
 	if os.Getenv("OMPI_TEST_REGISTER") == "1" {
 		writeFakeRegistration(t, launch, entry.Token, callNumber)
 	}
@@ -643,6 +668,8 @@ func prepareFakeOMP(t *testing.T, root, logPath, session, cwd, handoff string) {
 	t.Setenv("OMPI_TEST_CALLS", filepath.Join(root, "calls"))
 	t.Setenv("OMPI_TEST_HANDOFF", handoff)
 	t.Setenv("OMPI_TEST_SESSION", session)
+	t.Setenv("OMPI_TEST_PR_RESUME_STATUS", "")
+	t.Setenv("OMPI_TEST_PR_RESUME_INITIAL_CONFIG", "")
 	t.Setenv("OMPI_TEST_CWD", cwd)
 	if err := os.WriteFile(filepath.Join(root, "adapter.js"), []byte(""), 0600); err != nil {
 		t.Fatal(err)

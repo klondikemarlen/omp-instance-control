@@ -1,15 +1,16 @@
 import assert from "node:assert/strict"
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import test from "node:test"
 
 import { registerOmpiCommand } from "../../omp/command.js"
-import { getScope } from "../../protocol/index.js"
+import { registerPRResumeControl } from "../../omp/pr-resume-control.js"
+import { getScope, PROTOCOL_VERSION } from "../../protocol/index.js"
 import { createFixture } from "./command-fixture.js"
 
 const URL = "https://github.com/owner/repo/pull/111"
 const TIME = "2026-11-01T14:00:00.000Z"
-const COMMAND = `work resume ${URL}`
+const COMMAND = `resume ${URL}`
 
 async function writeJournal(directory, sessionId, cwd) {
   const sessionFile = path.join(directory, `2026-11-01T14-00-00-000Z_${sessionId}.jsonl`)
@@ -43,7 +44,7 @@ async function writeJournal(directory, sessionId, cwd) {
   }
 }
 
-async function createResumeFixture(t) {
+async function createResumeFixture(t, { freshStart = false } = {}) {
   const fixture = await createFixture()
   t.after(fixture.close)
   const { cwd } = fixture
@@ -58,6 +59,9 @@ async function createResumeFixture(t) {
   })
   const source = await writeJournal(directory, "source-conversation", cwd)
   const target = await writeJournal(directory, "target-conversation", cwd)
+  if (freshStart) {
+    await unlink(source.sessionFile)
+  }
   const nativeTool = [
     `#!${process.execPath}`,
     'const { appendFileSync, readFileSync } = require("node:fs")',
@@ -104,6 +108,7 @@ async function createResumeFixture(t) {
   ])
   let active = source
   let command
+  let editorText = ""
 
   class SessionManager {
     getSessionId() {
@@ -124,6 +129,14 @@ async function createResumeFixture(t) {
 
     getHeader() {
       return active.header
+    }
+
+    isSessionOnDisk() {
+      return !freshStart || active !== source
+    }
+
+    getEntries() {
+      return this.isSessionOnDisk() ? [active.leaf] : []
     }
 
     getLeafId() {
@@ -165,7 +178,7 @@ async function createResumeFixture(t) {
     getAsyncJobSnapshot: () => null,
     async switchSession(sessionFile) {
       const session = sessions.get(sessionFile)
-      assert.equal(ownLeases.has(active.sessionId), true)
+      assert.equal(ownLeases.has(active.sessionId), !freshStart)
       assert.equal(ownLeases.has(session.sessionId), true)
       switches.push(sessionFile)
       active = session
@@ -174,6 +187,10 @@ async function createResumeFixture(t) {
       }
     },
     ui: {
+      getEditorText: () => editorText,
+      setEditorText(text) {
+        editorText = text
+      },
       async select(title, choices) {
         picks.push([title, choices])
         return choices[0]
@@ -193,12 +210,27 @@ async function createResumeFixture(t) {
     transport: {
       readRecords: async () => records,
     },
+    origin: {
+      sessionId: source.sessionId,
+      sessionFile: source.sessionFile,
+      cwd,
+    },
     launch: {
       pid: process.ppid,
       scope,
+      directory: fixture.root,
+      token: "e".repeat(32),
       native: {
         executable,
       },
+      ...(freshStart
+        ? {
+            prResume: {
+              url: URL,
+              cwd,
+            },
+          }
+        : {}),
     },
   }
   const pi = {
@@ -227,13 +259,17 @@ async function createResumeFixture(t) {
       new FileSessionStorage().claimSession(active.sessionId, active.sessionFile)
     },
   }
+  const getRuntime = () => runtime
+  const prResume = registerPRResumeControl(pi, getRuntime)
   registerOmpiCommand(pi, {
-    getRuntime: () => runtime,
+    getRuntime,
+    runPRResume: prResume.run,
   })
 
   return {
     ctx,
     command,
+    prResume,
     runtime,
     records,
     source,
@@ -247,6 +283,7 @@ async function createResumeFixture(t) {
     otherLeases,
     unknownLeases,
     nativeCallsPath,
+    resultPath: path.join(fixture.root, "pr-resume-result.json"),
     async setClaims(...claims) {
       await writeFile(claimsPath, JSON.stringify(claims))
     },
@@ -441,19 +478,165 @@ test("when the selected claim belongs to another directory, slash offers only ma
   assert.equal(fixture.notifications[0][1], "error")
 })
 
-test("when slash work resume is given an issue URL or a profile override, it reports usage", async (t) => {
+test("when slash resume is given an issue URL or a profile override, it reports usage", async (t) => {
   // Arrange
   const { command, ctx, switches, notifications } = await createResumeFixture(t)
 
   // Act
-  await command.handler("work resume https://github.com/owner/repo/issues/111", ctx)
+  await command.handler("resume https://github.com/owner/repo/issues/111", ctx)
   await command.handler(`${COMMAND} --profile other`, ctx)
+  await command.handler(`resume -- ${URL}`, ctx)
 
   // Assert
   assert.deepEqual(switches, [])
-  assert.equal(notifications.length, 2)
+  assert.equal(notifications.length, 3)
   for (const [message, type] of notifications) {
-    assert.match(message, /^Usage: \/ompi work resume /)
+    assert.match(message, /^Usage: \/ompi resume /)
     assert.equal(type, "error")
   }
+})
+
+test("when using the retired slash resume spelling, it shows migration help without looking up work", async (t) => {
+  // Arrange
+  const { command, ctx, switches, notifications, picks } = await createResumeFixture(t)
+
+  // Act
+  await command.handler(`work ${COMMAND}`, ctx)
+
+  // Assert
+  assert.deepEqual(picks, [])
+  assert.deepEqual(switches, [])
+  assert.deepEqual(notifications, [["PR resume moved to /ompi resume PR_URL.", "error"]])
+})
+
+test("when requesting slash resume help, it describes the guarded operation without opening a chooser", async (t) => {
+  // Arrange
+  const { command, ctx, notifications, picks } = await createResumeFixture(t)
+
+  // Act
+  await command.handler("help resume", ctx)
+  await command.handler("resume --help", ctx)
+
+  // Assert
+  assert.deepEqual(picks, [])
+  assert.equal(notifications.length, 2)
+  assert.equal(notifications[0][1], "info")
+  assert.match(
+    notifications[0][0],
+    /^Usage: \/ompi resume https:\/\/github.com\/OWNER\/REPO\/pull\/N/
+  )
+  assert.deepEqual(notifications[1], notifications[0])
+})
+
+test("when completing slash resume, only the root command and its help option are suggested", async (t) => {
+  // Arrange
+  const { command } = await createResumeFixture(t)
+  const cases = [
+    ["resu", ["resume"]],
+    ["help resu", ["help resume"]],
+    ["resume --", ["resume --help"]],
+    ["resume ", []],
+    [`${COMMAND} --`, []],
+  ]
+
+  // Act
+  const actual = cases.map(([input]) =>
+    command.getArgumentCompletions(input).map(({ value }) => value)
+  )
+
+  // Assert
+  assert.deepEqual(
+    actual,
+    cases.map(([, expected]) => expected)
+  )
+})
+
+test("when OMP starts for shell PR resume, prefill alone never opens the original", async (t) => {
+  // Arrange
+  const {
+    command,
+    prResume,
+    runtime,
+    ctx,
+    picks,
+    confirms,
+    switches,
+    source,
+    target,
+    ownLeases,
+    resultPath,
+  } = await createResumeFixture(t, {
+    freshStart: true,
+  })
+
+  // Act
+  await prResume.prepareLaunch(runtime, ctx, runtime.launch.scope)
+
+  // Assert
+  assert.equal(ctx.ui.getEditorText(), `/ompi ${COMMAND}`)
+  assert.deepEqual(picks, [])
+  assert.deepEqual(confirms, [])
+  assert.deepEqual(switches, [])
+  assert.equal(ownLeases.size, 0)
+  await assert.rejects(access(resultPath), {
+    code: "ENOENT",
+  })
+
+  const submittedCommand = ctx.ui.getEditorText().slice("/ompi ".length)
+  ctx.ui.setEditorText("")
+  await command.handler(submittedCommand, ctx)
+
+  assert.equal(confirms.length, 1)
+  assert.deepEqual(switches, [target.sessionFile])
+  assert.deepEqual([...ownLeases], [[target.sessionId, 1]])
+  await assert.rejects(access(source.sessionFile), {
+    code: "ENOENT",
+  })
+  assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), {
+    version: PROTOCOL_VERSION,
+    token: runtime.launch.token,
+    status: "resumed",
+    message: "Resumed the original PR conversation in this terminal.",
+  })
+
+  await prResume.prepareLaunch(runtime, ctx, runtime.launch.scope)
+  assert.equal(ctx.ui.getEditorText(), "")
+})
+
+test("when OMP's editor holds a draft at startup, shell PR resume leaves it untouched", async (t) => {
+  // Arrange
+  const { prResume, runtime, ctx, switches, resultPath } = await createResumeFixture(t, {
+    freshStart: true,
+  })
+  ctx.ui.setEditorText("An existing draft")
+
+  // Act
+  await prResume.prepareLaunch(runtime, ctx, runtime.launch.scope)
+
+  // Assert
+  assert.equal(ctx.ui.getEditorText(), "An existing draft")
+  assert.deepEqual(switches, [])
+  assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), {
+    version: PROTOCOL_VERSION,
+    token: runtime.launch.token,
+    status: "refused",
+    message: "Cannot prepare shell PR resume without an empty OMP editor.",
+  })
+})
+
+test("when OMP started in a different profile, shell resume refuses before showing any candidates", async (t) => {
+  // Arrange
+  const { prResume, runtime, ctx, picks, resultPath } = await createResumeFixture(t, {
+    freshStart: true,
+  })
+
+  // Act
+  await prResume.prepareLaunch(runtime, ctx, {
+    id: "another-profile",
+  })
+
+  // Assert
+  assert.equal(ctx.ui.getEditorText(), "")
+  assert.deepEqual(picks, [])
+  assert.equal(JSON.parse(await readFile(resultPath, "utf8")).status, "refused")
 })

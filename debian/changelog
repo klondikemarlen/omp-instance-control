@@ -1,3 +1,10 @@
+omp-instance-control (3.0.0~ppa1) resolute; urgency=medium
+
+  * Open a pull request conversation from the invoking shell or OMP terminal.
+  * Replace /ompi work resume with /ompi resume.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Thu, 26 Nov 2026 15:29:32 -0700
+
 omp-instance-control (2.2.0~ppa1) resolute; urgency=medium
 
   * Resume a saved conversation by pull request in a managed terminal.

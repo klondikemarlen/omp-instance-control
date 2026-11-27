@@ -5,7 +5,7 @@
 
 override_dh_auto_build:
 	mkdir -p debian/build
-	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=2.2.0" -o debian/build/ompi ./cli/cmd/ompi
+	CGO_ENABLED=0 GOCACHE=$(CURDIR)/debian/build/cache go build -trimpath -ldflags="-s -w -X main.version=3.0.0" -o debian/build/ompi ./cli/cmd/ompi
 
 override_dh_auto_test:
 	OMPI_USAGE=0 GOCACHE=$(CURDIR)/debian/build/cache go test ./...
@@ -23,7 +23,9 @@ override_dh_auto_install:
 	install -D -m 0644 omp/take-over.js debian/omp-instance-control/usr/share/omp-instance-control/omp/take-over.js
 	install -D -m 0644 omp/work-command.js debian/omp-instance-control/usr/share/omp-instance-control/omp/work-command.js
 	install -D -m 0644 omp/pr-resume.js debian/omp-instance-control/usr/share/omp-instance-control/omp/pr-resume.js
+	install -D -m 0644 omp/pr-resume-control.js debian/omp-instance-control/usr/share/omp-instance-control/omp/pr-resume-control.js
 	install -D -m 0644 cli/client.js debian/omp-instance-control/usr/share/omp-instance-control/cli/client.js
+	install -D -m 0644 cli/pr-resume.js debian/omp-instance-control/usr/share/omp-instance-control/cli/pr-resume.js
 	install -D -m 0644 cli/restart-wait.js debian/omp-instance-control/usr/share/omp-instance-control/cli/restart-wait.js
 	install -D -m 0644 linux/native-updates.js debian/omp-instance-control/usr/share/omp-instance-control/linux/native-updates.js
 	install -D -m 0644 linux/restart-diagnostics.js debian/omp-instance-control/usr/share/omp-instance-control/linux/restart-diagnostics.js

@@ -172,6 +172,30 @@ func TestReplacementStartupFailurePreservesOriginalErrorAndExactRecovery(t *test
 	}
 }
 
+func TestCleanReplacementRetiresRecoveryDespiteUnconfirmedPRResume(t *testing.T) {
+	file, record := failedRestartFixture(t)
+	root := t.TempDir()
+	prepareFakeOMP(t, root, filepath.Join(root, "invocations.jsonl"), "", "", "")
+	t.Setenv("PI_CONFIG_DIR", record.Session.Scope.ConfigRoot)
+	replacement := &resumeState{
+		cwd:                 record.Session.CWD,
+		sessionFile:         record.Session.SessionFile,
+		restart:             record.Restart,
+		recoveryFile:        file,
+		unconfirmedPRResume: true,
+	}
+	adapter := filepath.Join(root, "adapter.js")
+
+	code, err := launchWithResume(record.Session.ResumeArgs, adapter, "test", record.Session.RestoreID, nil, replacement)
+
+	if code != 1 || err == nil || !strings.Contains(err.Error(), "PR resume was not completed") {
+		t.Fatalf("replacement exit lost the unconfirmed PR resume: code=%d err=%v", code, err)
+	}
+	if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("clean replacement should retire exact restart recovery: %v", err)
+	}
+}
+
 func TestFailedRecoveryAttemptKeepsTheOriginalLaunchFailure(t *testing.T) {
 	file, record := failedRestartFixture(t)
 	original := errors.New("native execution denied")

@@ -39,6 +39,7 @@ type launchRecord struct {
 	CanRestartWrapper                 bool                  `json:"canRestartWrapper"`
 	SupportsInstalledWrapperSelection bool                  `json:"supportsInstalledWrapperSelection"`
 	Native                            *nativeImage          `json:"native,omitempty"`
+	PRResume                          *prResumeRequest      `json:"prResume,omitempty"`
 }
 
 type restartRecord struct {
@@ -71,6 +72,21 @@ func launch(args []string, extensionPath, nativeVersion, restoreID string, resto
 }
 
 func launchWithResume(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState) (code int, launchError error) {
+	return launchManaged(args, extensionPath, nativeVersion, restoreID, restoreLock, resume, nil)
+}
+
+func launchManaged(args []string, extensionPath, nativeVersion, restoreID string, restoreLock *os.File, resume *resumeState, prResume *prResumeRequest) (code int, launchError error) {
+	var prResumeError error
+	if resume != nil && resume.unconfirmedPRResume {
+		prResumeError = errors.New("the PR resume was not completed before the terminal restarted")
+	}
+	// Report the original request after the independent restart recovery defer.
+	defer func() {
+		if code == 0 && launchError == nil && prResumeError != nil {
+			code, launchError = 1, prResumeError
+		}
+	}()
+
 	recoveryFile := ""
 	if resume != nil {
 		recoveryFile = resume.recoveryFile
@@ -96,6 +112,9 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 		pendingReplacement.observe("replacement-failed", "replacement-prepare", nil, 0)
 	}()
 	if !isInteractiveLaunch(args) || isReservedCommand(args) || !stdinIsTerminal() || !stdoutIsTerminal() {
+		if prResume != nil {
+			return 1, errors.New("PR resume requires an interactive terminal to confirm the resume in OMP")
+		}
 		return runPassthrough(args)
 	}
 	if !filepath.IsAbs(extensionPath) {
@@ -116,8 +135,18 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 	if resume != nil {
 		initialCwd = resume.cwd
 	}
+	if prResume != nil {
+		initialCwd, err = filepath.EvalSymlinks(initialCwd)
+		if err != nil {
+			return 1, err
+		}
+		prResume.CWD = initialCwd
+	}
 	builtinFlags := make([]string, 0, len(args))
 	restartArgs, profile, cwd, restartArgsErr := restartArguments(args, initialCwd, &builtinFlags)
+	if prResume != nil && restartArgsErr != nil {
+		return 1, fmt.Errorf("cannot prepare PR resume: %w", restartArgsErr)
+	}
 	if err := ensureWorkingDirectory(cwd); err != nil {
 		return 0, err
 	}
@@ -204,6 +233,13 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 	if slices.Contains(builtinFlags, "trusted-extension") {
 		extensionFlag = "--trusted-extension"
 	}
+	var prResumeOverlay string
+	if prResume != nil {
+		prResumeOverlay, err = writePRResumeOverlay(launchDir)
+		if err != nil {
+			return 1, err
+		}
+	}
 	for {
 		select {
 		case received := <-signals:
@@ -223,6 +259,7 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 			CanRestartWrapper:                 canRestartWrapper,
 			SupportsInstalledWrapperSelection: true,
 			Native:                            nativeMetadata,
+			PRResume:                          prResume,
 		}
 		if restartArgsErr != nil && restart == nil {
 			launch.RestartError = restartArgsErr.Error()
@@ -252,10 +289,14 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 		if resumeFile != "" {
 			childArgs = append(childArgs, "-r", resumeFile)
 		}
-		childEnv := replaceEnvironment(baseEnv, map[string]string{
+		childSettings := map[string]string{
 			launchDirectoryEnv: launchDir,
 			launchTokenEnv:     token,
-		})
+		}
+		if prResume != nil {
+			childSettings[ompConfigFilesEnv] = prResumeOverlay
+		}
+		childEnv := replaceEnvironment(baseEnv, childSettings)
 		childCWD := initialCwd
 		if resumeFile != "" {
 			childCWD = cwd
@@ -296,6 +337,10 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 		}
 		if child.signal != 0 || child.code != 0 {
 			return child.code, nil
+		}
+		if prResume != nil {
+			prResumeError = readPRResumeResult(launchDir, token)
+			prResume = nil
 		}
 		if restartArgsErr != nil {
 			observer.observe("handoff-invalid", "restart-arguments", &child.code, 0)
@@ -359,7 +404,7 @@ func launchWithResume(args []string, extensionPath, nativeVersion, restoreID str
 				observer.observe("replacement-failed", "wrapper-unavailable", nil, 0)
 				return 1, fmt.Errorf("cannot restart the native wrapper: installed executable is unavailable or unusable: %s", wrapperExecutable)
 			}
-			if err := execWrapperReplacement(launchDir, wrapperExecutable, scope, restartArgs, cwd, resumeFile, restart, restoreID, restoreLock, handoff.NativeTarget); err != nil {
+			if err := execWrapperReplacement(launchDir, wrapperExecutable, scope, restartArgs, cwd, resumeFile, restart, restoreID, restoreLock, handoff.NativeTarget, prResumeError != nil); err != nil {
 				observer.observe("replacement-failed", "wrapper-exec", nil, 0)
 				return 1, err
 			}
