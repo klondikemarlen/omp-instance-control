@@ -56,17 +56,10 @@ async function managedSession(t, shutdown) {
   return { ctx, directory, fresh, launch, processEvents, send, state }
 }
 
-function prepareTicket(send, directory) {
-  const preparation = send("prepare", { directory })
-  assert.equal(preparation.status, "accepted", preparation.message)
-  return preparation.ticket
-}
-
 function commitPreparedLaunch(send, directory) {
-  const ticket = prepareTicket(send, directory)
+  const { ticket } = send("prepare", { directory })
   const commit = send("commit", { ticket })
-  assert.equal(commit.status, "committed", commit.message)
-  return ticket
+  return { ticket, commit }
 }
 
 test("when another session requests a fresh launch, preparation is refused", async (t) => {
@@ -142,12 +135,13 @@ test("when the destination is an unresolved symlink, preparation is refused", as
 test("when the commit ticket is incorrect, the session stays open", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
-  prepareTicket(send, directory)
+  const preparation = send("prepare", { directory })
 
   // Act
   const result = send("commit", { ticket: "wrong-ticket" })
 
   // Assert
+  assert.equal(preparation.status, "accepted")
   assert.equal(result.status, "refused")
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
@@ -155,7 +149,7 @@ test("when the commit ticket is incorrect, the session stays open", async (t) =>
 test("when the user cancels a prepared launch, its ticket cannot request shutdown", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
-  const ticket = prepareTicket(send, directory)
+  const { ticket } = send("prepare", { directory })
 
   // Act
   const cancellation = send("cancel", { ticket })
@@ -184,7 +178,7 @@ test("when the session exits without committing, the prepared launch is not publ
 test("when a confirmed ticket is submitted again, shutdown is not requested twice", async (t) => {
   // Arrange
   const { ctx, directory, send } = await managedSession(t)
-  const ticket = prepareTicket(send, directory)
+  const { ticket } = send("prepare", { directory })
 
   // Act
   const commit = send("commit", { ticket })
@@ -199,7 +193,7 @@ test("when a confirmed ticket is submitted again, shutdown is not requested twic
 test("when the committed session exits cleanly, the handoff names only the fresh destination", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
-  const ticket = commitPreparedLaunch(send, directory)
+  const { ticket, commit } = commitPreparedLaunch(send, directory)
   fresh.onShutdown(state, ctx)
 
   // Act
@@ -207,6 +201,7 @@ test("when the committed session exits cleanly, the handoff names only the fresh
   const handoff = JSON.parse(await readFile(launch.handoffPath, "utf8"))
 
   // Assert
+  assert.equal(commit.status, "committed")
   assert.equal(handoff.operationId, ticket)
   assert.equal(handoff.freshLaunch.directory, directory)
   assert.equal(handoff.sessionFile, undefined)
@@ -215,31 +210,33 @@ test("when the committed session exits cleanly, the handoff names only the fresh
 test("when teardown has not reached process exit, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, send, state } = await managedSession(t)
-  commitPreparedLaunch(send, directory)
+  const { commit } = commitPreparedLaunch(send, directory)
 
   // Act
   fresh.onShutdown(state, ctx)
 
   // Assert
+  assert.equal(commit.status, "committed")
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
 test("when the process exits without host teardown, no handoff is published", async (t) => {
   // Arrange
   const { directory, launch, processEvents, send } = await managedSession(t)
-  commitPreparedLaunch(send, directory)
+  const { commit } = commitPreparedLaunch(send, directory)
 
   // Act
   processEvents.emit("exit", 0)
 
   // Assert
+  assert.equal(commit.status, "committed")
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
 test("when host teardown belongs to another session, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
-  commitPreparedLaunch(send, directory)
+  const { commit } = commitPreparedLaunch(send, directory)
   ctx.sessionManager.getSessionId = () => "other-session"
 
   // Act
@@ -247,26 +244,28 @@ test("when host teardown belongs to another session, no handoff is published", a
   processEvents.emit("exit", 0)
 
   // Assert
+  assert.equal(commit.status, "committed")
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
 test("when the host exits unsuccessfully, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
-  commitPreparedLaunch(send, directory)
+  const { commit } = commitPreparedLaunch(send, directory)
   fresh.onShutdown(state, ctx)
 
   // Act
   processEvents.emit("exit", 1)
 
   // Assert
+  assert.equal(commit.status, "committed")
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
 test("when the event loop drains without explicit exit, no handoff is published", async (t) => {
   // Arrange
   const { ctx, directory, fresh, launch, processEvents, send, state } = await managedSession(t)
-  commitPreparedLaunch(send, directory)
+  const { commit } = commitPreparedLaunch(send, directory)
   fresh.onShutdown(state, ctx)
 
   // Act
@@ -274,20 +273,22 @@ test("when the event loop drains without explicit exit, no handoff is published"
   processEvents.emit("exit", 0)
 
   // Assert
+  assert.equal(commit.status, "committed")
   await assert.rejects(readFile(launch.handoffPath), { code: "ENOENT" })
 })
 
 test("when the approved directory is replaced, commit is refused", async (t) => {
   // Arrange
   const { ctx, directory, launch, send } = await managedSession(t)
-  const ticket = prepareTicket(send, directory)
+  const preparation = send("prepare", { directory })
   await rename(directory, path.join(launch.directory, "moved"))
   await mkdir(directory)
 
   // Act
-  const result = send("commit", { ticket })
+  const result = send("commit", { ticket: preparation.ticket })
 
   // Assert
+  assert.equal(preparation.status, "accepted")
   assert.equal(result.status, "refused")
   assert.equal(ctx.shutdown.mock.callCount(), 0)
 })
@@ -300,7 +301,7 @@ test("when OMP rejects shutdown, commit is refused", async (t) => {
       throw new Error("shutdown unavailable")
     }
   )
-  const ticket = prepareTicket(send, directory)
+  const { ticket } = send("prepare", { directory })
 
   // Act
   const result = send("commit", { ticket })
