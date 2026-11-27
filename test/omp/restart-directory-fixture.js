@@ -13,6 +13,7 @@ export async function createRestartDirectoryFixture({
   lastRestart = null,
   failRefresh = false,
   withInstalledWrapper = false,
+  ompVersion,
   supportsInstalledWrapperSelection,
 } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "ic-cwd-"))
@@ -106,6 +107,10 @@ export async function createRestartDirectoryFixture({
     },
   }
   const extension = createExtensionApi(createEventBus(), handlers)
+  if (ompVersion !== undefined) {
+    extension.api.pi.VERSION = ompVersion
+  }
+
   extension.api.sendMessage = (content, options) => sendMessages.push({ content, options })
   await instanceControl(extension.api)
   await handlers.get("session_start")({}, ctx)

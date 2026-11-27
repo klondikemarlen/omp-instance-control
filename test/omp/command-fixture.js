@@ -46,7 +46,12 @@ async function createFixture() {
   return {
     root,
     cwd,
-    async addPeer(scope, instanceId, peerCwd = cwd, { sendContext, sessionTitle } = {}) {
+    async addPeer(
+      scope,
+      instanceId,
+      peerCwd = cwd,
+      { ompVersion, sendContext, sessionTitle } = {}
+    ) {
       const transport = await createTransport(scope)
       const record = {
         version: 1,
@@ -66,7 +71,11 @@ async function createFixture() {
       const server = await transport.serve(instanceId, async (request) => {
         requests.push(request)
         if (request.action === "status") {
-          const data = { ...record, canRestart: true }
+          const data = {
+            ...record,
+            canRestart: true,
+            ompVersion,
+          }
           if (sendContext !== undefined) {
             data.sendContext = sendContext
           }
