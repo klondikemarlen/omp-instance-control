@@ -1,3 +1,9 @@
+omp-instance-control (3.2.0~ppa1) resolute; urgency=medium
+
+  * Support an approved fresh managed session after a correlated clean OMP exit.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 27 Nov 2026 13:19:59 -0700
+
 omp-instance-control (3.0.0~ppa1) resolute; urgency=medium
 
   * Open a pull request conversation from the invoking shell or OMP terminal.

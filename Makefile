@@ -1,4 +1,4 @@
-VERSION := 3.0.0
+VERSION := 3.2.0
 GO ?= go
 
 .PHONY: build test clean
