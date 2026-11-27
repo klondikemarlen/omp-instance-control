@@ -1,3 +1,9 @@
+omp-instance-control (3.1.0~ppa1) resolute; urgency=medium
+
+  * Show the loaded OMP version in native and slash instance lists.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 27 Nov 2026 13:11:24 -0700
+
 omp-instance-control (3.0.0~ppa1) resolute; urgency=medium
 
   * Open a pull request conversation from the invoking shell or OMP terminal.
