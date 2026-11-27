@@ -161,6 +161,56 @@ test("when peers share a working directory, slash list shows safe titles and sen
   }
 })
 
+test("when completing the root command, only the empty prefix omits cleanup and take-over", () => {
+  // Arrange
+  const { command } = createCommand(createContext(process.cwd()))
+
+  // Act
+  const everydayCommands = command.getArgumentCompletions("").map(({ value }) => value)
+  const cleanupCommands = command.getArgumentCompletions("c").map(({ value }) => value)
+  const takeoverCommands = command.getArgumentCompletions("t").map(({ value }) => value)
+
+  // Assert
+  assert.deepEqual(everydayCommands, [
+    "help",
+    "version",
+    "list",
+    "restart",
+    "send",
+    "steer",
+    "restore",
+    "resume",
+    "work",
+  ])
+  assert.deepEqual(cleanupCommands, ["cleanup"])
+  assert.deepEqual(takeoverCommands, ["take-over"])
+})
+
+test("when asking for help, cleanup and take-over remain in completion and usage", async () => {
+  // Arrange
+  const ctx = createContext(process.cwd())
+  const { command, notifications } = createCommand(ctx)
+
+  // Act
+  const helpTargets = command.getArgumentCompletions("help ").map(({ value }) => value)
+  await command.handler("help", ctx)
+
+  // Assert
+  assert.deepEqual(helpTargets, [
+    "help list",
+    "help restart",
+    "help send",
+    "help steer",
+    "help cleanup",
+    "help restore",
+    "help resume",
+    "help work",
+    "help take-over",
+  ])
+  assert.match(notifications[0].message, /^cleanup\s+Remove safely confirmed stale registrations/m)
+  assert.match(notifications[0].message, /^take-over\s+Prepare a plain-OMP session/m)
+})
+
 test("when completion reaches consumed or conflicting choices, only valid next options remain", () => {
   // Arrange
   const { command } = createCommand(createContext(process.cwd()))

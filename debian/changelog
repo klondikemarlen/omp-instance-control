@@ -1,3 +1,10 @@
+omp-instance-control (3.0.1~ppa1) resolute; urgency=medium
+
+  * Keep restore in the default /ompi menu and show cleanup and take-over
+    only when requested by prefix or through help.
+
+ -- Marlen Brunner <klondikemarlen@gmail.com>  Fri, 27 Nov 2026 13:09:44 -0700
+
 omp-instance-control (3.0.0~ppa1) resolute; urgency=medium
 
   * Open a pull request conversation from the invoking shell or OMP terminal.
