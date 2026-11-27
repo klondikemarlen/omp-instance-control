@@ -24,6 +24,8 @@ import { parseWorkLookupOptions, WORK_HELP, WORK_OPERATIONS, workCommand } from 
 
 const COMMAND = "ompi"
 const PROGRESS_WIDGET = "ompi-restart-progress"
+const SELF_RESTART_ACCEPTED =
+  "Restart accepted, not complete. OMP may still be settling work. From another terminal in the same profile and configuration, check `ompi control list --json`."
 const ACTION_COMPLETIONS = [
   "list",
   "restart",
@@ -36,6 +38,9 @@ const ACTION_COMPLETIONS = [
   "take-over",
 ]
 const ROOT_COMPLETIONS = ["help", "version", ...ACTION_COMPLETIONS]
+const EVERYDAY_ROOT_COMPLETIONS = ROOT_COMPLETIONS.filter(
+  (value) => value !== "cleanup" && value !== "take-over"
+)
 const LIST_COMPLETIONS = ["--profile", "--json"]
 const RETIRED_RESTORE_IMPORT = "import-legacy"
 const RESTORE_OPERATIONS = [
@@ -572,8 +577,9 @@ function getArgumentCompletions(
   if (context.ended || context.options.has("help") || context.options.has("version")) return []
 
   if (completedTokens.length === 0) {
+    const candidates = tokenPrefix ? ROOT_COMPLETIONS : EVERYDAY_ROOT_COMPLETIONS
     return completionValues(
-      ROOT_COMPLETIONS.map((value) => completionItem(value)),
+      candidates.map((value) => completionItem(value)),
       completedTokens,
       tokenPrefix
     )
@@ -1019,9 +1025,9 @@ export function registerOmpiCommand(
               "Usage: /ompi restart [ID|all] [--profile NAME] [--json] [--no-wait]",
               "ID may be a unique 1-32 character lowercase hexadecimal instance-ID prefix.",
               "Every target replaces its native ompi wrapper and OMP using the installed code.",
-              "With no target, select only this terminal. Ctrl-C stops watching, not accepted requests.",
+              "With no target, select only this terminal.",
               "Restarts inject zero model messages. OMP settles active work and typed instructions queued while busy before the session reopens for input.",
-              "Explicit exit suppresses relaunch; Ctrl-C stops watching only.",
+              "Explicit exit suppresses relaunch. Ctrl-C in a restart progress view stops observation only.",
             ],
             cleanup: ["Usage: /ompi cleanup [--profile NAME] [--json]"],
             resume: RESUME_HELP,
@@ -1105,10 +1111,7 @@ export function registerOmpiCommand(
 
         if (action === "restart-wrapper") {
           await requestWrapperRestart(getRuntime())
-          ctx.ui.notify(
-            "Wrapper restart accepted. OMP will shut down at a safe boundary; the owning ompi launcher will replace it.",
-            "info"
-          )
+          ctx.ui.notify(SELF_RESTART_ACCEPTED, "info")
           return
         }
 
@@ -1165,7 +1168,7 @@ export function registerOmpiCommand(
         if (selfRow) {
           observationMessage =
             selfRow.status === "accepted"
-              ? "This instance's restart is accepted and pending. The invoking terminal cannot wait for its own relaunch; OMP will resume the persisted session and cwd."
+              ? SELF_RESTART_ACCEPTED
               : `This instance was selected, but its restart outcome is ${selfRow.status}; this terminal cannot observe its own relaunch.`
         } else if (values["no-wait"] !== true) {
           const acceptedRows = rows.filter((row) => row.status === "accepted")

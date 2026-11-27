@@ -245,6 +245,7 @@ type Data struct {
 	CWD             string               `json:"cwd,omitempty"`
 	SessionID       string               `json:"sessionId,omitempty"`
 	SessionTitle    *string              `json:"sessionTitle,omitempty"`
+	OMPVersion      string               `json:"ompVersion,omitempty"`
 	SessionFile     *string              `json:"sessionFile,omitempty"`
 	LauncherManaged bool                 `json:"launcherManaged,omitempty"`
 	State           string               `json:"state,omitempty"`

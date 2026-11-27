@@ -658,6 +658,28 @@ async function assertRestartSuppressed(scope, launchDirectory, request) {
   })
 }
 
+test("when status is queried, the loaded OMP version is included only when available", async () => {
+  for (const ompVersion of ["19.2.0", undefined]) {
+    // Arrange
+    const fixture = await createRestartDirectoryFixture({
+      ompVersion,
+    })
+    const { transport, record } = fixture
+
+    try {
+      // Act
+      const response = await transport.request(record, createRequest(record.instanceId, "status"))
+
+      // Assert
+      assert.equal(response.ok, true)
+      assert.equal(Object.hasOwn(response.data, "ompVersion"), ompVersion !== undefined)
+      assert.equal(response.data.ompVersion, ompVersion)
+    } finally {
+      await fixture.close()
+    }
+  }
+})
+
 test("when status is queried again, the adapter reads the current OMP session title", async () => {
   // Arrange
   const fixture = await createRestartDirectoryFixture()

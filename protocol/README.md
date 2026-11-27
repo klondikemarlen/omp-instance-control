@@ -16,6 +16,8 @@ Received response data is read-only. Native CLI JSON preserves the host payload'
 
 Live status may include `sessionTitle`: the current OMP session name, or `null` when unnamed or unavailable. Older adapters omit it. Titles are read from the host for status requests, not stored in registrations or used to resolve message targets.
 
+Live status optionally includes `ompVersion`: the running OMP host version from the public SDK injected into that process. Missing means unknown (including older adapters or hosts without the export). The version is not stored in registrations or inferred from an installed executable, and does not affect restart admission or completion.
+
 Status data may include `sendContext: {version, protocolVersion}` for the loaded Send Context plugin, or `null` when unverified. Its package version and routing protocol are independent of this control protocol's version, OMP, and the native wrapper. An older response without the field stays absent in JSON. Restart admission and completion correlation do not depend on plugin metadata.
 
 Status may also carry `native: {runningVersion, installedVersion, state, message?}`. Installed version is `null` until verified; state distinguishes checking, current, available, and failed observation. `available` means notification only, not accepted restart or applied update. These are executing-launcher and installed-candidate facts, independent of OMP and Send Context versions. Older payloads remain unchanged in JSON.
